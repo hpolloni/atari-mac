@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | In progress |
 | Depends on | The committed specification (`docs/spec/`, `docs/design/`) |
 
 ## Goal
@@ -15,15 +15,15 @@ the frontend and the test harness.
 
 ## Requirements in the slice
 
-| Layer | Requirements | Scope in this slice |
-| --- | --- | --- |
-| CPU | REQ-100 to REQ-108, REQ-110, REQ-113 to REQ-117, REQ-124 | All opcodes, exact to the cycle. The Klaus Dormann test and the SingleStepTests suite pass. |
-| System | REQ-201 to REQ-208, REQ-211, REQ-216 to REQ-222, REQ-224, REQ-229, REQ-230 | Memory map, `PORTB` banking, PIA data and direction registers, reset. |
-| ANTIC | REQ-300 to REQ-305, REQ-308 to REQ-310, REQ-312 to REQ-314, REQ-319 to REQ-323, REQ-331 to REQ-333, REQ-336, REQ-338 | Display list, mode 2, DMA halts, VBI and DLI, `WSYNC`, `VCOUNT`. |
-| GTIA | REQ-400 to REQ-406, REQ-408, REQ-409, REQ-435, REQ-437 | Color registers, high-resolution playfield, NTSC palette, triggers, console keys. |
-| POKEY | REQ-500, REQ-501, REQ-515, REQ-518, REQ-519, REQ-522 to REQ-524 | Keyboard scan, keyboard IRQ, BREAK, `IRQEN` and `IRQST`, the ASCII table. |
-| Frontend | REQ-008, REQ-009, REQ-013 | Window, keyboard mapping, headless screenshot. |
-| Test harness | REQ-003, REQ-005, REQ-020, REQ-021, REQ-023 to REQ-025 | Boot test, typing test, screen text, the CPU test suites. |
+| Layer | Package | Requirements | Scope in this slice |
+| --- | --- | --- | --- |
+| CPU | WP-1 | REQ-100 to REQ-108, REQ-110, REQ-113 to REQ-117, REQ-124 | All opcodes, exact to the cycle. The Klaus Dormann test and the SingleStepTests suite pass. |
+| ANTIC | WP-2 | REQ-300 to REQ-305, REQ-308 to REQ-310, REQ-312 to REQ-314, REQ-319 to REQ-323, REQ-331 to REQ-333, REQ-336, REQ-338 | Display list, mode 2, DMA halts, VBI and DLI, `WSYNC`, `VCOUNT`. |
+| GTIA | WP-2 | REQ-400 to REQ-406, REQ-408, REQ-409, REQ-435, REQ-437 | Color registers, high-resolution playfield, NTSC palette, triggers, console keys. |
+| POKEY | WP-3 | REQ-500, REQ-501, REQ-515, REQ-518, REQ-519, REQ-522 to REQ-524 | Keyboard scan, keyboard IRQ, BREAK, `IRQEN` and `IRQST`, the ASCII table. |
+| Frontend | WP-4 | REQ-008, REQ-009, REQ-013 | Window, keyboard mapping, headless screenshot. |
+| System | WP-5 | REQ-201 to REQ-208, REQ-211, REQ-216 to REQ-222, REQ-224, REQ-229, REQ-230 | Memory map, `PORTB` banking, PIA data and direction registers, reset. |
+| Test harness | WP-5 | REQ-003, REQ-005, REQ-020, REQ-021, REQ-023 to REQ-025, REQ-027 | Boot test, typing test, screen text, the CPU test suites, traceability. |
 
 ## Not in this slice
 
@@ -38,13 +38,26 @@ the frontend and the test harness.
 Each teammate works in its own git worktree (see `CLAUDE.md`). Each package must pass
 `make pre-commit` before it is merged.
 
-| Package | Owner | Contents | Checked by |
-| --- | --- | --- | --- |
-| WP-1 CPU | Teammate | `crates/atari-core/src/cpu.rs` and submodules, from [cpu.md](../design/cpu.md) | `tests/cpu_functional.rs`, `tests/cpu_single_step.rs`, CPU unit tests |
-| WP-2 Video | Teammate | `antic.rs`, `gtia.rs`, `palette.rs`, from [antic.md](../design/antic.md) and [gtia.md](../design/gtia.md). It also settles the ANTIC-to-GTIA interface. | ANTIC and GTIA unit tests |
-| WP-3 Keyboard | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
-| WP-4 Frontend | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
-| WP-5 Machine and harness | Lead | `machine.rs`, `pia.rs`, `timing.rs`, the `atari-harness` crate, the integration of WP-1 to WP-4 | `tests/boot.rs`, `tests/keyboard.rs`, `tests/harness_self_test.rs` |
+| Package | Status | Owner | Contents | Checked by |
+| --- | --- | --- | --- | --- |
+| WP-0 Interfaces | Done | Lead | The workspace, the decided interfaces as stubs that compile, the `atari-harness` crate with its helpers, the traceability check | `tests/harness_self_test.rs`, `tests/traceability.rs` |
+| WP-1 CPU | Planned | Teammate | `crates/atari-core/src/cpu.rs` and submodules, from [cpu.md](../design/cpu.md) | `tests/cpu_functional.rs`, `tests/cpu_single_step.rs`, CPU unit tests |
+| WP-2 Video | Planned | Teammate | `antic.rs`, `gtia.rs`, `palette.rs`, from [antic.md](../design/antic.md) and [gtia.md](../design/gtia.md) | ANTIC and GTIA unit tests |
+| WP-3 Keyboard | Planned | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
+| WP-4 Frontend | Planned | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
+| WP-5 Machine and harness | In progress | Lead | `machine.rs`, `pia.rs`, `timing.rs`, the `atari-harness` crate, the integration of WP-1 to WP-4 | `tests/boot.rs`, `tests/keyboard.rs`, `tests/harness_self_test.rs` |
+
+### Test rule for each package (REQ-027)
+
+`crates/harness/tests/traceability.rs` checks the tests of each package:
+
+| Package status | Rule |
+| --- | --- |
+| `Planned` or `In progress` | No rule. The matrix in `target/traceability.md` shows the state. |
+| `Done` | Each requirement of the package with the verification method `Test` has at least one test that names it (`/// Verifies REQ-NNN`) and that is not ignored. |
+
+When the slice status is `Done`, the same rule applies to all requirements of the slice. A
+package sets its own status to `Done` in its last commit, so the check runs on that commit.
 
 WP-1 to WP-4 do not depend on each other. Each one works against the interfaces in the
 design documents. WP-5 does the integration after the other packages are merged.

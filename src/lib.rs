@@ -1,7 +1,8 @@
-//! `atari-mac` library crate.
+//! `atari-mac` frontend library crate.
 //!
-//! All program logic lives here so that it is reachable from unit tests,
-//! integration tests (`tests/`) and doctests. `src/main.rs` is a thin shell.
+//! WP-4 (SLICE-01) adds the window, the key map and the headless mode here.
+
+pub use atari_core;
 
 /// Returns the greeting shown by the binary.
 ///

@@ -139,8 +139,18 @@ attribute. A test is never skipped silently (REQ-021).
 ### Traceability (REQ-027)
 
 Each test has a documentation comment that names its requirements, for example
-`/// Verifies REQ-110.`. The script `scripts/trace.sh` lists the requirements with the
-verification method `Test` that no test names. CI runs the script.
+`/// Verifies REQ-110.`. The test `tests/traceability.rs` `finished_packages_have_running_tests`
+reads the requirement files, the slice plans and every `.rs` file of the workspace. It applies
+the rule for each work package in `docs/plan/SLICE-NN.md`:
+
+| Package or slice status | Rule |
+| --- | --- |
+| `Planned`, `In progress` | No rule. The matrix shows the state. |
+| `Done` | Each `Test` requirement of the package has a test that is not ignored. |
+
+It always fails for a comment that names a requirement that does not exist or that is
+withdrawn. It writes the matrix to `target/traceability.md`. A work package sets its status to
+`Done` in the slice plan in its last commit, so the check runs on that commit.
 
 ## Test plan
 
@@ -152,7 +162,7 @@ verification method `Test` that no test names. CI runs the script.
 | REQ-024 | `tests/harness_self_test.rs` `screen_text_has_24_rows_of_40`, `internal_to_ascii_values` |
 | REQ-025 | `tests/keyboard.rs` `basic_prints_sum`, `type_text_rejects_unknown_character` |
 | REQ-026 | `tests/golden.rs` `boot_screen_matches_golden`, `difference_writes_failure_images`, `update_mode_writes_reference` |
-| REQ-027 | `scripts/trace.sh` in CI |
+| REQ-027 | `tests/traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests` |
 
 ## Open issues
 

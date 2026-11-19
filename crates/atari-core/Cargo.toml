@@ -1,0 +1,12 @@
+[package]
+name = "atari-core"
+description = "Emulation core for the Atari 65XE: CPU, ANTIC, GTIA, POKEY, PIA and memory map"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

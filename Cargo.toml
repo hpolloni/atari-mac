@@ -1,18 +1,33 @@
-[package]
-name = "atari-mac"
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 # Keep in sync with `rust-toolchain.toml`. CI verifies this with `cargo hack --rust-version`.
 rust-version = "1.100.0"
-description = "atari-mac"
-readme = "README.md"
 # Not published to crates.io. Remove this line (and add `license`, `repository`,
 # `keywords`, `categories`) before publishing.
 publish = false
 
-[dependencies]
+[workspace.dependencies]
+atari-core = { path = "crates/atari-core" }
 
-[dev-dependencies]
+[package]
+name = "atari-mac"
+description = "Atari 65XE emulator for macOS"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+atari-core.workspace = true
+
+[lints]
+workspace = true
 
 # ---------------------------------------------------------------------------
 # Lints
@@ -23,7 +38,7 @@ publish = false
 # `#[allow]` without a reason is itself a lint error.
 # ---------------------------------------------------------------------------
 
-[lints.rust]
+[workspace.lints.rust]
 # Hard ban: this is not overridable by `#[allow]` / `#[expect]`.
 unsafe_code = "forbid"
 
@@ -60,7 +75,6 @@ unnameable_types = "warn"
 unreachable_pub = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unstable_features = "warn"
-unused_crate_dependencies = "warn"
 unused_extern_crates = "warn"
 unused_import_braces = "warn"
 unused_lifetimes = "warn"
@@ -69,7 +83,7 @@ unused_qualifications = "warn"
 unused_results = "warn"
 variant_size_differences = "warn"
 
-[lints.rustdoc]
+[workspace.lints.rustdoc]
 broken_intra_doc_links = "warn"
 private_intra_doc_links = "warn"
 missing_crate_level_docs = "warn"
@@ -80,7 +94,7 @@ bare_urls = "warn"
 unescaped_backticks = "warn"
 redundant_explicit_links = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 # Whole groups. `restriction` is never enabled wholesale (clippy advises against
 # it); selected lints from it are listed below.
 all = { level = "warn", priority = -1 }
@@ -169,6 +183,12 @@ verbose_file_reads = "warn"
 [profile.dev]
 # Make integer overflow a panic in debug builds (the default, stated explicitly).
 overflow-checks = true
+# The emulator and the CPU test suites are too slow without some optimization.
+opt-level = 1
+
+[profile.dev.package."*"]
+# Dependencies (for example serde_json in the test harness) are fully optimized.
+opt-level = 3
 
 [profile.release]
 # Keep overflow checks in release too: use `wrapping_*`/`checked_*` explicitly
