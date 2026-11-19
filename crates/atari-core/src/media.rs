@@ -274,6 +274,12 @@ impl Cartridge {
 
 #[cfg(test)]
 mod tests {
+    mod atr;
+    mod cartridge;
+    mod drive;
+    mod sio;
+    mod xex;
+
     use super::{CartKind, Cartridge, MediaError};
 
     /// Verifies REQ-604: a raw image of 8 KB or 16 KB is a standard cartridge.

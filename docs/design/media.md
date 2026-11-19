@@ -695,12 +695,12 @@ the test code writes (usually `$A5` at `$0600`), with the frame limit of the req
 | REQ-604 | `media.rs` `req604_raw_sizes` (1, 2), `req604_raw_bad_sizes` (3) |
 | REQ-605 | `media.rs` `req605_car_type1` (1), `req605_car_type2` (2), `req605_car_unused_bytes_ignored` (3). The reads use `Cartridge::read`. |
 | REQ-606 | `media.rs` `req606_car_errors` (1-5), `req606_car_error_order` (6) |
-| REQ-607 | `crates/harness/tests/media.rs` `req607_bank_kept_on_reset_key` (1, 2), `req607_cold_reset_bank0` (3, 4). The test calls `press_reset` or `power_on` and then `peek` with no `run_cycle` between. |
+| REQ-607 | `crates/harness/tests/media.rs` `req607_bank_kept_on_reset_key` (1, 2), `req607_cold_reset_bank0` (3, 4). The test calls `Machine::press_reset` or `Machine::power_on` and then `peek` with no `Machine::run_cycle` between. |
 | REQ-608 | `media.rs` `req608_maxflash1_banks` (1-5, 8), `req608_maxflash8_banks` (6-8); `crates/harness/tests/media.rs` `req608_flash_write_ignored` (9) |
 | REQ-609 | `crates/harness/tests/media.rs` `req609_dummy_read_switches_bank` (1), `req609_antic_dma_switches_bank` (2: the test code writes the display list to `$0600`, `DLISTL`/`DLISTH` and `DMACTL`, and the test runs 2 frames) |
 | REQ-610 | `media.rs` `req610_parse_segments` (1-6) |
 | REQ-611 | `media.rs` `req611_xex_signature_errors` (1-3), `req611_xex_no_segment` (4-6), `req611_xex_defects_keep_segments` (7-9) |
-| REQ-612 | `crates/harness/tests/media.rs` `req612_xex_loads_segments` (1-3), `req612_xex_file_order` (4), each with fast SIO off and on (5); `media.rs` `req612_boot_image_records` (the records and the geometry of `boot_image`) |
+| REQ-612 | `crates/harness/tests/media.rs` `req612_xex_loads_segments` (1-3), `req612_xex_file_order` (4), each with fast SIO off and on (5); `media.rs` `req612_boot_image_records` (the records and the geometry of `Xex::boot_image`) |
 | REQ-613 | `crates/harness/tests/media.rs` `req613_initad_called_per_segment` (1, 2); `media.rs` `req613_init_records` (an Init record after segments C and E only) |
 | REQ-614 | `crates/harness/tests/media.rs` `req614_runad` (1, 3), `req614_run_first_segment` (2, 3); `media.rs` `req614_run_records` (Run indirect or Run direct `$2000`) |
 | REQ-615 | `media.rs` `req615_status_frame_reply` (1), `req615_frame_needs_command_line` (2), `req615_frame_restart` (3), `req615_baud_tolerance` (4, 5) |

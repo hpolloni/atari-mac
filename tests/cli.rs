@@ -206,3 +206,26 @@ fn usage_errors_and_help() {
         "screenshot in a missing directory"
     );
 }
+
+/// Fails the test that calls it. A planned stub calls this function, so that the stub never
+/// passes when it runs (`cargo test -- --include-ignored`).
+fn planned() {
+    panic!("planned test: a package replaces this stub with the real test");
+}
+
+/// Verifies REQ-012: `--headless --frames 1` exits with status 0 for a valid 8,192-byte
+/// cartridge (`--cart`), a valid executable (`--xex`) and a valid ATR image (`--disk`)
+/// (criterion 1).
+#[test]
+#[ignore = "planned: SLICE-04"]
+fn loads_cart_xex_and_disk() {
+    planned();
+}
+
+/// Verifies REQ-012: with a 100-byte file, each of `--cart`, `--xex` and `--disk` writes a
+/// message that names the file to standard error and exits with status 2 (criterion 2).
+#[test]
+#[ignore = "planned: SLICE-04"]
+fn rejects_bad_cart_xex_and_disk() {
+    planned();
+}

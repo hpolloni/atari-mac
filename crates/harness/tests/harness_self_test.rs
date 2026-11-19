@@ -627,3 +627,18 @@ fn fetch_rejects_bad_checksum() {
         "the valid ROMs are kept"
     );
 }
+
+/// Fails the test that calls it. A planned stub calls this function, so that the stub never
+/// passes when it runs (`cargo test -- --include-ignored`).
+#[expect(clippy::panic, reason = "a planned test stub must fail when it runs")]
+fn planned() {
+    panic!("planned test: a package replaces this stub with the real test");
+}
+
+/// Verifies REQ-042: the CI job `Coverage (cargo-llvm-cov)` in `.github/workflows/ci.yml`
+/// runs `cargo llvm-cov` on the workspace with `--fail-under-lines 80` (criterion 1).
+#[test]
+#[ignore = "planned: SLICE-06"]
+fn coverage_job_needs_80_percent() {
+    planned();
+}
