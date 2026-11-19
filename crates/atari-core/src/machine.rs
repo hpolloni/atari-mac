@@ -538,7 +538,9 @@ mod tests {
 
     /// The OS ROM of the tests: byte `i` is `i >> 8` (the page number in the ROM).
     fn os_rom() -> Vec<u8> {
-        (0..super::OS_ROM_SIZE).map(|i| u8::try_from(i >> 8).unwrap()).collect()
+        (0..super::OS_ROM_SIZE)
+            .map(|i| u8::try_from(i >> 8).unwrap())
+            .collect()
     }
 
     /// A machine with the test OS ROM, BASIC of `$BB` bytes, and an optional cartridge.
@@ -632,10 +634,46 @@ mod tests {
         let mut m = machine();
         assert_eq!(cpu_read(&mut m, 0xD014), 0x0F, "GTIA PAL register (NTSC)");
         assert_eq!(cpu_read(&mut m, 0xD0F4), 0x0F, "GTIA mirror");
-        assert_eq!(cpu_read(&mut m, 0xD20F) & 0x04, 0x04, "POKEY SKSTAT: no key");
+        assert_eq!(
+            cpu_read(&mut m, 0xD20F) & 0x04,
+            0x04,
+            "POKEY SKSTAT: no key"
+        );
         assert_eq!(cpu_read(&mut m, 0xD40B), m.peek(0xD40B), "ANTIC VCOUNT");
         for addr in [0xD100, 0xD5FF, 0xD600, 0xD7FF] {
             assert_eq!(cpu_read(&mut m, addr), 0xFF, "unused I/O ${addr:04X}");
+        }
+        // Criterion 3: ANTIC decodes 4 address bits, the PIA 2.
+        assert_eq!(cpu_read(&mut m, 0xD47B), m.peek(0xD40B), "VCOUNT at $D47B");
+        cpu_write(&mut m, 0xD3FF, 0x3C);
+        assert_eq!(cpu_read(&mut m, 0xD303), 0x3C, "PBCTL written at $D3FF");
+        assert_eq!(m.peek(0xD303), 0x3C, "peek of PBCTL");
+        assert_eq!(m.peek(0xD20F) & 0x04, 0x04, "peek of SKSTAT");
+    }
+
+    /// Verifies REQ-205: writes to `$D000-$D7FF` do not change the RAM under the I/O area.
+    #[test]
+    fn io_writes_keep_ram() {
+        let mut m = machine_with(Some(Cartridge::from_raw(vec![0xCC; 0x2000]).unwrap()));
+        set_portb(&mut m, 0xFE);
+        for addr in 0xD000..=0xD7FF {
+            m.poke_ram(addr, 0xAA);
+        }
+        for page in 0xD0..=0xD7_u16 {
+            let addr = (page << 8) | 0xFF;
+            cpu_write(&mut m, addr, 0x55);
+            assert_eq!(m.peek_ram(addr), 0xAA, "RAM at ${addr:04X}");
+        }
+    }
+
+    /// Verifies REQ-214: unmapped I/O pages, and `$D5xx` without a driving cartridge, read
+    /// `$FF` for the CPU and for `peek`.
+    #[test]
+    fn unmapped_io_reads_ff() {
+        let mut m = machine_with(Some(Cartridge::from_raw(vec![0xCC; 0x2000]).unwrap()));
+        for addr in (0xD100..=0xD1FF).chain(0xD500..=0xD7FF) {
+            assert_eq!(cpu_read(&mut m, addr), 0xFF, "CPU read of ${addr:04X}");
+            assert_eq!(m.peek(addr), 0xFF, "peek of ${addr:04X}");
         }
     }
 
@@ -659,14 +697,22 @@ mod tests {
         assert_eq!(m.peek(0xE000), 0x20, "OS ROM after power-on (pins $FF)");
         set_portb(&mut m, 0xFE);
         assert_eq!(m.peek(0xE000), 0xAA, "RAM with OS ROM off");
-        assert_eq!(m.peek(0xC000), m.peek_ram(0xC000), "RAM at $C000 with OS ROM off");
+        assert_eq!(
+            m.peek(0xC000),
+            m.peek_ram(0xC000),
+            "RAM at $C000 with OS ROM off"
+        );
     }
 
     /// Verifies REQ-208: `PORTB` bit 1 = 0 maps BASIC at `$A000-$BFFF`.
     #[test]
     fn portb_bit1_switches_basic() {
         let mut m = machine();
-        assert_eq!(m.peek(0xA000), 0x00, "BASIC is off after power-on (pins $FF)");
+        assert_eq!(
+            m.peek(0xA000),
+            0x00,
+            "BASIC is off after power-on (pins $FF)"
+        );
         set_portb(&mut m, 0xFD);
         assert_eq!(m.peek(0xA000), 0xBB, "BASIC on");
         assert_eq!(m.peek(0xBFFF), 0xBB, "BASIC end");
@@ -688,11 +734,21 @@ mod tests {
         let mut m = machine_with(Some(Cartridge::from_raw(vec![0xCC; 0x4000]).unwrap()));
         set_portb(&mut m, 0xFD);
         assert_eq!(m.peek(0xA000), 0xCC, "cartridge before BASIC");
+        assert_eq!(
+            cpu_read(&mut m, 0xA000),
+            0xCC,
+            "CPU read: cartridge before BASIC"
+        );
         assert_eq!(m.peek(0x8000), 0xCC, "16 KB cartridge at $8000 (RD4)");
+        assert_eq!(cpu_read(&mut m, 0x8000), 0xCC, "CPU read at $8000 (RD4)");
         let mut plain = machine();
         set_portb(&mut plain, 0xFF);
         cpu_write(&mut plain, 0xA000, 0xC3);
-        assert_eq!(plain.peek(0xA000), 0xC3, "RAM with no cartridge and BASIC off");
+        assert_eq!(
+            plain.peek(0xA000),
+            0xC3,
+            "RAM with no cartridge and BASIC off"
+        );
     }
 
     /// Verifies REQ-213: ANTIC DMA reads use the CPU memory map.
@@ -706,10 +762,18 @@ mod tests {
                     continue;
                 }
                 let cpu = m.peek(addr);
-                assert_eq!(m.mem.dma_read(addr), cpu, "PORTB ${portb:02X} at ${addr:04X}");
+                assert_eq!(
+                    m.mem.dma_read(addr),
+                    cpu,
+                    "PORTB ${portb:02X} at ${addr:04X}"
+                );
             }
         }
-        assert_eq!(m.mem.dma_read(0xD500), 0xFF, "DMA read of cartridge control");
+        assert_eq!(
+            m.mem.dma_read(0xD500),
+            0xFF,
+            "DMA read of cartridge control"
+        );
         assert_eq!(m.mem.dma_read(0xD40B), 0xFF, "DMA read of other I/O");
     }
 
@@ -749,12 +813,28 @@ mod tests {
     #[test]
     fn joystick_reaches_pia_and_trigger() {
         let mut m = machine();
-        let state = super::JoystickState { up: true, left: true, fire: true, ..Default::default() };
+        let state = super::JoystickState {
+            up: true,
+            left: true,
+            fire: true,
+            ..Default::default()
+        };
         m.set_joystick(0, state);
         cpu_write(&mut m, 0xD302, 0x04); // PACTL: select ORA
-        assert_eq!(cpu_read(&mut m, 0xD300), 0xFA, "up and left pressed on stick 1");
+        assert_eq!(
+            cpu_read(&mut m, 0xD300),
+            0xFA,
+            "up and left pressed on stick 1"
+        );
         assert_eq!(cpu_read(&mut m, 0xD010), 0x00, "TRIG0 pressed");
-        m.set_joystick(1, super::JoystickState { down: true, right: true, ..Default::default() });
+        m.set_joystick(
+            1,
+            super::JoystickState {
+                down: true,
+                right: true,
+                ..Default::default()
+            },
+        );
         assert_eq!(cpu_read(&mut m, 0xD300), 0x5A, "stick 2 down and right");
         m.set_joystick(2, super::JoystickState::default());
         assert_eq!(cpu_read(&mut m, 0xD300), 0x5A, "no third port");
@@ -764,9 +844,17 @@ mod tests {
     #[test]
     fn console_keys_reach_gtia() {
         let mut m = machine();
-        m.set_console_keys(ConsoleKeys { option: true, ..ConsoleKeys::default() });
+        m.set_console_keys(ConsoleKeys {
+            option: true,
+            ..ConsoleKeys::default()
+        });
         assert_eq!(cpu_read(&mut m, 0xD01F), 0x0B, "OPTION pressed");
         cpu_write(&mut m, 0xD01F, 0x08);
-        assert_eq!(cpu_read(&mut m, 0xD01F), 0x0B, "speaker bit does not change the keys");
+        // REQ-437 criterion 2: after a write of $08, OPTION gives $03.
+        assert_eq!(
+            cpu_read(&mut m, 0xD01F),
+            0x03,
+            "OPTION pressed after a write of $08"
+        );
     }
 }

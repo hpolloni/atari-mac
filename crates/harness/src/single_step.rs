@@ -6,7 +6,7 @@
 use core::fmt;
 use core::fmt::Write as _;
 use core::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use atari_core::cpu::{Bus, Cpu, Registers};
@@ -76,8 +76,7 @@ pub struct Case {
     /// The start state.
     pub initial: State,
     /// The expected end state.
-    #[serde(rename = "final")]
-    pub expected: State,
+    pub r#final: State,
     /// The expected bus cycles as `(address, value, kind)`.
     pub cycles: Vec<(u16, u8, Access)>,
 }
@@ -152,17 +151,16 @@ pub fn file_path(opcode: u8) -> PathBuf {
         .join(format!("{opcode:02x}.json"))
 }
 
-/// Reads and parses the cases for `opcode`.
+/// Reads and parses the cases of the file at `path` (for example [`file_path`]).
 ///
 /// # Errors
 ///
 /// [`HarnessError::Missing`] if the suite is not downloaded, [`HarnessError::Read`] if the
 /// file does not parse.
-pub fn load_cases(opcode: u8) -> Result<Vec<Case>, HarnessError> {
-    let path = file_path(opcode);
-    let bytes = data::read_file(&path, data::FETCH_TEST_DATA)?;
+pub fn load_cases(path: &Path) -> Result<Vec<Case>, HarnessError> {
+    let bytes = data::read_file(path, data::FETCH_TEST_DATA)?;
     serde_json::from_slice(&bytes).map_err(|error| HarnessError::Read {
-        path,
+        path: path.to_path_buf(),
         message: error.to_string(),
     })
 }
@@ -170,19 +168,25 @@ pub fn load_cases(opcode: u8) -> Result<Vec<Case>, HarnessError> {
 /// A CPU at an instruction boundary: a new CPU after its reset sequence.
 #[must_use]
 pub fn ready_cpu() -> Cpu {
+    reset_cpu(&mut FlatBus::new())
+}
+
+/// A new CPU that has run its reset sequence on `bus`. The reset sequence makes only reads
+/// (REQ-124), so `bus` keeps its RAM; the log gets the reads.
+fn reset_cpu(bus: &mut FlatBus) -> Cpu {
     let mut cpu = Cpu::new();
-    let mut bus = FlatBus::new();
-    let _step = cpu.step(&mut bus);
+    let _step = cpu.step(bus);
     cpu
 }
 
-/// Runs one case on `cpu` and `bus`, then clears the bytes that the case used. `cpu` must be
-/// at an instruction boundary.
+/// Runs one case on a new CPU at an instruction boundary and on `bus`, then clears the bytes
+/// that the case used.
 ///
 /// # Errors
 ///
 /// A [`Mismatch`] that names the first difference.
-pub fn run_case(case: &Case, cpu: &mut Cpu, bus: &mut FlatBus) -> Result<(), Mismatch> {
+pub fn run_case(case: &Case, bus: &mut FlatBus) -> Result<(), Mismatch> {
+    let mut cpu = reset_cpu(bus);
     *cpu.registers_mut() = Registers {
         a: case.initial.a,
         x: case.initial.x,
@@ -198,8 +202,8 @@ pub fn run_case(case: &Case, cpu: &mut Cpu, bus: &mut FlatBus) -> Result<(), Mis
     for _ in &case.cycles {
         let _tick = cpu.tick(bus, true);
     }
-    let result = compare(case, cpu, bus);
-    for &(addr, _) in case.initial.ram.iter().chain(&case.expected.ram) {
+    let result = compare(case, &cpu, bus);
+    for &(addr, _) in case.initial.ram.iter().chain(&case.r#final.ram) {
         bus.set_byte(addr, 0);
     }
     let touched: Vec<u16> = bus.log.iter().map(|&(addr, _, _)| addr).collect();
@@ -211,7 +215,7 @@ pub fn run_case(case: &Case, cpu: &mut Cpu, bus: &mut FlatBus) -> Result<(), Mis
 
 /// Compares the CPU, the memory and the bus log with the case.
 fn compare(case: &Case, cpu: &Cpu, bus: &FlatBus) -> Result<(), Mismatch> {
-    let e = &case.expected;
+    let e = &case.r#final;
     let r = cpu.registers();
     let expected = (e.a, e.x, e.y, e.s, e.p, e.pc);
     let actual = (r.a, r.x, r.y, r.s, r.p, r.pc);
@@ -303,18 +307,16 @@ pub fn run_opcodes(opcodes: &[u8]) -> Result<Vec<FileReport>, HarnessError> {
 
 /// Runs all cases of one opcode file.
 fn run_file(opcode: u8) -> Result<FileReport, HarnessError> {
-    let cases = load_cases(opcode)?;
-    let mut cpu = ready_cpu();
+    let cases = load_cases(&file_path(opcode))?;
     let mut bus = FlatBus::new();
     let mut failures = 0;
     let mut first = None;
     for case in &cases {
-        if let Err(mismatch) = run_case(case, &mut cpu, &mut bus) {
+        if let Err(mismatch) = run_case(case, &mut bus) {
             failures += 1;
             if first.is_none() {
                 first = Some(mismatch);
             }
-            cpu = ready_cpu();
         }
     }
     Ok(FileReport {

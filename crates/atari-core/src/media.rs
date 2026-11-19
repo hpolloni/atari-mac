@@ -120,14 +120,23 @@ mod tests {
         assert_eq!(small.kind(), CartKind::Standard8k, "8 KB");
         let big = Cartridge::from_raw(vec![2; 0x4000]).unwrap();
         assert_eq!(big.kind(), CartKind::Standard16k, "16 KB");
-        assert_eq!(Cartridge::from_raw(vec![0; 100]), Err(MediaError::BadSize(100)), "100 bytes");
-        assert_eq!(MediaError::BadSize(100).to_string(), "unsupported cartridge size: 100 bytes");
+        assert_eq!(
+            Cartridge::from_raw(vec![0; 100]),
+            Err(MediaError::BadSize(100)),
+            "100 bytes"
+        );
+        assert_eq!(
+            MediaError::BadSize(100).to_string(),
+            "unsupported cartridge size: 100 bytes"
+        );
     }
 
     /// Verifies REQ-600: the standard cartridges map `$A000-$BFFF`, and 16 KB also `$8000`.
     #[test]
     fn standard_mapping() {
-        let data: Vec<u8> = (0..0x4000_usize).map(|i| u8::try_from(i >> 8).unwrap()).collect();
+        let data: Vec<u8> = (0..0x4000_usize)
+            .map(|i| u8::try_from(i >> 8).unwrap())
+            .collect();
         let mut big = Cartridge::from_raw(data).unwrap();
         assert_eq!(big.read(0x8000), Some(0x00), "first byte");
         assert_eq!(big.peek(0xBFFF), Some(0x3F), "last byte");
@@ -138,7 +147,11 @@ mod tests {
         assert!(!small.rd4() && small.rd5(), "RD5 only");
         small.write(0xA000, 0);
         small.cold_reset();
-        assert_eq!(small.access_control(0xD500, None), None, "no bus drive at $D5xx");
+        assert_eq!(
+            small.access_control(0xD500, None),
+            None,
+            "no bus drive at $D5xx"
+        );
         assert_eq!(small.peek(0xA000), Some(0xCC), "ROM unchanged");
     }
 }

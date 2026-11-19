@@ -102,17 +102,23 @@ pub fn test_os_rom(program: &[u8]) -> Vec<u8> {
     rom
 }
 
-/// A machine with [`test_os_rom`] of `program`, after power-on.
+/// A machine with [`test_os_rom`] of `program` (and Altirra BASIC if `options.basic`),
+/// after power-on.
 ///
 /// # Errors
 ///
-/// [`HarnessError::Config`] only if the ROM builder is wrong.
-pub fn boot_program(program: &[u8], standard: VideoStandard) -> Result<Machine, HarnessError> {
+/// [`HarnessError::Missing`] if `options.basic` and the BASIC ROM is not downloaded.
+pub fn boot_program(program: &[u8], options: BootOptions) -> Result<Machine, HarnessError> {
+    let basic_rom = if options.basic {
+        Some(data::basic_rom()?)
+    } else {
+        None
+    };
     Ok(Machine::new(MachineConfig {
         os_rom: test_os_rom(program),
-        basic_rom: None,
+        basic_rom,
         cartridge: None,
-        standard,
+        standard: options.standard,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })?)
 }
