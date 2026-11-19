@@ -1,0 +1,178 @@
+[package]
+name = "atari-mac"
+version = "0.1.0"
+edition = "2024"
+# Keep in sync with `rust-toolchain.toml`. CI verifies this with `cargo hack --rust-version`.
+rust-version = "1.100.0"
+description = "atari-mac"
+readme = "README.md"
+# Not published to crates.io. Remove this line (and add `license`, `repository`,
+# `keywords`, `categories`) before publishing.
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+
+# ---------------------------------------------------------------------------
+# Lints
+#
+# Everything here is "warn". CI and `make check` promote warnings to errors
+# with `-D warnings`, so local iteration is not blocked but nothing lands.
+# To silence a lint locally, use `#[expect(lint, reason = "...")]`.
+# `#[allow]` without a reason is itself a lint error.
+# ---------------------------------------------------------------------------
+
+[lints.rust]
+# Hard ban: this is not overridable by `#[allow]` / `#[expect]`.
+unsafe_code = "forbid"
+
+# Lint groups.
+future_incompatible = { level = "warn", priority = -1 }
+keyword_idents = { level = "warn", priority = -1 }
+let_underscore = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+refining_impl_trait = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
+rust_2024_compatibility = { level = "warn", priority = -1 }
+unused = { level = "warn", priority = -1 }
+
+# Allow-by-default rustc lints that we turn on.
+ambiguous_negative_literals = "warn"
+closure_returning_async_block = "warn"
+deref_into_dyn_supertrait = "warn"
+elided_lifetimes_in_paths = "warn"
+explicit_outlives_requirements = "warn"
+impl_trait_redundant_captures = "warn"
+macro_use_extern_crate = "warn"
+meta_variable_misuse = "warn"
+missing_copy_implementations = "warn"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+non_ascii_idents = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+single_use_lifetimes = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unit_bindings = "warn"
+unnameable_types = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unstable_features = "warn"
+unused_crate_dependencies = "warn"
+unused_extern_crates = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "warn"
+unused_qualifications = "warn"
+unused_results = "warn"
+variant_size_differences = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_html_tags = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+unescaped_backticks = "warn"
+redundant_explicit_links = "warn"
+
+[lints.clippy]
+# Whole groups. `restriction` is never enabled wholesale (clippy advises against
+# it); selected lints from it are listed below.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# Selected `restriction` lints.
+absolute_paths = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+as_underscore = "warn"
+assertions_on_result_states = "warn"
+cfg_not_test = "warn"
+clone_on_ref_ptr = "warn"
+create_dir = "warn"
+dbg_macro = "warn"
+decimal_literal_representation = "warn"
+deref_by_slicing = "warn"
+disallowed_script_idents = "warn"
+doc_include_without_cfg = "warn"
+empty_drop = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+error_impl_error = "warn"
+exit = "warn"
+expect_used = "warn"
+filetype_is_file = "warn"
+float_cmp_const = "warn"
+fn_to_numeric_cast_any = "warn"
+format_push_string = "warn"
+get_unwrap = "warn"
+if_then_some_else_none = "warn"
+infinite_loop = "warn"
+iter_over_hash_type = "warn"
+large_include_file = "warn"
+let_underscore_must_use = "warn"
+let_underscore_untyped = "warn"
+lossy_float_literal = "warn"
+map_err_ignore = "warn"
+mem_forget = "warn"
+missing_assert_message = "warn"
+missing_docs_in_private_items = "warn"
+mixed_read_write_in_expression = "warn"
+mod_module_files = "warn"
+multiple_inherent_impl = "warn"
+mutex_atomic = "warn"
+needless_raw_strings = "warn"
+panic = "warn"
+panic_in_result_fn = "warn"
+partial_pub_fields = "warn"
+pathbuf_init_then_push = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+pub_without_shorthand = "warn"
+rc_buffer = "warn"
+rc_mutex = "warn"
+redundant_type_annotations = "warn"
+renamed_function_params = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+same_name_method = "warn"
+semicolon_outside_block = "warn"
+str_to_string = "warn"
+string_add = "warn"
+string_lit_chars_any = "warn"
+suspicious_xor_used_as_pow = "warn"
+todo = "warn"
+try_err = "warn"
+undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unneeded_field_pattern = "warn"
+unreachable = "warn"
+unseparated_literal_suffix = "warn"
+unused_result_ok = "warn"
+unused_trait_names = "warn"
+unwrap_used = "warn"
+use_debug = "warn"
+verbose_file_reads = "warn"
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+
+[profile.dev]
+# Make integer overflow a panic in debug builds (the default, stated explicitly).
+overflow-checks = true
+
+[profile.release]
+# Keep overflow checks in release too: use `wrapping_*`/`checked_*` explicitly
+# where wrap-around is intended (e.g. emulated CPU registers).
+overflow-checks = true
+lto = "thin"
+codegen-units = 1

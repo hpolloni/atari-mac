@@ -1,0 +1,5 @@
+# typos spell checker: https://github.com/crate-ci/typos
+[files]
+extend-exclude = ["target/", "Cargo.lock", "test-data/", "roms/*.rom", "*.sha1"]
+
+[default.extend-words]

@@ -1,0 +1,11 @@
+# taplo TOML formatter: https://taplo.tamasfe.dev/
+include = ["**/*.toml"]
+exclude = ["target/**"]
+
+[formatting]
+align_comments = false
+array_auto_collapse = false
+array_auto_expand = true
+column_width = 100
+indent_string = "    "
+reorder_keys = false

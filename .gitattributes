@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.rs text diff=rust
+*.toml text
+Cargo.lock text -diff linguist-generated=true

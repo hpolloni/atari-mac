@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Runs the fast gate subset before each commit. Install with `make hooks`.
+# Bypass in an emergency with `git commit --no-verify` (CI still enforces everything).
+set -euo pipefail
+exec make --no-print-directory pre-commit

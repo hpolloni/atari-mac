@@ -1,0 +1,15 @@
+# Tests may unwrap/expect/panic/print; production code may not.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-print-in-tests = true
+allow-indexing-slicing-in-tests = true
+# `dbg!` is never allowed, not even in tests.
+allow-dbg-in-tests = false
+
+# Make some pedantic lints stricter.
+avoid-breaking-exported-api = false
+too-many-arguments-threshold = 5
+cognitive-complexity-threshold = 15
+excessive-nesting-threshold = 5
+missing-docs-in-crate-items = true

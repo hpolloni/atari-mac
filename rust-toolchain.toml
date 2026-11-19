@@ -1,0 +1,6 @@
+# Pinned toolchain. Bump deliberately (Dependabot does not do this) and keep
+# `package.rust-version` in Cargo.toml in sync.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt", "llvm-tools-preview"]
+profile = "minimal"
