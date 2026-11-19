@@ -760,7 +760,10 @@ mod gates {
         let fixture = Fixture::new();
         fixture.replace(
             "crates/demo/tests/demo.rs",
-            &format!("/// Verifies {}.\n#[test]\nfn first_test() {{}}\n\n", req(1)),
+            &format!(
+                "/// Verifies {}.\n#[test]\nfn first_test() {{}}\n\n",
+                req(1)
+            ),
             "",
         );
         fixture.write(
