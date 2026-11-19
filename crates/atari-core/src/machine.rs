@@ -615,6 +615,7 @@ mod tests {
     use crate::cpu::Bus as _;
     use crate::gtia::{ConsoleKeys, FRAME_HEIGHT, FRAME_WIDTH};
     use crate::media::Cartridge;
+    use crate::planned::planned;
     use crate::timing::VideoStandard;
 
     /// The address of the test programs in the OS ROM.
@@ -1907,5 +1908,14 @@ mod tests {
             assert_eq!(m.cycle_count() - start, 29_868, "frame {frame}");
             assert!(m.cpu().is_jammed(), "still locked after frame {frame}");
         }
+    }
+
+    /// Verifies REQ-347: on the first scan line of a `$1E` line with `DMACTL` = `$23` and
+    /// `HSCROL` = 2, `STA WSYNC` writes on cycle 104 and the CPU waits on the opcode fetch of
+    /// a `NOP` (`$EA`); the virtual fetch on cycle 107 loads `$EA` into line buffer byte 47.
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn virtual_fetch_during_wsync_reads_cpu_byte() {
+        planned();
     }
 }

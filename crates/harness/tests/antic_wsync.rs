@@ -204,3 +204,49 @@ mod wsync {
         assert_eq!(write, (TEST_LINE, 109), "the STX write");
     }
 }
+
+/// The planned tests (`docs/design/spec-gates.md`, "Planned test stubs"). The module has
+/// `cfg(test)`, so that the helper can panic as the tests do.
+#[cfg(test)]
+mod stubs {
+    /// Fails the calling test: a planned stub never counts as a pass.
+    fn planned() {
+        panic!("planned test: not written yet");
+    }
+
+    /// Verifies REQ-337: with `DMACTL` = `$00`, `STA WSYNC` with its write on cycle 104 of
+    /// scan line N, then `STX $0600`: the `STX` opcode fetch is on cycle 105 of scan line N and
+    /// the `STX` write on cycle 107 of scan line N + 1.
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn wsync_write_on_104_next_line() {
+        planned();
+    }
+
+    /// Verifies REQ-337: on the first scan line of a mode A line with `DMACTL` = `$23`,
+    /// `INC WSYNC` with its write cycles on cycles 102 and 103, then `STX $0600`: the `STX`
+    /// opcode fetch is on cycle 105 and the `STX` write on cycle 108.
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn inc_wsync_ignores_dma() {
+        planned();
+    }
+
+    /// Verifies REQ-337: with `DMACTL` = `$00`, `INC WSYNC` with its write cycles on cycles 103
+    /// and 104 of scan line N, then `STX $0600`: the `STX` opcode fetch is on cycle 105 of
+    /// scan line N and the `STX` write on cycle 107 of scan line N + 1.
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn inc_wsync_on_103_104() {
+        planned();
+    }
+
+    /// Verifies REQ-337: with `DMACTL` = `$00`, `STA WSYNC` with its write on cycle 113 of
+    /// scan line N, then `STX $0600`: the `STX` opcode fetch is on cycle 0 of scan line N + 1
+    /// and the `STX` write on cycle 107 of scan line N + 1.
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn wsync_write_on_113() {
+        planned();
+    }
+}

@@ -5,9 +5,16 @@
 //! `(2C - 1) mod 228` of the output of cycle `C`.
 
 mod display;
+mod dlist;
 mod dma;
+mod light_pen;
+mod line_buffer;
+mod modes;
 mod nmi;
+mod nmi_timing;
+mod pm;
 mod registers;
+mod scroll;
 
 use super::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::timing::{CYCLES_PER_LINE, VBLANK_START_LINE, VideoStandard};

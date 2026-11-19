@@ -145,3 +145,21 @@ mod registers {
         }
     }
 }
+
+/// The planned tests (`docs/design/spec-gates.md`, "Planned test stubs"). The module has
+/// `cfg(test)`, so that the helper can panic as the tests do.
+#[cfg(test)]
+mod stubs {
+    /// Fails the calling test: a planned stub never counts as a pass.
+    fn planned() {
+        panic!("planned test: not written yet");
+    }
+
+    /// Verifies REQ-342: in the full machine, a press of the trigger of joystick port 1 or of
+    /// port 2 on scan line 100 makes `PENV` read `$32`.
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn joystick_trigger_latches_light_pen() {
+        planned();
+    }
+}
