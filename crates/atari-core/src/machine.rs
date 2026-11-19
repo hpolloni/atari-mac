@@ -961,6 +961,112 @@ mod tests {
         assert_eq!(m.peek(0xC000), 0xAA, "OS ROM disabled");
     }
 
+    /// A `MaxFlash` 1Mbit cartridge (CAR type 41, REQ-608) with the bank pattern: each byte of
+    /// bank `k` holds `k`.
+    fn maxflash() -> Cartridge {
+        let data: Vec<u8> = (0..0x2_0000_usize)
+            .map(|i| u8::try_from(i >> 13).unwrap())
+            .collect();
+        let sum = data
+            .iter()
+            .fold(0_u32, |sum, &byte| sum.wrapping_add(u32::from(byte)));
+        let mut file = b"CART".to_vec();
+        file.extend(41_u32.to_be_bytes());
+        file.extend(sum.to_be_bytes());
+        file.extend([0; 4]);
+        file.extend(data);
+        Cartridge::from_car(&file).unwrap()
+    }
+
+    /// A machine that runs `code` from `$C200` with the `MaxFlash` 1Mbit cartridge.
+    fn maxflash_machine(code: &[u8]) -> Machine {
+        Machine::new(config(program_os(code), Some(maxflash()))).unwrap()
+    }
+
+    /// `true` while the cartridge maps `$A000-$BFFF`.
+    fn rd5(m: &Machine) -> bool {
+        m.mem.cart.as_ref().is_some_and(Cartridge::rd5)
+    }
+
+    /// Verifies REQ-203: the dummy read of `LDA $D5F0,X` with `X` = `$20` reaches the
+    /// cartridge control area (criterion 3). The `MaxFlash` 1Mbit cartridge (REQ-608) turns RD5
+    /// off on an access to `$D510`, so its state shows the access.
+    #[test]
+    fn dummy_read_reaches_cartridge_control() {
+        let mut m = maxflash_machine(&[
+            0xA2, 0x20, // LDX #$20
+            0xBD, 0xF0, 0xD5, // LDA $D5F0,X
+            0x4C, 0x05, 0xC2, // JMP $C205
+        ]);
+        assert!(rd5(&m), "RD5 after power-on");
+        let log = accesses(&log_cycles(&mut m, 100));
+        let io: Vec<(u16, bool)> = log
+            .iter()
+            .filter(|access| (0xD000..0xD800).contains(&access.addr))
+            .map(|access| (access.addr, access.write))
+            .collect();
+        assert_eq!(
+            io,
+            [(0xD510, false), (0xD610, false)],
+            "one dummy read of $D510, then the read of $D610"
+        );
+        assert!(!rd5(&m), "the cartridge received the read of $D510");
+        assert_eq!(m.peek(0xD013), 0x00, "TRIG3 follows RD5");
+        assert_eq!(m.peek(0xA000), 0x00, "RAM at $A000 (BASIC off)");
+    }
+
+    /// Verifies REQ-203: while RDY is low after `STA WSYNC`, the CPU makes one read in each
+    /// stopped cycle and one more read, and then its read of `$D503` reaches the cartridge
+    /// control area (criterion 4, in part).
+    ///
+    /// Criterion 4 runs the code from `$D500`. No cartridge kind of the design drives the bus
+    /// at `$D5xx` (`docs/design/media.md`, `access_control`), so the code runs from the OS
+    /// ROM: the repeated reads are of the `LDA` operand address, and the `MaxFlash` 1Mbit
+    /// cartridge shows the read of `$D503` as bank 3.
+    #[test]
+    fn rdy_reads_reach_cartridge_control() {
+        let mut m = maxflash_machine(&[
+            0x8D, 0x0A, 0xD4, // STA WSYNC
+            0xAD, 0x03, 0xD5, // LDA $D503
+            0x4C, 0x06, 0xC2, // JMP $C206
+        ]);
+        let mut log = Vec::new();
+        for _ in 0..300 {
+            m.run_cycle();
+            log.push((m.last_out.rdy, m.last_out.halt, m.last_access));
+        }
+        let wsync = log
+            .iter()
+            .position(|&(_, _, access)| access.is_some_and(|a| a.write && a.addr == 0xD40A))
+            .unwrap();
+        let after = &log[wsync + 1..];
+        assert_eq!(
+            after[0].2.map(|a| a.addr),
+            Some(0xC203),
+            "the LDA opcode fetch runs in the next cycle"
+        );
+        let stopped = after
+            .iter()
+            .filter(|&&(rdy, halt, _)| !rdy && !halt)
+            .count();
+        assert!(stopped > 0, "RDY is low");
+        let operand_reads = after
+            .iter()
+            .filter(|&&(_, _, access)| access.is_some_and(|a| a.addr == 0xC204 && !a.write))
+            .count();
+        assert_eq!(
+            operand_reads,
+            stopped + 1,
+            "one read per stopped cycle, plus one"
+        );
+        let control_reads = after
+            .iter()
+            .filter(|&&(_, _, access)| access.is_some_and(|a| a.addr == 0xD503))
+            .count();
+        assert_eq!(control_reads, 1, "one read of $D503");
+        assert_eq!(m.peek(0xA000), 0x03, "the cartridge shows bank 3");
+    }
+
     /// Verifies REQ-204: with all ROMs off, each address outside `$D000-$D7FF` is RAM
     /// (criterion 1).
     #[test]

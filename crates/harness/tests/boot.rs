@@ -80,7 +80,8 @@ fn emulation_is_deterministic() {
     assert_eq!(a, b, "machine state after 300 frames");
 }
 
-/// Verifies REQ-005 and REQ-024: the machine boots to the BASIC `READY` prompt.
+/// Verifies REQ-005, REQ-024 and REQ-216: the machine boots to the BASIC `READY` prompt
+/// (REQ-216 criterion 4).
 ///
 /// Altirra BASIC prints the prompt as `Ready`. Before BASIC starts, the OS sends three SIO
 /// commands (the D1: status of the disk boot and two type 3 polls) to an empty bus. Each
