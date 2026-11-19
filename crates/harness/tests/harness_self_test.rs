@@ -1,8 +1,8 @@
 //! Tests of the harness helpers themselves.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::{fs, io};
 
 use atari_core::cpu::Bus as _;
 use atari_core::gtia::ConsoleKeys;
@@ -502,4 +502,128 @@ fn type_text_checks_all_characters_first() {
         "euro sign"
     );
     assert_eq!(machine.frame_count(), 0, "no frame ran");
+}
+
+/// The text of `scripts/fetch-roms.sh`.
+fn fetch_script() -> io::Result<String> {
+    fs::read_to_string(data::repo_root().join("scripts/fetch-roms.sh"))
+}
+
+/// `true` if `text` is `len` lower-case hexadecimal digits.
+fn is_hex(text: &str, len: usize) -> bool {
+    text.len() == len
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Verifies REQ-020: each URL in `scripts/fetch-roms.sh` contains a commit hash, except the
+/// HRM URL, which has a SHA-256 checksum (criterion 1). Each `fetch` and `fetch_c_array`
+/// call also has a SHA-256 checksum.
+#[test]
+fn fetch_urls_are_pinned() {
+    let script = fetch_script().unwrap().replace("\\\n", " ");
+    let commits: Vec<(String, String)> = script
+        .lines()
+        .filter_map(|line| line.strip_prefix("readonly "))
+        .filter_map(|rest| rest.split_once('='))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect();
+    assert!(commits.len() >= 3, "commit variables: {commits:?}");
+    for (name, value) in &commits {
+        assert!(is_hex(value, 40), "{name} = {value} is not a commit hash");
+    }
+    let expand = |url: &str| {
+        commits.iter().fold(url.to_owned(), |url, (name, value)| {
+            url.replace(&format!("${name}"), value)
+        })
+    };
+    let mut urls = 0;
+    for (index, _) in script.match_indices("https://") {
+        let rest = &script[index..];
+        let end = rest
+            .find(|c: char| c == '"' || c.is_whitespace())
+            .unwrap_or(rest.len());
+        let url = expand(&rest[..end]);
+        urls += 1;
+        if url.contains("virtualdub.org") {
+            let after = &script[index + end..];
+            let checksum = after
+                .split_whitespace()
+                .nth(2)
+                .unwrap_or_default()
+                .trim_matches('"');
+            assert!(is_hex(checksum, 64), "HRM URL {url}: checksum {checksum}");
+        } else {
+            assert!(
+                url.split('/').any(|part| is_hex(part, 40)),
+                "URL without a commit hash: {url}"
+            );
+        }
+    }
+    assert_eq!(
+        urls, 4,
+        "atari800, Klaus Dormann, HRM and SingleStepTests URLs"
+    );
+    let calls: Vec<&str> = script
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| line.starts_with("fetch ") || line.starts_with("fetch_c_array "))
+        .collect();
+    assert_eq!(calls.len(), 4, "fetch calls: {calls:?}");
+    for call in calls {
+        let checksum = call.split_whitespace().nth(3).unwrap_or_default();
+        assert!(is_hex(checksum, 64), "no SHA-256 checksum: {call}");
+    }
+}
+
+/// Verifies REQ-020: when a downloaded file has a different checksum, the script deletes the
+/// file, prints `checksum mismatch` and exits with a status that is not 0 (criterion 2).
+///
+/// The test runs a copy of the script in a temporary directory. The copy has the valid ROMs,
+/// so that it downloads nothing for them, and its Klaus Dormann URL is a local `file://` URL
+/// to a file with a wrong checksum.
+#[test]
+fn fetch_rejects_bad_checksum() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fetch-rejects-bad-checksum");
+    if root.exists() {
+        fs::remove_dir_all(&root).unwrap();
+    }
+    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::create_dir_all(root.join("roms")).unwrap();
+    for rom in ["altirraos-xl.rom", "altirra-basic.rom"] {
+        let bytes = data::read_test_file(&format!("roms/{rom}"), data::FETCH_ROMS).unwrap();
+        fs::write(root.join("roms").join(rom), bytes).unwrap();
+    }
+    let source = root.join("wrong.bin");
+    fs::write(&source, b"not the Klaus Dormann test").unwrap();
+    let script = fetch_script().unwrap();
+    let start = script
+        .find("https://raw.githubusercontent.com/Klaus2m5")
+        .unwrap();
+    let end = start + script[start..].find('"').unwrap();
+    let copy = format!(
+        "{}file://{}{}",
+        &script[..start],
+        source.display(),
+        &script[end..]
+    );
+    fs::write(root.join("scripts/fetch-roms.sh"), copy).unwrap();
+    let output = Command::new("bash")
+        .arg(root.join("scripts/fetch-roms.sh"))
+        .output()
+        .expect("bash runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "the script failed: {stderr}");
+    assert!(stderr.contains("checksum mismatch"), "stderr: {stderr}");
+    let dest = root.join("test-data/klaus/6502_functional_test.bin");
+    assert!(!dest.exists(), "the file is not kept");
+    assert!(
+        !dest.with_extension("bin.part").exists(),
+        "the partial download is deleted"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("ok      roms/altirraos-xl.rom"),
+        "the valid ROMs are kept"
+    );
 }
