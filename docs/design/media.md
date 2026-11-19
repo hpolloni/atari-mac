@@ -82,10 +82,19 @@ impl Cartridge {
     pub fn from_raw(data: Vec<u8>) -> Result<Self, MediaError>;
     pub fn from_car(file: &[u8]) -> Result<Self, MediaError>;
     pub const fn kind(&self) -> CartKind;
-    /// The byte at `addr` in `$8000-$BFFF`, or `None` if the cartridge does not map `addr`.
-    pub fn read(&self, addr: u16) -> Option<u8>;
-    /// One bus access to `$D500-$D5FF`. `value` is `Some` for a write, `None` for a read.
-    pub fn access_control(&mut self, addr: u16, value: Option<u8>);
+    /// CPU read of `$8000-$BFFF`. `None` if the cartridge does not drive the bus there.
+    /// No supported kind has a read side effect, so this gives the same value as `peek`.
+    pub fn read(&mut self, addr: u16) -> Option<u8>;
+    /// The same value as `read`, without side effects: for `Machine::peek` and to find if
+    /// a write goes to ROM.
+    pub fn peek(&self, addr: u16) -> Option<u8>;
+    /// CPU write to `$8000-$BFFF` while the cartridge shows ROM there. No supported kind
+    /// changes state (REQ-608 criterion: flash writes are ignored).
+    pub fn write(&mut self, addr: u16, value: u8);
+    /// One bus access to `$D500-$D5FF`, from the CPU or from ANTIC DMA. `value` is `Some`
+    /// for a write, `None` for a read. Returns `Some` only for a read that the cartridge
+    /// drives. No supported kind drives the bus here, so it always returns `None`.
+    pub fn access_control(&mut self, addr: u16, value: Option<u8>) -> Option<u8>;
     /// `true` while the cartridge maps `$8000-$9FFF`.
     pub const fn rd4(&self) -> bool;
     /// `true` while the cartridge maps `$A000-$BFFF`.
@@ -95,19 +104,21 @@ impl Cartridge {
 }
 ```
 
+This is the cartridge contract of `system.md` ("Cartridge port"), decided in OI-003.
+
 Call contract:
 
-1. `read` has no side effects. The machine calls it for each CPU read and each ANTIC DMA read
-   in `$8000-$BFFF`, and to find if a write goes to ROM (REQ-602). The machine shows RAM or
-   BASIC when `read` gives `None` (REQ-601).
-2. The machine calls `access_control` once for each bus access to `$D500-$D5FF`. This includes
-   CPU dummy reads (the CPU already makes all its bus accesses through `Bus::read`) and ANTIC
-   DMA reads (REQ-609).
-3. After each `access_control` call, at insertion and at each cold reset, the machine sets the
-   GTIA trigger input 3 from `rd5()`: `gtia.set_trigger(3, !cart.rd5())` (REQ-603). With no
-   cartridge, the trigger is "pressed" (`TRIG3` = 0).
-4. A read of `$D5xx` gives `$FF` to the CPU. No supported cartridge drives the data bus in this
-   range.
+1. The machine calls `read` for each CPU read and each ANTIC DMA read in `$8000-$BFFF`,
+   `peek` to find if a write goes to ROM (REQ-206), and `write` for each CPU write to a ROM
+   address of the cartridge. The machine shows BASIC or RAM when `read` gives `None`
+   (REQ-210).
+2. The machine calls `access_control` once for each bus access to `$D500-$D5FF`. This
+   includes CPU dummy reads (the CPU already makes all its bus accesses through `Bus::read`)
+   and ANTIC DMA reads (REQ-609, OI-002).
+3. After each `access_control` call, at insertion and at each cold reset, the machine sets
+   the GTIA trigger input 3 from `rd5()`: `gtia.set_trigger(3, !cart.rd5())` (REQ-232).
+   With no cartridge, the trigger is "pressed" (`TRIG3` = 0).
+4. A read of `$D5xx` gives `$FF` to the CPU when `access_control` returns `None`.
 5. The RESET key does not call any cartridge function (REQ-607).
 
 ### Executable files
@@ -179,20 +190,8 @@ impl DiskImage {
 ### SIO bus and disk drive
 
 ```rust
-/// One serial byte on the bus: 1 start bit, 8 data bits LSB first, 1 stop bit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SerialByte {
-    pub value: u8,
-    /// The machine cycle where the start bit begins.
-    pub start: u64,
-    /// The length of one bit in machine cycles.
-    pub bit_cycles: u32,
-}
-
-impl SerialByte {
-    /// The machine cycle where the stop bit ends: `start + 10 * bit_cycles`.
-    pub const fn end(&self) -> u64;
-}
+// The bytes from the computer use `pokey::SerialByte { value, start_cycle, end_cycle }`
+// (see pokey.md). The bit length is `(end_cycle - start_cycle) / 10`.
 
 #[derive(Debug, Clone)]
 pub struct SioBus { /* see State */ }
@@ -203,12 +202,16 @@ impl SioBus {
     pub const fn drive_mut(&mut self) -> &mut DiskDrive;
     /// The PIA CB2 output changed. `low` = command line asserted.
     pub fn set_command_line(&mut self, low: bool, now: u64);
-    /// POKEY finished sending `byte`. `now` is `byte.end()`.
-    pub fn host_byte(&mut self, byte: SerialByte, now: u64);
-    /// The next byte that a device sends, if one is scheduled.
-    pub fn peek_device_byte(&self) -> Option<SerialByte>;
-    /// Removes and gives the next device byte if its start cycle is at or before `now`.
-    pub fn take_device_byte(&mut self, now: u64) -> Option<SerialByte>;
+    /// POKEY finished sending `byte` (from `Pokey::take_serial_byte`).
+    pub fn host_byte(&mut self, byte: pokey::SerialByte);
+    /// The level of the SIO DATA IN line in machine cycle `now` (`true` = mark). The bus
+    /// makes the start bit, the 8 data bits (LSB first) and the stop bit of each scheduled
+    /// device byte. The line is high when no byte is in progress.
+    pub fn data_in_level(&self, now: u64) -> bool;
+    /// The start cycle of the next scheduled device byte, for tests.
+    pub fn next_device_byte_start(&self) -> Option<u64>;
+    /// The scheduled device bytes as `(value, start, bit_cycles)`, for tests.
+    pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)>;
     /// A complete transaction at once, for fast SIO (REQ-623).
     pub fn transact(&mut self, request: &SioRequest<'_>) -> SioOutcome;
     /// Bus state to idle (cold reset). The inserted image does not change.
@@ -266,11 +269,12 @@ Call contract for the machine:
 
 1. The machine calls `set_command_line` in the machine cycle where the PIA CB2 output changes.
    The PIA module must give the CB2 output level.
-2. POKEY calls `host_byte` in the cycle where the stop bit of a byte from `SEROUT` ends.
-3. In each machine cycle, the machine compares `peek_device_byte().start` with the cycle
-   counter. At that cycle, it calls `take_device_byte` and gives the byte to POKEY. POKEY
-   shifts the bits in with `bit_cycles` and sets `SERIN` and the serial input interrupt. This
-   is in the POKEY area.
+2. After the POKEY `tick` of each machine cycle, the machine moves each byte from
+   `Pokey::take_serial_byte` to `host_byte`. POKEY reports no byte that it sent with force
+   break on (OI-030).
+3. In each machine cycle, before the POKEY `tick`, the machine calls
+   `pokey.set_serial_in(sio.data_in_level(now))`. POKEY receives the bits from the line
+   level with its own serial timing (REQ-526, REQ-528). The interface is decided in OI-038.
 4. `SioBus` never reads the cycle counter by itself. All times come from the `now` and `start`
    arguments, so the core stays deterministic (REQ-014).
 
@@ -388,7 +392,7 @@ pub fn start_xex(&mut self, xex: &Xex);
 | `phase` | `BusPhase` | `Idle` | Protocol state |
 | `frame` | `[u8; 5]`, `u8` | Empty | Command frame bytes and count |
 | `data_in` | `Vec<u8>` | Empty | Data frame from the computer |
-| `out` | `VecDeque<SerialByte>` | Empty | Scheduled device bytes |
+| `out` | `VecDeque<DeviceByte>` | Empty | Scheduled device bytes. `DeviceByte { value, start, bit_cycles }` is private to `SioBus`; its last cycle is `start + 10 * bit_cycles`. |
 
 ```rust
 enum BusPhase {
@@ -641,7 +645,7 @@ The test helpers make these images. The requirements give the same definitions.
 | --- | --- | --- |
 | Offset pattern cartridge | 8 KB or 16 KB. Byte `i` holds `(i >> 8) & $FF`. | REQ-600, REQ-604, REQ-605, REQ-606 |
 | Bank pattern cartridge | MaxFlash 1Mbit or 8Mbit. Each byte of bank `k` holds `k`. | REQ-607 to REQ-609 |
-| Fill cartridge | All bytes `$CC` (8 KB, 16 KB) or `$DD` (MaxFlash 1Mbit). BASIC ROM: 8192 bytes of `$BB`. | REQ-601, REQ-602 |
+| Fill cartridge | All bytes `$CC` (8 KB, 16 KB) or `$DD` (MaxFlash 1Mbit). BASIC ROM: 8192 bytes of `$BB`. | REQ-206, REQ-210 |
 | CAR file | 16-byte header (`CART`, type, checksum, `00 00 00 00`) and the offset pattern data. | REQ-605, REQ-606 |
 | SD test image | 720 x 128. Each byte of sector `n` holds `n & $FF`. | REQ-615 to REQ-624, REQ-631 |
 | ATR pattern files | SD, ED and DD files of REQ-625. Data byte `i` holds `i & $FF`. | REQ-625 to REQ-638 |
@@ -650,11 +654,13 @@ The test helpers make these images. The requirements give the same definitions.
 ### Unit test method for the SIO bus
 
 The SIO unit tests drive `SioBus` directly. The helper `send_frame(bus, bytes, t, bit_cycles)`
-calls `set_command_line(true, t)`, then `host_byte` for each byte with no gap, then
+calls `set_command_line(true, t)`, then `host_byte` with a `pokey::SerialByte` for each byte
+(`start_cycle` and `end_cycle = start_cycle + 10 * bit_cycles`, no gap), then
 `set_command_line(false, ...)` after a delay that the test gives (default 1,600 cycles). The
-helper `device_bytes(bus, until)` calls `take_device_byte` until the cycle `until` and gives
-each `SerialByte` with its `start` and `bit_cycles`. A write-type test sends its data frame
-with `host_byte` after the first ACK. The timing tests compare `start` and `end()` values. A
+helper `device_bytes(bus)` gives `scheduled_device_bytes()`. One test per direction also
+decodes `data_in_level` cycle by cycle, to prove that the line level and the schedule agree.
+A write-type test sends its data frame with `host_byte` after the first ACK. The timing
+tests compare the start cycles and the last cycles. A
 timing test runs for NTSC and for PAL when its requirement names both.
 
 ### System test method for cartridges
@@ -681,9 +687,9 @@ the test code writes (usually `$A5` at `$0600`), with the frame limit of the req
 | Requirement | Test |
 | --- | --- |
 | REQ-600 | `crates/harness/tests/media.rs` `req600_std8k_maps_left_window` (criteria 1, 2), `req600_std16k_maps_both_windows` (3, 4) |
-| REQ-601 | `crates/harness/tests/media.rs` `req601_cart_over_basic_over_ram` (1-3), `req601_disabled_cart_shows_basic_or_ram` (4, 5) |
-| REQ-602 | `crates/harness/tests/media.rs` `req602_write_to_cart_rom_ignored` (1, 2), `req602_maxflash_disabled_write_goes_to_ram` (3) |
-| REQ-603 | `crates/harness/tests/media.rs` `req603_trig3_follows_rd5` (1-4), `req603_trig3_follows_bank_switch` (5) |
+| REQ-210 | `crates/harness/tests/media.rs` `cart_over_basic_over_ram` (1, 2, 4), `disabled_cart_shows_basic_or_ram` (2, 4, with REQ-608); also the `system.md` tests |
+| REQ-206 | `crates/harness/tests/media.rs` `write_to_cart_rom_ignored` (3, 5), `disabled_cart_write_goes_to_ram` (6, with REQ-608); also the `system.md` tests |
+| REQ-232 | `crates/harness/tests/media.rs` `trig3_follows_rd5` (1, 2, 4, 7), `trig3_follows_bank_switch` (3, 8, with REQ-608); also the `system.md` tests |
 | REQ-604 | `media.rs` `req604_raw_sizes` (1, 2), `req604_raw_bad_sizes` (3) |
 | REQ-605 | `media.rs` `req605_car_type1` (1), `req605_car_type2` (2), `req605_car_unused_bytes_ignored` (3). The reads use `Cartridge::read`. |
 | REQ-606 | `media.rs` `req606_car_errors` (1-5), `req606_car_error_order` (6) |
@@ -728,13 +734,12 @@ model is enabled. The REQ-608 and REQ-609 tests wait for the MaxFlash kinds in t
 
 ## Open issues
 
-1. POKEY interface. The POKEY design must agree with `SerialByte`, `host_byte` and
-   `take_device_byte`. The POKEY side sets `SERIN`, the serial interrupts and the receive tone.
-2. PIA interface. The PIA module must give the CB2 output level and tell the machine when it
-   changes.
-3. ANTIC DMA reads. `DmaMemory::dma_read` takes `&self` and gives `$FF` for `$D000-$D7FF`. To
-   satisfy REQ-609, a DMA read of `$D5xx` must call `Cartridge::access_control`. The trait must
-   take `&mut self`, or ANTIC must report the DMA address to the machine.
+1. Resolved by OI-038: bytes from POKEY use `pokey::SerialByte` and `host_byte`; data to
+   POKEY is the `data_in_level` line level.
+2. Resolved: the PIA gives the CB2 level with `Pia::cb2()` (`system.md`). The machine calls
+   `set_command_line(!pia.cb2(), now)` when the level changes.
+3. Resolved by OI-002: `DmaMemory::dma_read` takes `&mut self`, and a DMA read of `$D5xx`
+   calls `Cartridge::access_control`.
 4. Loader memory. The XEX loader uses `$0700-$08FF`. A later version can move itself to the top
    of RAM. The zero-page bytes that the loader uses are not chosen yet.
 5. RESET after an XEX start. The OS jumps through `DOSVEC` again. If the program did not change

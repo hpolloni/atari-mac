@@ -129,6 +129,7 @@ With `UPDATE_GOLDEN=1`, it writes the reference file instead (REQ-026).
 | `tests/pokey_audio.rs` | POKEY tones and filters through the machine and BASIC | REQ-503, REQ-511, REQ-539 |
 | `tests/pokey_serial.rs` | OS SIO receive through the POKEY serial port | REQ-526 |
 | `tests/pokey_paddle.rs` | Paddle values read by BASIC | REQ-534 |
+| `tests/antic_cpu.rs` | ANTIC and the real CPU together: the NMI start cycles of REQ-334 with the CPU interrupt polling of REQ-116 to REQ-118 | REQ-334 (OI-017) |
 | `tests/harness_self_test.rs` | Tests of the helpers themselves | REQ-003, REQ-020, REQ-021, REQ-024 |
 
 A test that waits for a chip that is not implemented yet has the attribute

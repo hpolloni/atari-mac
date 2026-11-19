@@ -104,31 +104,19 @@ impl Cartridge {
 }
 ```
 
-### ANTIC (contract that the ANTIC design must give)
+### ANTIC
+
+The machine uses the ANTIC interface of `antic.md` ("Functions", "Call order", "Interface
+with GTIA"), decided in OI-001: `Antic::tick(&mut self, mem: &mut impl DmaMemory) ->
+CycleOutput`, then the CPU access, then `Antic::end_cycle(data_bus)` and
+`Gtia::clock(&out, data_bus)`. `CycleOutput` gives `halt`, `rdy`, `nmi`, `frame_done`,
+`line` and `cycle`.
 
 ```rust
-/// What ANTIC does in one machine cycle.
-pub struct AnticCycle {
-    /// ANTIC uses the bus (DMA or refresh). The CPU does not run in this cycle.
-    pub halt: bool,
-    /// Level of RDY (false while a WSYNC wait is active).
-    pub rdy: bool,
-    /// Level of the NMI line.
-    pub nmi: bool,
-    /// The last cycle of the frame.
-    pub frame_done: bool,
-}
-
-impl Antic {
-    /// Runs one machine cycle. DMA reads go through `mem` (REQ-213).
-    pub fn tick(&mut self, mem: &impl DmaMemory, gtia: &mut Gtia) -> AnticCycle;
-    /// Reset: clears NMIEN, DMACTL and the playfield DMA clock (HRM 4.1).
-    pub fn reset(&mut self);
-}
-
 pub trait DmaMemory {
-    /// A DMA read with the CPU memory map and no side effects.
-    fn dma_read(&self, addr: u16) -> u8;
+    /// A DMA read with the CPU memory map (REQ-213). The only side effect: a read of
+    /// `$D500-$D5FF` calls `Cartridge::access_control` (REQ-609, OI-002).
+    fn dma_read(&mut self, addr: u16) -> u8;
 }
 ```
 
@@ -208,7 +196,7 @@ machine runs.
 
 ### Memory bus (REQ-202, REQ-203)
 
-In each machine cycle, `AnticCycle::halt` decides the bus master. If `halt` is true, ANTIC
+In each machine cycle, `CycleOutput::halt` decides the bus master. If `halt` is true, ANTIC
 has the bus and the CPU does not tick. Otherwise the CPU makes one access. ANTIC never
 writes (HRM 2.3). The CPU bus sends each access to the device of its address, with all side
 effects, also for dummy accesses and repeated RDY reads.
@@ -249,9 +237,10 @@ by ANTIC, uses the new map.
 
 ### ANTIC DMA (REQ-213)
 
-`Machine` implements `DmaMemory` with the same decode as the CPU, through
-`Cartridge::peek` and without device side effects. The value of a DMA read in
-`$D000-$D7FF` is an ANTIC design decision.
+`Machine` implements `DmaMemory` with the same decode as the CPU. A DMA read of
+`$8000-$BFFF` uses `Cartridge::read`. A DMA read of `$D500-$D5FF` calls
+`Cartridge::access_control` (REQ-609, OI-002), then updates `TRIG3` from `rd5()`. A DMA
+read of the other I/O pages in `$D000-$D7FF` has no side effect and gives `$FF`.
 
 ### Power-on (REQ-215, REQ-216)
 
@@ -338,14 +327,24 @@ always `true` (HRM 2.8).
 
 One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
 
-1. `antic.tick(&memory, &mut gtia)` gives `AnticCycle` for cycle `c`. ANTIC DMA reads use
-   the memory map as it was at the end of cycle `c - 1`.
-2. `cpu.set_nmi(out.nmi)` and `cpu.set_irq(pokey.irq() || pia.irq())`. The POKEY and PIA
-   levels are the levels from the end of cycle `c - 1`.
-3. If `out.halt` is false: `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
-   `portb_pins`. A PIA write updates `portb_pins` at the end of the access.
-4. `pokey.tick()`, `pia.tick()`, and the GTIA work for cycle `c`.
-5. `cycles += 1`. If `out.frame_done` is true, the frame counter increments.
+1. `let out = antic.tick(&mut memory)` gives the `CycleOutput` of cycle `c`. ANTIC DMA
+   reads use the memory map as it was at the end of cycle `c - 1`.
+2. `pokey.set_serial_in(sio.data_in_level(c))`, then `pokey.tick()`. POKEY runs before the
+   CPU access, so a POKEY register access in cycle `c` sees the events of cycle `c`
+   (`pokey.md`, call contract).
+3. `cpu.set_nmi(out.nmi)` and `cpu.set_irq(pokey.irq() || pia.irq())`. The POKEY level is
+   the level of cycle `c`. The PIA level is the level from the end of cycle `c - 1`.
+4. If `out.halt` is false: `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
+   `portb_pins`. A PIA write updates `portb_pins` at the end of the access. A GTIA write
+   also calls `pokey.set_speaker(gtia.speaker())`.
+5. The machine finds the data bus value of the cycle (`antic.md`, "Call order", step 3),
+   then calls `antic.end_cycle(data_bus)` and `gtia.clock(&out, data_bus)`.
+6. `pia.tick()`. Then each byte from `pokey.take_serial_byte()` goes to `sio.host_byte`. If
+   the PIA CB2 level changed in this cycle, `sio.set_command_line(!pia.cb2(), c)`.
+7. `cycles += 1`. If `out.frame_done` is true, the frame counter increments.
+
+This is the only definition of the machine cycle order. The other design documents refer
+to it.
 
 A scan line has 114 machine cycles (0 to 113). A frame has 262 lines (NTSC) or 312 lines
 (PAL). `run_frame` runs exactly `cycles_per_frame` cycles when it starts at the first cycle
@@ -440,9 +439,8 @@ The boot tests in `crates/harness/tests/boot.rs` need the ROM files from
    agrees with it.
 7. The PLP+SEI case of the CPU (see [cpu.md](cpu.md), "Open issues") can change the IRQ
    timing of PIA interrupt handlers, but no change to the PIA is expected.
-8. REQ-217 criterion 4 compares the GTIA and POKEY states before and after the Reset
-   button. The GTIA and POKEY designs must give a state that a test can copy and compare
-   (for example `Clone` and `PartialEq`). REQ-232 needs `GRACTL` bit 2 to turn the trigger
-   latch off.
-9. REQ-216 criterion 3 needs `pokey.reset` at power-on, but HRM 5.7 says that POKEY has no
-   reset pin. The POKEY design must say which POKEY state `reset` sets (project decision).
+8. Resolved by OI-005: each chip type derives `Debug`, `Clone` and `PartialEq`, so a test
+   can copy a chip and compare it. REQ-232 needs `GRACTL` bit 2 to turn the trigger latch
+   off, which the GTIA design gives (REQ-436).
+9. Resolved by OI-009: `Pokey::reset` sets the power-on state of REQ-501 (the same state as
+   `Pokey::new`). The machine calls it only at power-on, never for the Reset button.

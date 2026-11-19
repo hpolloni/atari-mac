@@ -37,19 +37,21 @@ A module talks to another module only through the public interface in its design
 ## Scheduling model
 
 The unit of time is one machine cycle (one CPU clock, 114 in each scanline). The machine
-runs all chips one cycle at a time. In each machine cycle `c`, it does these steps in this
-order (the exact contracts are in [cpu.md](cpu.md), [antic.md](antic.md),
-[gtia.md](gtia.md), [pokey.md](pokey.md) and [system.md](system.md)):
+runs all chips one cycle at a time. The exact order of the calls in one machine cycle is in
+[system.md](system.md), "Timing". In short:
 
-1. ANTIC calculates cycle `c`: its DMA access, if any, the halt signal (DMA) and the RDY
-   signal (`WSYNC`), and the NMI line.
-2. The machine gives the NMI line level from ANTIC and the IRQ line level from POKEY and
-   the PIA to the CPU (`Cpu::set_nmi`, `Cpu::set_irq`).
-3. If ANTIC uses the bus for DMA in cycle `c`, the CPU does not run in this cycle.
-   Otherwise the machine calls `Cpu::tick(bus, rdy)`. The CPU makes exactly one bus access.
-   When RDY is low, the 6502 repeats a read cycle, but it completes a write cycle (HRM 4.9).
-4. GTIA, POKEY and the PIA run cycle `c`. GTIA gets the AN codes and the data bus value of
-   the cycle.
+1. ANTIC calculates the cycle: its DMA access, the halt signal (DMA), the RDY signal
+   (`WSYNC`) and the NMI line.
+2. POKEY runs the cycle, with the SIO DATA IN level from the SIO bus.
+3. The CPU gets the NMI and IRQ line levels. If ANTIC does not halt it, the CPU makes
+   exactly one bus access. When RDY is low, the 6502 repeats a read cycle, but it completes
+   a write cycle (HRM 4.9).
+4. ANTIC and GTIA get the data bus value of the cycle. GTIA makes two color clocks.
+5. The PIA runs the cycle. The serial bytes from POKEY and the SIO command line go to the
+   SIO bus.
+
+Each chip type derives `Debug`, `Clone` and `PartialEq`, so that a test can copy a chip and
+compare it (OI-005).
 
 The CPU polls the interrupt lines in the cycles where the real 6502 polls them, so the
 interrupt timing of HRM 3.4 and 4.8 is exact. A jammed CPU still makes its bus reads, and

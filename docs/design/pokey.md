@@ -36,6 +36,8 @@ pub struct Pokey { /* see State */ }
 pub struct SerialByte {
     /// The 8 data bits.
     pub value: u8,
+    /// The POKEY cycle (see `Pokey::cycle`) on which the start bit began.
+    pub start_cycle: u64,
     /// The POKEY cycle (see `Pokey::cycle`) on which the stop bit ended.
     pub end_cycle: u64,
 }
@@ -130,9 +132,14 @@ pub const fn ascii_to_kbcode(c: char) -> Option<u8>;
 5. Input functions (`set_key`, `set_shift`, `set_control`, `set_break`, `set_pot`,
    `set_serial_in`, `set_serial_clock_in`) can be called between two `tick` calls. The new
    level applies from the next `tick`.
-6. The SIO bus model calls `set_serial_in` when the SIO DATA IN level changes. It reads
-   `serial_out` or calls `take_serial_byte` after each `Machine::step`. The FIFO of
+6. Serial data flow (OI-038). In each machine cycle, before `tick`, the machine calls
+   `set_serial_in(sio.data_in_level(now))`. After `tick`, it moves each byte from
+   `take_serial_byte` to `SioBus::host_byte`. `Pokey::cycle` counts the `tick` calls since
+   power-on, so it equals the machine cycle count that the SIO bus uses. The FIFO of
    `take_serial_byte` holds 64 bytes. When it is full, the oldest byte is lost.
+7. Force break (OI-030). POKEY does not put a byte into the `take_serial_byte` FIFO if
+   `SKCTL` bit 7 was 1 in any cycle of that byte's frame, because SIO DATA OUT was 0 and no
+   device can receive the byte (REQ-532).
 7. The frontend calls `Machine::drain_audio`, which calls `drain_samples`, once per frame.
    The sample buffer grows until the call. It has no maximum size.
 8. `Machine` keeps these wrappers: `key_down`, `key_up`, `set_shift`, `set_control`,
@@ -200,6 +207,8 @@ All state is in `Pokey`. Power-on values are the values after `new` and `reset` 
 | `in_busy` | `bool` | `false` | `SKSTAT` bit 1 is 0 |
 | `ser_in_clk`, `ser_out_clk` | `bool` | `false` | Serial clock flip-flops |
 | `sent` | `VecDeque<SerialByte>` | empty | Sent bytes for the SIO model |
+| `out_start_cycle` | `u64` | 0 | Cycle where the start bit of the current output frame began |
+| `out_break_seen` | `bool` | `false` | `SKCTL` bit 7 was 1 in a cycle of the current output frame (OI-030) |
 | `speaker` | `bool` | `false` | Console speaker level |
 | `nonlinear` | `bool` | `false` | REQ-541 option |
 | `clock_hz`, `sample_rate` | `u32` | from `new` | 1789773 (NTSC) or 1773447 (PAL); host rate |
@@ -399,7 +408,8 @@ the bit on SIO DATA OUT. On each rising edge of the output clock:
 
 1. If `out_bits > 0`: decrement `out_bits`. If it is still above 0, set `out_level` to the
    next bit of `out_shift`. If it is 0, the stop bit cell has ended: push a `SerialByte`
-   with the current cycle to `sent`.
+   with the start cycle of the frame and the current cycle to `sent`, unless force break
+   was on during the frame (call contract item 7).
 2. Then, if `out_bits == 0` and `serout_pending`: load `out_shift` with the start bit, the 8
    bits of `serout` and the stop bit. Set `out_level = false` (start bit), `out_bits = 10`
    and `serout_pending = false`. Latch `IRQST` bit 4.
@@ -670,8 +680,7 @@ model of REQ-600 and later.
     reload for both timers is at T+9". The linked period of N + 7 and Figure 8 give a reload
     on T+10 (last `AUDF` write on T+9). This design uses T+10. REQ-506 criterion 7 checks only
     the fire cycles, which do not depend on this choice.
-15. With force break (`SKCTL` bit 7 = 1), the shift register still completes each byte, so
-    `take_serial_byte` reports it, but SIO DATA OUT stays 0. The SIO bus model must use the
-    line level, or ignore reported bytes while force break is on (REQ-532).
+15. Resolved by OI-030: a byte sent while force break is on is not reported by
+    `take_serial_byte` (call contract item 7).
 16. `Pokey::new` takes a sample rate of 8000 to 192000 Hz (REQ-538). The behavior for a rate
     outside this range (panic, clamp or error) is not decided.

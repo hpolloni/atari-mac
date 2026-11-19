@@ -7,14 +7,14 @@ section, set the status to `Decided`, and change the affected requirements.
 | Item | Title | Area | Status |
 | --- | --- | --- | --- |
 | [OI-001](OI-001.md) | ANTIC-to-GTIA cycle interface | ANTIC, GTIA | Decided |
-| [OI-002](OI-002.md) | Side effects of ANTIC DMA reads in $D500-$D5FF | System, media | Open |
-| [OI-003](OI-003.md) | Cartridge interface signatures | System, media | Open |
-| [OI-004](OI-004.md) | Duplicate cartridge requirements | System, media | Open |
-| [OI-005](OI-005.md) | Chip state that a test can compare | System, GTIA, POKEY, ANTIC | Open |
+| [OI-002](OI-002.md) | Side effects of ANTIC DMA reads in $D500-$D5FF | System, media | Decided |
+| [OI-003](OI-003.md) | Cartridge interface signatures | System, media | Decided |
+| [OI-004](OI-004.md) | Duplicate cartridge requirements | System, media | Decided |
+| [OI-005](OI-005.md) | Chip state that a test can compare | System, GTIA, POKEY, ANTIC | Decided |
 | [OI-006](OI-006.md) | Values derived from HRM charts that are images | ANTIC, GTIA | Open |
 | [OI-007](OI-007.md) | IRQ after PLP followed by SEI | CPU | Open |
 | [OI-008](OI-008.md) | REQ-210 covers $8000-$9FFF | System | Open |
-| [OI-009](OI-009.md) | POKEY reset at power-on | System, POKEY | Open |
+| [OI-009](OI-009.md) | POKEY reset at power-on | System, POKEY | Decided |
 | [OI-010](OI-010.md) | Cycle of the CA2/CB2 pulse | System | Open |
 | [OI-011](OI-011.md) | Reads of unmapped I/O | System | Open |
 | [OI-012](OI-012.md) | PAL vertical sync lines | ANTIC | Open |
@@ -22,7 +22,7 @@ section, set the status to `Decided`, and change the affected requirements.
 | [OI-014](OI-014.md) | Line buffer when playfield DMA is off | ANTIC | Open |
 | [OI-015](OI-015.md) | Extent of the hi-res bug at vertical blank | ANTIC | Open |
 | [OI-016](OI-016.md) | PENH and PENV addresses | ANTIC | Open |
-| [OI-017](OI-017.md) | NMI start cycle contract with the CPU | ANTIC, CPU | Open |
+| [OI-017](OI-017.md) | NMI start cycle contract with the CPU | ANTIC, CPU | Decided |
 | [OI-018](OI-018.md) | Playfield DMA on cycle 105 | ANTIC | Open |
 | [OI-019](OI-019.md) | Fifth player priority | GTIA | Open |
 | [OI-020](OI-020.md) | Artifacting scope | GTIA, frontend | Open |
@@ -35,7 +35,7 @@ section, set the status to `Decided`, and change the affected requirements.
 | [OI-027](OI-027.md) | Audio sample rate out of range | POKEY | Open |
 | [OI-028](OI-028.md) | Linked timer reload cycle | POKEY | Open |
 | [OI-029](OI-029.md) | Force break and the SIO bus model | POKEY, media | Open |
-| [OI-030](OI-030.md) | 65XE keyboard layout | POKEY | Open |
+| [OI-030](OI-030.md) | 65XE keyboard layout | POKEY | Decided |
 | [OI-031](OI-031.md) | POKEY choices where the HRM conflicts with itself | POKEY | Open |
 | [OI-032](OI-032.md) | CAR types 41 and 42 | Media | Open |
 | [OI-033](OI-033.md) | ED Percom block and Format $21 | Media | Open |
@@ -43,3 +43,5 @@ section, set the status to `Decided`, and change the affected requirements.
 | [OI-035](OI-035.md) | Bank-switched cartridge types without a source | Media | Open |
 | [OI-036](OI-036.md) | File format details marked to verify | Media | Open |
 | [OI-037](OI-037.md) | SIO timing statements that conflict | Media | Open |
+| [OI-038](OI-038.md) | POKEY to SIO bus serial interface | POKEY, media | Decided |
+| [OI-039](OI-039.md) | Machine cycle order and the ANTIC contract in system.md | System, ANTIC, POKEY, GTIA | Decided |

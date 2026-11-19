@@ -21,10 +21,11 @@ Out of scope: 130XE ANTIC banking, the reset NMI of the 400/800 (the 65XE does n
 ### Types
 
 ```rust
-/// Side-effect-free memory reads for ANTIC DMA. The memory map is the same as the CPU's.
+/// Memory reads for ANTIC DMA. The memory map is the same as the CPU's (REQ-213).
 pub trait DmaMemory {
-    /// Reads one byte for DMA. This must not change any device state.
-    fn dma_read(&self, addr: u16) -> u8;
+    /// Reads one byte for DMA. The only side effect: a read of `$D500-$D5FF` reaches the
+    /// cartridge control (REQ-609, OI-002).
+    fn dma_read(&mut self, addr: u16) -> u8;
 }
 
 /// One 3-bit code on the ANTIC-to-GTIA bus (REQ-307, HRM 6.9 Table 17).
@@ -101,7 +102,7 @@ impl Antic {
     pub fn write(&mut self, reg: u8, value: u8);
 
     /// Runs one machine cycle (see "Call order").
-    pub fn tick(&mut self, mem: &impl DmaMemory) -> CycleOutput;
+    pub fn tick(&mut self, mem: &mut impl DmaMemory) -> CycleOutput;
 
     /// Ends the machine cycle. `data_bus` is the value on the data bus in this cycle.
     pub fn end_cycle(&mut self, data_bus: u8);
@@ -131,7 +132,7 @@ impl Antic {
 
 The machine calls ANTIC exactly once per machine cycle, in this order. `L` is the scan line and `C` is the cycle.
 
-1. `let out = antic.tick(&mem);` ANTIC does the work of cycle `C` of scan line `L`. It does the DMA read through `mem` and computes `halt`, `rdy`, `nmi` and `video`. Then it advances its counters to the next cycle.
+1. `let out = antic.tick(&mut mem);` ANTIC does the work of cycle `C` of scan line `L`. It does the DMA read through `mem` and computes `halt`, `rdy`, `nmi` and `video`. Then it advances its counters to the next cycle.
 2. The CPU part of the cycle:
    - If `out.halt` is `true`, the CPU does no bus cycle.
    - If `out.rdy` is `false` and the next CPU bus cycle is a read, the CPU does the read again on the bus, but does not advance.
@@ -529,7 +530,7 @@ Machine unit tests are in `crates/atari-core/src/machine.rs`. They are necessary
 | REQ-331 | `antic.rs` `nmist_low_bits_read_one` (1), `dli_clears_vbi_bit` (2), `vbi_clears_dli_bit` (3), `nmist_set_when_disabled` (4), `nmires_clears_status` (5), `dli_bit_stays_set` (6), `nmist_bit5_stays_clear` (7) |
 | REQ-332 | `antic.rs` `dli_on_last_line_of_mode_line` (1), `dli_masked_by_nmien` (2), `dli_on_blank_line` (3), `dli_on_shortened_line` (4), `dli_on_jump` (5) |
 | REQ-333 | `antic.rs` `vbi_on_line_248` (1), `vbi_masked_by_nmien` (2); `crates/harness/tests/antic_nmi.rs` `os_vbi_increments_rtclok` (3) |
-| REQ-334 | `antic.rs` `nmist_visible_from_cycle_7` (1), `nmien_enable_on_7_delays_nmi` (3), `nmien_enable_on_8_too_late` (4), `nmien_disable_on_8_prevents` (5), `nmires_does_not_cancel` (6); `crates/harness/tests/antic_nmi.rs` `nmi_sequence_start_cycles` (2, 3) |
+| REQ-334 | `antic.rs` `nmist_visible_from_cycle_7` (1), `nmien_enable_on_7_delays_nmi` (3), `nmien_enable_on_8_too_late` (4), `nmien_disable_on_8_prevents` (5), `nmires_does_not_cancel` (6); `crates/harness/tests/antic_nmi.rs` `nmi_sequence_start_cycles` (2, 3); `crates/harness/tests/antic_cpu.rs` `nmi_start_cycles_with_real_cpu` (joint ANTIC and CPU test, OI-017) |
 | REQ-335 | `antic.rs` `irq_on_cycle_4_loses_nmi` (3); `crates/harness/tests/antic_nmi.rs` `brk_on_cycle_4_skips_vbi_handler` (1), `brk_on_cycle_3_or_5_keeps_vbi_handler` (2) |
 | REQ-336 | `antic.rs` `wsync_rdy_window` (5), `halt_on_cycles_105_106_setups` (supports 3, 4); `crates/harness/tests/antic_wsync.rs` `wsync_next_instruction_on_104` (1), `wsync_blocked_next_cycle_starts_on_105` (2), `wsync_delayed_by_playfield_105` (3), `wsync_delayed_by_refresh_105` (4), `wsync_delayed_by_refresh_106` (4) |
 | REQ-337 | `antic.rs` `wsync_write_on_104_waits_next_line` (supports 1), `wsync_windows_join` (supports 2, 3); `crates/harness/tests/antic_wsync.rs` `wsync_write_on_104_next_line` (1), `inc_wsync_ignores_dma` (2), `inc_wsync_on_103_104` (3), `wsync_write_on_113` (4) |
