@@ -6,7 +6,7 @@ This document tells how the emulator satisfies the ANTIC requirements REQ-300 to
 
 The module is `crates/atari-core/src/antic.rs`. It contains:
 
-- The ANTIC registers (REQ-300 to REQ-303, REQ-331, REQ-338, REQ-342).
+- The ANTIC registers (REQ-300 to REQ-303, REQ-331, REQ-338). The light pen (REQ-342) is withdrawn (OI-016).
 - The scan line and frame counters (REQ-304, REQ-305).
 - The display list processor (REQ-319 to REQ-330).
 - The DMA scheduler: display list, playfield, player/missile and refresh (REQ-309 to REQ-312, REQ-339 to REQ-341).
@@ -107,9 +107,6 @@ impl Antic {
     /// Ends the machine cycle. `data_bus` is the value on the data bus in this cycle.
     pub fn end_cycle(&mut self, data_bus: u8);
 
-    /// Sets the light pen input. `true` = asserted (REQ-342).
-    pub fn set_light_pen(&mut self, asserted: bool);
-
     /// The CPU started an IRQ or BRK interrupt sequence in this cycle (REQ-335).
     pub fn irq_sequence_started(&mut self);
 
@@ -171,7 +168,6 @@ The machine must make these changes to the draft code in `machine.rs`:
 3. `Machine::reset_key` calls `antic.reset()`. On the XL/XE, the RESET key also resets ANTIC (HRM 4.1).
 4. `Machine::cold_reset` calls `antic.reset()`. It does not set the scan line and cycle to 0. `Antic::new` sets them to 0 (REQ-303).
 5. The NMI edge in `out.nmi` goes to the CPU in the same cycle. The CPU starts the NMI sequence at the first instruction boundary after that cycle (REQ-334).
-6. The machine calls `antic.set_light_pen(any_trigger_pressed)` when the joystick trigger inputs change (HRM 7.4).
 
 ### Interface with GTIA
 
@@ -216,7 +212,6 @@ All state is in `struct Antic`. Sizes are the sizes in hardware. The Rust type c
 | `nmien` | 2 bits | 0 | Cleared | `NMIEN` bits 7-6 |
 | `nmist` | 3 bits | `%011` (reads `$7F`) | Kept | `NMIST` bits 7-5 |
 | `penh`, `penv` | 8 bits each | `$00`, `$FF` | Kept | Light pen latches |
-| `light_pen_in` | 1 bit | 0 | Kept | Last light pen input level |
 | `ir` | 8 bits | 0 | Kept | Instruction register |
 | `prev_vs` | 1 bit | 0 | Kept | Bit 5 of the last mode line (kept across vertical blank) |
 | `row` | 4 bits | 0 | Kept | Row counter |
@@ -435,9 +430,9 @@ DMA on cycle 105 or 106 delays the CPU restart without special code, because `ha
 - `$00` on cycles 112 and 113 of the last scan line.
 - Else `line >> 1`.
 
-### Light pen (REQ-342)
+### Light pen (REQ-342, withdrawn)
 
-When `set_light_pen` changes the input from `false` to `true`, ANTIC sets `penh = 2 × cycle` and `penv = (line >> 1)` (with the VCOUNT rule above). `2 × cycle` is a project decision. It gives values 0-226.
+The light pen is a non-goal (OI-016). `PENH` and `PENV` keep their power-on values (REQ-301). The `set_light_pen` input is removed.
 
 ### Hi-res bug (REQ-346)
 
@@ -479,7 +474,6 @@ All start and stop events move one cycle later for each 2 of `HSCROL` on scrolle
 
 ### Test methods
 
-Unit tests are in `crates/atari-core/src/antic.rs` (`#[cfg(test)] mod tests`). They call `tick`, `read`, `write`, `end_cycle`, `reset`, `set_light_pen` and `irq_sequence_started` directly, between two ticks. They use these helpers:
 
 - **Fake memory.** A fake `DmaMemory` holds 64 KB. It logs each `dma_read` as `(cycle, address)`. It uses interior mutability (`RefCell`), because `dma_read` takes `&self`. A test finds the address of each fetch from this log.
 - **Output record.** The test records the `CycleOutput` of each cycle. "`out.dma` is X on cycle t" means the record of cycle t.
@@ -538,7 +532,6 @@ Machine unit tests are in `crates/atari-core/src/machine.rs`. They are necessary
 | REQ-339 | `antic.rs` `missile_dma_on_cycle_0` (1), `player_dma_forces_missile_dma` (2), `player_dma_cycles_2_to_5` (3), `no_pm_dma_in_vblank` (4), `pm_dma_disable_two_cycles_ahead` (5), `pm_dma_enable_two_cycles_ahead` (6), `pm_dma_data_on_bus` (7) |
 | REQ-340 | `antic.rs` `pm_address_two_line` (1), `pm_address_one_line` (2), `pm_two_line_repeats` (3), `pmbase_bit2_latent` (4) |
 | REQ-341 | `antic.rs` `refresh_cycles_on_blank_line` (1), `refresh_in_mode_2_first_line` (2), `refresh_narrow_mode_2_two_cycles` (3), `refresh_no_memory_read` (4) |
-| REQ-342 | `antic.rs` `light_pen_latches_on_edge` (1), `light_pen_penv_next_line_after_111` (2), `light_pen_penh_is_two_times_cycle` (3), `light_pen_held_does_not_relatch` (4), `light_pen_kept_across_vblank_and_reset` (5); `crates/harness/tests/antic_registers.rs` `joystick_trigger_latches_light_pen` (6) |
 | REQ-343 | `antic.rs` `line_buffer_never_cleared` (1), `line_buffer_partial_load_keeps_tail` (2), `line_buffer_replay_without_dma` (3), `line_buffer_reinterpreted_by_mode` (4), `line_buffer_follows_left_border` (5) |
 | REQ-344 | `antic.rs` `width_change_narrow_to_normal_gives_144` (1), `late_start_ignored` (2), `early_start_after_deadline_no_playfield` (3), `early_stop_extends_to_wide` (4), `playfield_off_mid_line_counts_on` (5), `playfield_off_before_start_no_change` (6), `hscrol_bit0_mid_line` (7), `invert_state_kept_while_dma_off` (8, after the decision in REQ-344 Notes) |
 | REQ-345 | `antic.rs` `abnormal_dma_hscrol_0_to_4_mode_8` (1), `overlap_uses_address_and` (2), `blank_line_clears_dma_clock` (3), `mode_8_after_scrolled_mode_2_bug` (4), `narrow_width_no_mode_8_bug` (5), `line_buffer_counter_63_states` (6) |
@@ -593,8 +586,6 @@ These tests are new in this revision of the test plan. Each line tells what the 
 - `pm_dma_data_on_bus`: checks `out.halt` and `out.dma_data` on the P/M DMA cycles against the fake memory.
 - `refresh_narrow_mode_2_two_cycles`: first scan line of a narrow mode 2 line; checks refresh on cycles 25 and 90 only.
 - `refresh_no_memory_read`: checks that the fake memory log has no read on refresh cycles.
-- `light_pen_penh_is_two_times_cycle`: latches on each cycle 0-113; checks `PENH` = 2 × cycle.
-- `joystick_trigger_latches_light_pen`: presses the trigger of port 1 and then of port 2 on scan line 100; checks `PENV` = `$32`.
 - `line_buffer_follows_left_border`: replays a normal mode A buffer with narrow width; checks that B0 starts at `$40`.
 - `playfield_off_before_start_no_change`: writes `DMACTL` = `$20` on cycle 10; checks the memory scan counter and the line buffer.
 - `hires_bug_pal_vsync`: the hi-res bug on PAL; checks `%101` at `$80` on scan lines 275-277.
@@ -612,7 +603,7 @@ These tests are removed, because no acceptance criterion needs them: `crates/har
 2. **Cycle-to-position mapping.** The mapping "cycle C = positions 2C - 2 and 2C - 1" and the fetch-to-display offsets (+8 and +6 color clocks) come from HRM 6.2 and the 6.10 example. They are not stated directly. They must be checked against Altirra test results.
 3. **PAL vertical sync lines.** HRM 4.6 says 275-278, HRM 6.2 says 275-277. This design uses 275-277.
 4. **VSCROL end deadline.** HRM 4.7 says cycle 108, HRM 14.6 says cycle 109. This design uses 108.
-5. **Playfield DMA on cycle 105.** HRM 4.9 and 4.14 allow cycle 105. HRM 4.12 says cycles 105-111 and 0 are suppressed for abnormal DMA. This design allows real DMA up to cycle 105. For abnormal DMA it is not yet decided.
+5. **Playfield DMA on cycle 105.** HRM 4.9 and 4.14 allow cycle 105. HRM 4.12 says cycles 105-111 and 0 are suppressed for abnormal DMA. This design allows real DMA up to cycle 105. Abnormal DMA is suppressed on cycles 105-111 and 0 (OI-018, decided).
 6. **NMI contract with the CPU.** This design sets `out.nmi` on cycle 9 (or 10). The CPU then starts the sequence at the first instruction boundary at or after the next cycle. The CPU design (REQ-100 to REQ-199) must accept this contract, including the IRQ takeover on cycles 5-9.
 7. **DMA reads of I/O addresses.** The HRM does not say what ANTIC DMA reads from `$D000-$D7FF`. The draft `DmaMemory` returns `$FF`. The system design must decide.
 8. **Floating bus value.** The data bus value on refresh cycles and undriven cycles is a system decision (HRM 2.3). XL and some XE machines have pull-ups; others float.

@@ -218,13 +218,12 @@ even color clock.
 
 ### Priority (REQ-424 to REQ-427)
 
-GTIA builds a table in `new`. The index is `PRIOR` bits 0-5 (64 values) and 9 input bits:
-`P0-P3`, `PF0-PF3` and `M5` (any missile while `PRIOR` bit 4 = 1). Each entry is a 9-bit
+GTIA builds a table in `new`. The index is `PRIOR` bits 0-3 and 5 (32 values) and 8 input
+bits: `P0-P3` and `PF0-PF3`. GTIA ignores `PRIOR` bit 4 (OI-019). Each entry is a 9-bit
 mask: `COLPM0-3`, `COLPF0-3`, `COLBK`. The builder uses the equations of HRM 6.7:
 
-- `P0-P3` = player n OR (missile n AND `PRIOR` bit 4 = 0).
-- `PF3` input = playfield `PF3` OR `M5`.
-- `SF0-SF2` also need `/M5` (project decision, see REQ-426).
+- `P0-P3` = player n OR missile n.
+- The fifth player (`PRIOR` bit 4) is a non-goal (OI-019). GTIA ignores `PRIOR` bit 4.
 - The color is the OR of the registers in the mask, or `$00` for an empty mask.
 
 The same builder function is the reference for the unit tests against HRM Table 16.
@@ -234,10 +233,9 @@ The same builder function is the reference for the unit tests against HRM Table 
 - When `PRIOR` bits 6-7 are not `%00`, `hires` is false. A change of bits 6-7 from `%00`
   to another value clears `hires` until the next `%011` code (REQ-432).
 - Pixel `p = ((an[0] & 3) << 2) | (an[1] & 3)`.
-- Mode 9: no playfield input. If `SB` is in the mask, the color is `COLBK | p`. If the
-  fifth player is selected, the color is `COLPF3 | p`.
+- Mode 9: no playfield input. If `SB` is in the mask, the color is `COLBK | p`.
 - Mode 11: no playfield input. If `SB` is in the mask, the color is `COLBK | (p << 4)`.
-  If the fifth player is selected, it is `COLPF3 | (p << 4)`. For `p = 0`, the
+  For `p = 0`, the
   luminance bits are cleared.
 - Mode 10: the even color clock uses `gtia_pixel` (the last pixel) and the odd color
   clock uses `p`. Then `gtia_pixel = p`. `p` in 0-3 sets the input `Pp`. `p` in 4-7 or
@@ -299,7 +297,7 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-409 | `palette.rs` `ntsc_grays`, `ntsc_reference_colors`, `ntsc_round_trip_yuv`, `ntsc_build_matches_table` |
 | REQ-410 | `palette.rs` `pal_grays`, `pal_reference_colors`, `pal_round_trip_angles`, `pal_hue_1_equals_hue_15` |
 | REQ-411 | `palette.rs` `artifact_alternating_rows_are_colored`, `artifact_luma_is_average`, `artifact_solid_row_unchanged`; `src/frontend.rs` `display_filters_off_by_default` |
-| REQ-412 | `palette.rs` `pal_blend_formula`, `pal_blend_reference_rows`; `src/frontend.rs` `display_filters_off_by_default` |
+| REQ-412 | `palette.rs` `pal_blend_formula`, `pal_blend_reference_rows`, `pal_blend_row_0_unchanged` (6); `src/frontend.rs` `display_filters_off_by_default` |
 | REQ-413 | `gtia.rs` `player_bits_msb_first`, `missile_bits_and_colors`, `all_object_colors`, `latch_repeats_without_dma` |
 | REQ-414 | `gtia.rs` `gractl_gates_dma`, `gractl_off_keeps_latch`, `cpu_writes_ignore_gractl`; `crates/harness/tests/gtia.rs` `pm_dma_one_line_resolution` |
 | REQ-415 | `gtia.rs` `vdelay_bit_map`, `vdelay_accepts_odd_lines_only`, `vdelay_ignores_cpu_writes` |
@@ -313,12 +311,11 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-423 | `gtia.rs` `hitclr_clears_all`, `collisions_latch_until_hitclr` |
 | REQ-424 | `gtia.rs` `priority_equations_all_inputs`, `standard_priority_modes` |
 | REQ-425 | `gtia.rs` `priority_mode_0_mixes`, `priority_table_16_without_p5` |
-| REQ-426 | `gtia.rs` `fifth_player_uses_colpf3`, `fifth_player_keeps_collisions`, `fifth_player_keeps_position_and_size`, `priority_table_16_p5_rows` |
 | REQ-427 | `gtia.rs` `multicolor_players_or_colors`, `multicolor_missiles`, `multicolor_keeps_collisions` |
 | REQ-428 | `gtia.rs` `gtia_pixels_pair_even_hpos`, `gtia_mode_ignores_an2`, `gtia_mode_ignores_hires`; `crates/harness/tests/gtia.rs` `gtia_mode_pixels_from_antic` |
-| REQ-429 | `gtia.rs` `mode_9_luminance`, `mode_9_players_on_top`, `mode_9_fifth_player`, `mode_9_no_playfield_collisions` |
+| REQ-429 | `gtia.rs` `mode_9_luminance`, `mode_9_players_on_top`, `mode_9_no_playfield_collisions` |
 | REQ-430 | `gtia.rs` `mode_10_register_map`, `mode_10_delay_and_border`, `mode_10_wide_right_edge`, `mode_10_collisions` |
-| REQ-431 | `gtia.rs` `mode_11_hues`, `mode_11_players_on_top`, `mode_11_fifth_player`, `mode_11_no_playfield_collisions` |
+| REQ-431 | `gtia.rs` `mode_11_hues`, `mode_11_players_on_top`, `mode_11_no_playfield_collisions` |
 | REQ-432 | `gtia.rs` `pseudo_mode_e_after_mid_line_prior` |
 | REQ-433 | `gtia.rs` `mode_10_bak_mutes_pixel` |
 | REQ-434 | `gtia.rs` `write_delays_table_18`, `write_delay_base_other_cycle`; `crates/harness/tests/gtia.rs` `mid_line_colbk_change` |
@@ -354,8 +351,7 @@ The tests that this list adds or changes do these checks:
 - `size_change_after_image`: changes `SIZEP0` after the image and compares the row with a row with no write.
 - `collisions_ignore_colors_and_priority`: all color registers `$00`, `PRIOR` = `$04`, player 0 on `PF0`, checks `P0PF` = `$01`.
 - `no_self_collision`, `same_color_players_collide`: REQ-421 criteria 4 and 5.
-- `priority_equations_all_inputs`: compares the priority table with an evaluation of the HRM 6.7 equations that the test code does itself, for all `PRIOR` values with bit 4 = 0 and all inputs.
-- `fifth_player_keeps_position_and_size`: missiles 0 and 3 at different positions and sizes with `PRIOR` = `$10`.
+- `priority_equations_all_inputs`: compares the priority table with an evaluation of the HRM 6.7 equations that the test code does itself, for all `PRIOR` values with bit 4 = 0 and all inputs (bit 4 is ignored, OI-019).
 - `multicolor_missiles`, `multicolor_keeps_collisions`: REQ-427 criteria 3-6.
 - `gtia_mode_ignores_an2`: code pairs (`%000`, `%101`) and (`%100`, `%101`) give the same pixel.
 - `crates/harness/tests/gtia.rs` `gtia_mode_pixels_from_antic`: ANTIC mode F and mode E lines with `PRIOR` = `$40` (REQ-428 criteria 1 and 2).
@@ -368,9 +364,7 @@ The tests that this list adds or changes do these checks:
 
 ## Open issues
 
-1. Fifth player priority. The HRM gives no equations for the fifth player. The model in
-   "Priority" disagrees with three cells of HRM Table 16 and with the HRM text for
-   `PRIOR` = `$18` (REQ-426). A test on real hardware or the Altirra source can settle it.
+1. Fifth player priority: out of scope (OI-019, REQ-426 withdrawn).
 2. Palette values. `step = 24°` and `S = 0.233` are choices (REQ-409). The palette does not
    model the close luminance levels 7 and 8, the blacker-than-black level 0, NTSC gamma,
    NTSC to sRGB color correction or a tint control (HRM D.2).
@@ -392,12 +386,10 @@ The tests that this list adds or changes do these checks:
    `$D000-$D003`. The emulator uses `$D000`. HRM 14.3 gives the wide playfield as `$22-$DD`.
    HRM 4.3 and 6.2 give `$2C-$DD` for the visible playfield. ANTIC sets the clip.
 9. Resolved by OI-001: GTIA uses `antic::CycleOutput`, and cycle `c` covers HPOS `2c - 2` and `2c - 1`.
-10. The frontend has no setting to turn on the display filters of REQ-411 and REQ-412
-    (`docs/design/architecture.md`). The test `display_filters_off_by_default` needs the setting.
-11. REQ-412 does not give the output of `pal_blend_row` for row 0, which has no previous row.
+10. Resolved by OI-022: the flags `--artifacting` and `--pal-blending` (REQ-019).
+11. Resolved by OI-021: row 0 is not blended (REQ-412 criterion 6).
 12. The system tests in `crates/harness/tests/gtia.rs` run small 6502 programs, some with exact
     cycles (`mid_line_colbk_change`, `registers_mirror_at_d020_d0ff`). `test-harness.md` has no
     helper to load and start such a program. The design must add one, or the tests must use an
     OS vector (for example the deferred vertical blank vector) or a display list interrupt.
-13. REQ-411 names PAL artifacting (HRM D.5) in its Source, but the design has only
-    `artifact_ntsc_row`.
+13. Resolved by OI-020: artifacting is NTSC only.

@@ -18,6 +18,8 @@ These items are out of scope. A requirement must not depend on them.
 | --- | --- | --- |
 | A Linux frontend | 2026-11-19 | Temporary. The core and the test harness still build and run on Linux, because CI uses Linux runners for them. |
 | A Windows frontend, and Windows CI | 2026-11-19 | No gate checks Windows. |
+| The light pen (`PENH`, `PENV` input) | 2026-11-19 | OI-016. REQ-342 is withdrawn. |
+| The fifth player (`PRIOR` bit 4) | 2026-11-19 | OI-019. REQ-426 is withdrawn. The emulator ignores `PRIOR` bit 4. |
 | Hardware outside the 65XE | Project start | See REQ-001: no extended memory, 65C02, 65C816, PBI devices or memory upgrades. |
 
 ## Rules
