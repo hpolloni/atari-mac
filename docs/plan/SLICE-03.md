@@ -7,7 +7,7 @@ packages:
   - id: WP-1
     title: POKEY timers and audio
     status: planned
-    requirements: [REQ-438, REQ-502, REQ-503, REQ-504, REQ-505, REQ-506, REQ-507, REQ-508, REQ-509, REQ-510, REQ-511, REQ-512, REQ-513, REQ-514, REQ-533, REQ-538, REQ-539, REQ-540, REQ-541]
+    requirements: [REQ-438, REQ-503, REQ-504, REQ-505, REQ-506, REQ-507, REQ-508, REQ-509, REQ-510, REQ-511, REQ-512, REQ-513, REQ-514, REQ-538, REQ-539, REQ-540, REQ-541]
   - id: WP-2
     title: Frontend audio and speed
     status: planned
@@ -23,7 +23,7 @@ The emulator makes the POKEY sound and the console speaker sound. In BASIC, `SOU
 
 | Package | Title | Requirements |
 | --- | --- | --- |
-| WP-1 | POKEY timers and audio | REQ-438, REQ-502, REQ-503, REQ-504, REQ-505, REQ-506, REQ-507, REQ-508, REQ-509, REQ-510, REQ-511, REQ-512, REQ-513, REQ-514, REQ-533, REQ-538, REQ-539, REQ-540, REQ-541 |
+| WP-1 | POKEY timers and audio | REQ-438, REQ-503, REQ-504, REQ-505, REQ-506, REQ-507, REQ-508, REQ-509, REQ-510, REQ-511, REQ-512, REQ-513, REQ-514, REQ-538, REQ-539, REQ-540, REQ-541 |
 | WP-2 | Frontend audio and speed | REQ-007, REQ-011 |
 
 Some requirements in this slice already have tests that run (from SLICE-01). The package must still check them against the full acceptance criteria.

@@ -299,7 +299,7 @@ fn force_break_keeps_timing() {
 /// Hz tone). With `SKCTL` = `$8B` (data bit forced to 0), SIO DATA OUT changes every 224 cycles (a
 /// 3995 Hz tone).
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn two_tone_frequencies() {
     planned();
 }
@@ -310,7 +310,7 @@ fn two_tone_frequencies() {
 /// The test does not check the first change after each bit boundary. The test sends `$55` in
 /// two-tone mode and checks the change spacing in each bit.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn two_tone_byte_55() {
     planned();
 }
@@ -319,7 +319,7 @@ fn two_tone_byte_55() {
 /// = `$0B`, the output idle and an `STIMER` write on cycle T, timer 1 fires on cycles T+8, T+14 and
 /// T+20, and on no other cycle from T to T+20. Timer 2 does not fire from T to T+1000.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn two_tone_resync_8_14_20() {
     planned();
 }
@@ -328,7 +328,7 @@ fn two_tone_resync_8_14_20() {
 /// reads 1 on each cycle from T to T+1000. `IRQST` bit 0 changes to 0 only on the fire cycles of
 /// timer 1.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn two_tone_resync_no_fire() {
     planned();
 }
@@ -336,7 +336,7 @@ fn two_tone_resync_no_fire() {
 /// Verifies REQ-533: Criterion 5: In the setup of criterion 2 with `SKCTL` = `$AB`, SIO DATA OUT
 /// changes every 224 cycles during the whole frame.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn two_tone_force_break_uses_timer2() {
     planned();
 }
@@ -344,7 +344,7 @@ fn two_tone_force_break_uses_timer2() {
 /// Verifies REQ-533: Criterion 6: For `AUDC1` = `AUDC2` = `$00`, `$1F`, `$8F` and `$AF`, the SIO
 /// DATA OUT levels of criterion 1 are the same on each cycle.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn two_tone_ignores_audc() {
     planned();
 }

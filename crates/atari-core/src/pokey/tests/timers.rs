@@ -9,7 +9,7 @@ use crate::planned::planned;
 /// bit 0 reads 1 and the timer 1 counter (test accessor) does not change from cycle T+4 to cycle
 /// T+10000.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn init_mode_stops_slow_clocks() {
     planned();
 }
@@ -17,7 +17,7 @@ fn init_mode_stops_slow_clocks() {
 /// Verifies REQ-502: Criterion 2: With `SKCTL` = `$00`, `AUDCTL` = `$40`, `AUDF1` = `$00`, `IRQEN`
 /// = `$01` and an `STIMER` write on cycle T, `IRQST` bit 0 reads 0 from cycle T+8.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn init_mode_keeps_fast_timers() {
     planned();
 }
@@ -29,7 +29,7 @@ fn init_mode_keeps_fast_timers() {
 /// `AUDF1-4`, `AUDC1-4`, `AUDCTL`, the four timer counters or the four channel output flip-flops.
 /// The test compares the values on cycle I-1 with the values on cycles I+1 and I+1000.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn init_mode_keeps_registers() {
     planned();
 }
@@ -38,7 +38,7 @@ fn init_mode_keeps_registers() {
 /// when `POT0` reads 10, a write of `SKCTL` = `$00` keeps `POT0` at 10 and `ALLPOT` bit 0 at 1 for
 /// 10 x 114 cycles.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn init_mode_stops_slow_pot_counter() {
     planned();
 }
@@ -47,7 +47,7 @@ fn init_mode_stops_slow_pot_counter() {
 /// `$03`), each read of `RANDOM` from cycle I+9 to cycle I+1000 returns `$FF`. This is true with
 /// `AUDCTL` = `$00` and with `AUDCTL` = `$80`.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn init_mode_random_ff_after_9_cycles() {
     planned();
 }
@@ -58,7 +58,7 @@ fn init_mode_random_ff_after_9_cycles() {
 /// 1 during the frame and for 1000 cycles after it. The test sends a frame with `SKCTL` = `$20` and
 /// checks that `SERIN`, `IRQST` bit 5 and `SKSTAT` bit 1 do not change.
 #[test]
-#[ignore = "planned: SLICE-03"]
+#[ignore = "planned: SLICE-05"]
 fn init_mode_holds_serial_input() {
     planned();
 }
