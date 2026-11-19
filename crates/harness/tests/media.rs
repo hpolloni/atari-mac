@@ -1,4 +1,5 @@
-//! Cartridge system tests (REQ-206, REQ-232, REQ-608).
+//! Cartridge system tests (REQ-206, REQ-232, REQ-608), and the planned cartridge, executable
+//! and disk system tests.
 //!
 //! Method of `docs/design/media.md`, "System test method for cartridges": a synthetic OS ROM
 //! ([`test_os_rom`]) runs the test code from `$C000`, then the test runs 10,000 cycles and
@@ -142,5 +143,225 @@ mod cartridges {
         assert_eq!(m.peek_ram(0x0600), 0x01, "TRIG3 with RD5 active");
         assert_eq!(m.peek_ram(0x0601), 0x00, "3: TRIG3 after LDA $D510");
         assert_eq!(m.peek_ram(0x0602), 0x01, "8: TRIG3 after LDA $D501");
+    }
+}
+
+/// Fails the test that calls it. A planned stub calls this function, so that the stub never
+/// passes when it runs (`cargo test -- --include-ignored`).
+#[expect(clippy::panic, reason = "a planned test stub must fail when it runs")]
+fn planned() {
+    panic!("planned test: a package replaces this stub with the real test");
+}
+
+/// Planned cartridge system tests (`docs/design/media.md`, "Tests").
+#[cfg(test)]
+mod planned_cartridges {
+    use super::planned;
+
+    /// Verifies REQ-600: with an 8 KB cartridge, `$A100` reads `$01` and `$BFFF` reads `$1F`,
+    /// and a CPU write to `$8000` goes to RAM (criteria 1, 2).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req600_std8k_maps_left_window() {
+        planned();
+    }
+
+    /// Verifies REQ-600: with a 16 KB cartridge, `$8100`, `$9FFF`, `$A000` and `$BFFF` read
+    /// `$01`, `$1F`, `$20` and `$3F` (criteria 3, 4).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req600_std16k_maps_both_windows() {
+        planned();
+    }
+
+    /// Verifies REQ-210: with RD5 active and BASIC on, `$A000` reads the cartridge byte; with
+    /// no cartridge and BASIC off, a CPU write to `$A000` goes to RAM (criteria 1, 2, 4).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn cart_over_basic_over_ram() {
+        planned();
+    }
+
+    /// Verifies REQ-210: a `MaxFlash` cartridge that disables itself shows BASIC at `$A000`
+    /// with `PORTB` pins = `$FD`, and RAM with `PORTB` pins = `$FF` (criteria 2, 4).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn disabled_cart_shows_basic_or_ram() {
+        planned();
+    }
+
+    /// Verifies REQ-232: `TRIG3` reads `$00` with no cartridge (also with BASIC on) and `$01`
+    /// with an 8 KB or a 16 KB cartridge (criteria 1, 2, 4, 7).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn trig3_follows_rd5() {
+        planned();
+    }
+
+    /// Verifies REQ-607: a `MaxFlash` 1Mbit cartridge keeps its bank (`$D505`) and its
+    /// disabled state (`$D510`) over a press of the RESET key (criteria 1, 2).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req607_bank_kept_on_reset_key() {
+        planned();
+    }
+
+    /// Verifies REQ-607: a cold reset sets the `MaxFlash` 1Mbit and 8Mbit cartridges to bank
+    /// 0, enabled: `$A000` reads `$00` and `TRIG3` reads `$01` (criteria 3, 4).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req607_cold_reset_bank0() {
+        planned();
+    }
+
+    /// Verifies REQ-608: after a read of `$D503`, a CPU write of `$00` to `$A000` does not
+    /// change the flash data: `$A000` reads `$03` (criterion 9).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req608_flash_write_ignored() {
+        planned();
+    }
+
+    /// Verifies REQ-609: `LDA $D5FF,X` with X = `$08` makes a false read of `$D507`, which
+    /// selects bank 7 of a `MaxFlash` 1Mbit cartridge (criterion 1).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req609_dummy_read_switches_bank() {
+        planned();
+    }
+
+    /// Verifies REQ-609: ANTIC playfield DMA from `$D540-$D55F` selects banks of a `MaxFlash`
+    /// 8Mbit cartridge; after one frame, `$A000` reads `$5F` (criterion 2).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req609_antic_dma_switches_bank() {
+        planned();
+    }
+}
+
+/// Planned executable file system tests (`docs/design/media.md`, "System test method for
+/// disks and executables").
+#[cfg(test)]
+mod planned_executables {
+    use super::planned;
+
+    /// Verifies REQ-612: the segments at `$2000` and `$A000` are in RAM when the program
+    /// starts, BASIC is off and RAM was cleared by a cold reset, with fast SIO off and on
+    /// (criteria 1-3, 5).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req612_xex_loads_segments() {
+        planned();
+    }
+
+    /// Verifies REQ-612: two segments at `$4000` load in file order, so `$4000` holds `$22`,
+    /// with fast SIO off and on (criteria 4, 5).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req612_xex_file_order() {
+        planned();
+    }
+
+    /// Verifies REQ-613: the OS calls `INITAD` after the segment that sets it: `$0600` holds
+    /// `$11` within 600 frames, with fast SIO off and on (criteria 1, 2).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req613_initad_called_per_segment() {
+        planned();
+    }
+
+    /// Verifies REQ-614: a `RUNAD` segment starts the program at `$3000`: `$0600` holds
+    /// `$A5`, with fast SIO off and on (criteria 1, 3).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req614_runad() {
+        planned();
+    }
+
+    /// Verifies REQ-614: with no `RUNAD` segment, the program starts at the first segment
+    /// (`$2000`): `$0600` holds `$A5`, with fast SIO off and on (criteria 2, 3).
+    #[test]
+    #[ignore = "planned: SLICE-04"]
+    fn req614_run_first_segment() {
+        planned();
+    }
+}
+
+/// Planned disk system tests (`docs/design/media.md`, "System test method for disks and
+/// executables").
+#[cfg(test)]
+mod planned_disks {
+    use super::planned;
+
+    /// Verifies REQ-623: with `AltirraOS` and fast SIO on, a Read of sector 2 fills
+    /// `$4000-$407F` and gives status `$01`; a Read of sector 0 gives `$8B` (criteria 1, 2).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req623_fast_sio_read() {
+        planned();
+    }
+
+    /// Verifies REQ-623: with fast SIO on, a Put of sector 5 gives status `$01`, and sector 5
+    /// of the image then holds 128 bytes of `$5A` (criterion 3).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req623_fast_sio_put() {
+        planned();
+    }
+
+    /// Verifies REQ-623: fast SIO does not handle a request for another device, a request
+    /// whose bus ID wraps to `$31`, or a call of `$E459` with the OS ROM off (criteria 4-6).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req623_fast_sio_not_intercepted() {
+        planned();
+    }
+
+    /// Verifies REQ-623: criteria 1 and 2 pass with a user-supplied Atari XL/XE OS ROM
+    /// (criterion 7). The real test needs the ROM (`docs/design/media.md`, "Tests").
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req623_fast_sio_xl_os() {
+        planned();
+    }
+
+    /// Verifies REQ-623: the SD boot test reaches `$0600` = `$A5` in fewer frames with fast
+    /// SIO on than with fast SIO off (criterion 8).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req623_fast_sio_boot_faster() {
+        planned();
+    }
+
+    /// Verifies REQ-636: NTSC: the SD test image boots after a cold reset, and its boot code
+    /// writes `$A5` to `$0600` within the frame limit of the criterion (criterion 1).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req636_boot_sd_ntsc() {
+        planned();
+    }
+
+    /// Verifies REQ-636: the SD boot of criterion 1 also passes for PAL, within 250 frames
+    /// (criterion 2).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req636_boot_sd_pal() {
+        planned();
+    }
+
+    /// Verifies REQ-636: the SD boots of criteria 1 and 2 pass with fast SIO on
+    /// (criterion 3).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req636_boot_fast_sio() {
+        planned();
+    }
+
+    /// Verifies REQ-636: the DD test image (720 sectors of 256 bytes, 3 boot sectors) boots,
+    /// and its code in sector 3 writes `$A5` to `$0600` (criterion 4).
+    #[test]
+    #[ignore = "planned: SLICE-05"]
+    fn req636_boot_dd() {
+        planned();
     }
 }

@@ -608,6 +608,10 @@ impl Machine {
 
 #[cfg(test)]
 mod tests {
+    mod halt;
+    mod memory_map;
+    mod triggers;
+
     use core::iter;
 
     use super::{BusAccess, ConfigError, CpuBus, JoystickState, Machine, MachineConfig};

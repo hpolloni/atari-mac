@@ -359,7 +359,7 @@ call `tick` if the script halts cycle `c`. A `TestBus` records each access as
 | REQ-106 | `cpu/tests.rs` unit tests `branch_page_cross_from_next_instruction`, `branch_same_page_three_cycles`, `branch_not_taken_two_cycles`; `cpu_single_step.rs` `single_step_bus_cycles` |
 | REQ-107 | `cpu/tests.rs` unit tests `php_pushes_bits_4_and_5`, `irq_pushes_b_clear`, `nmi_pushes_b_clear`, `brk_pushes_b_set` |
 | REQ-108 | `cpu/tests.rs` unit tests `decimal_adc_0f_0f`, `decimal_adc_99_01_flags`, `decimal_adc_ff_01_zero`, `decimal_sbc_borrow`, `decimal_sbc_no_borrow`, `decimal_no_extra_cycle`; `cpu_single_step.rs` `single_step_decimal` |
-| REQ-109 | `cpu/tests.rs` unit tests `decimal_flag_ignored_by_compare_and_increment`, `interrupt_keeps_decimal_flag`, `reset_keeps_decimal_flag`; `single_step_decimal` (`ISB`, `RRA` and `ARR` files) |
+| REQ-109 | `cpu/tests.rs` unit tests `decimal_flag_ignored_by_compare_and_increment`, `interrupt_keeps_decimal_flag`, `reset_keeps_decimal_flag`; `cpu_single_step.rs` `single_step_decimal_undocumented` (the `ISB`, `RRA` and `ARR` files) |
 | REQ-110 | `crates/harness/tests/cpu_functional.rs` `klaus_dormann_functional_test` |
 | REQ-111 | `cpu_single_step.rs` `single_step_undocumented_stable`; `cpu/tests.rs` unit tests `isb_uses_inc_result`, `lax_loads_a_and_x`, `sax_keeps_flags`, `nop_abs_x_page_cross`, `opcode_table_counts` |
 | REQ-112 | `cpu_single_step.rs` `single_step_undocumented_unstable`; `cpu/tests.rs` unit tests `shx_and_high_byte_plus_one`, `shx_page_cross_replaces_high_byte`, `shs_sets_s` |
@@ -375,7 +375,7 @@ call `tick` if the script halts cycle `c`. A `TestBus` records each access as
 | REQ-122 | `cpu/tests.rs` unit tests `nmi_after_irq_handler_first_instruction` (S = N-5), `nmi_lost_when_irq_starts_four_cycles_before` (S = N-4), `nmi_hijacks_irq_sequence` (S = N-3 to N+1), `nmi_hijacks_brk_with_b_set` (`BRK`, S = N-5 to N+1) |
 | REQ-123 | `cpu/tests.rs` unit tests `handler_first_instruction_always_runs`, `nmi_handler_first_instruction_before_second_nmi`, `nmi_hijacks_brk_as_first_handler_instruction` |
 | REQ-124 | `cpu/tests.rs` unit tests `reset_loads_fffc_in_seven_cycles`, `reset_decrements_s_by_three_no_writes`, `reset_sets_i_keeps_d`, `reset_ends_kil`, `reset_clears_pending_nmi`, `reset_keeps_decimal_flag` |
-| REQ-125 | `cpu/tests.rs` unit tests `halted_cycles_delay_accesses`, `halted_rmw_writes`, `halted_cycles_do_not_change_results`; `machine.rs` unit test `dma_cycles_halt_cpu` |
+| REQ-125 | `cpu/tests.rs` unit tests `halted_cycles_delay_accesses`, `halted_rmw_writes`, `halted_cycles_do_not_change_results`; `machine.rs` unit test `antic_dma_delays_cpu_accesses` |
 | REQ-126 | `cpu/tests.rs` unit tests `rdy_low_repeats_read`, `rdy_low_after_inc_wsync`, `rdy_low_does_not_stop_write`, `rdy_low_keeps_registers` |
 | REQ-127 | `cpu/tests.rs` unit tests `halted_cycles_extend_recognition_delay`, `nmi_edge_in_halted_cycle_kept`, `nmi_during_rdy_after_stopped_instruction`, `nmi_sequence_stops_on_rdy` |
 | REQ-128 | `cpu/tests.rs` unit tests `power_on_registers`, `power_on_is_deterministic` |

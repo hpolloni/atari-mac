@@ -126,12 +126,12 @@ file error.
 
 | Requirement | Test |
 | --- | --- |
-| REQ-002 | `crates/harness/tests/boot.rs` `frame_length_matches_standard`; `timing` unit test `frame_rates_match_the_hardware` |
+| REQ-002 | `crates/harness/tests/boot.rs` `frame_length_matches_standard` (criteria 1, 2), `default_standard_is_ntsc` (criterion 3) |
 | REQ-003 | `crates/harness/tests/harness_self_test.rs` `free_roms_have_expected_sizes`, `no_rom_is_tracked_by_git` |
 | REQ-004 | `crates/harness/tests/boot.rs` `accepts_user_roms`, `rejects_rom_with_wrong_size`; `tests/cli.rs` `rejects_bad_os_rom` |
 | REQ-005 | `crates/harness/tests/boot.rs` `boots_to_basic_ready` |
 | REQ-006 | `crates/harness/tests/boot.rs` `option_key_disables_basic`, `basic_is_mapped_without_option` |
-| REQ-012 | `tests/cli.rs` `loads_media`, `rejects_bad_media` |
+| REQ-012 | `tests/cli.rs` `loads_cart_xex_and_disk` (criterion 1), `rejects_bad_cart_xex_and_disk` (criterion 2) |
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
 | REQ-007, REQ-011 | Demonstration: the commands in the acceptance criteria |
 | REQ-008 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-008.md` |
@@ -142,7 +142,7 @@ file error.
 | REQ-014 | `crates/harness/tests/boot.rs` `emulation_is_deterministic`; clippy `disallowed-methods` |
 | REQ-016 | `crates/harness/tests/robustness.rs` `random_files_do_not_panic`, `random_programs_do_not_panic` |
 | REQ-018 | `crates/harness/tests/boot.rs` `save_state_round_trip` |
-| REQ-042 | CI job `Coverage (cargo-llvm-cov)` |
+| REQ-042 | `crates/harness/tests/harness_self_test.rs` `coverage_job_needs_80_percent` (the CI workflow runs the coverage check); CI job `Coverage (cargo-llvm-cov)` |
 
 ## Open issues
 

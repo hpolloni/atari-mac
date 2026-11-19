@@ -77,3 +77,19 @@ fn single_step_undocumented_unstable() {
     let summary = check(&UNSTABLE_OPCODES).unwrap();
     assert!(summary.is_empty(), "single-step failures:\n{summary}");
 }
+
+/// Fails the test that calls it. A planned stub calls this function, so that the stub never
+/// passes when it runs (`cargo test -- --include-ignored`).
+#[expect(clippy::panic, reason = "a planned test stub must fail when it runs")]
+fn planned() {
+    panic!("planned test: a package replaces this stub with the real test");
+}
+
+/// Verifies REQ-109: all cases with `D` = 1 in the files of `ISB` (`e3`, `e7`, `ef`, `f3`,
+/// `f7`, `fb`, `ff`), `RRA` (`63`, `67`, `6f`, `73`, `77`, `7b`, `7f`) and `ARR` (`6b`)
+/// agree with the file (criterion 2).
+#[test]
+#[ignore = "planned: SLICE-06"]
+fn single_step_decimal_undocumented() {
+    planned();
+}

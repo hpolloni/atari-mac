@@ -118,3 +118,26 @@ fn basic_is_mapped_without_option() {
     run_frames(&mut machine, BOOT_FRAMES);
     assert_eq!(machine.peek(0xA000), basic[0], "BASIC byte $0000 at $A000");
 }
+
+/// Fails the test that calls it. A planned stub calls this function, so that the stub never
+/// passes when it runs (`cargo test -- --include-ignored`).
+#[expect(clippy::panic, reason = "a planned test stub must fail when it runs")]
+fn planned() {
+    panic!("planned test: a package replaces this stub with the real test");
+}
+
+/// Verifies REQ-002: a `MachineConfig` with `VideoStandard::default()` gives NTSC: one frame
+/// is 29,868 cycles (criterion 3).
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn default_standard_is_ntsc() {
+    planned();
+}
+
+/// Verifies REQ-018: a state saved after frame 100 and restored in a new machine gives the
+/// same frame buffers for frames 101 to 200 as a run without interruption (criterion 1).
+#[test]
+#[ignore = "planned: SLICE-06"]
+fn save_state_round_trip() {
+    planned();
+}
