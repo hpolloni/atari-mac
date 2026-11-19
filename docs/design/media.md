@@ -671,8 +671,10 @@ design) with a synthetic OS ROM that the test builds: 16,384 bytes, the test cod
 `RTI`. The test code ends with a `JMP` to itself. The test calls `Machine::new` with the
 cartridge in `MachineConfig`, runs `run_cycle` for a fixed number of cycles (10,000 unless the
 test gives another value), and then checks `peek` and `peek_ram`. To set `PORTB`, the test
-code writes `$FF` to `$D301` (DDRB, selected after reset), `$04` to `$D303` (PBCTL) and then
-the value to `$D301`. A `PORTB` value always keeps bit 0 = 1, because the code runs from the
+code first selects the output register and writes the value: `$04` to `$D303` (PBCTL),
+the value to `$D301` (ORB). Then it selects DDRB and writes `$FF`: `$00` to `$D303`, `$FF`
+to `$D301`, and `$04` to `$D303` again. In the other order, the `$FF` to DDRB makes the
+reset value `$00` of ORB the output, which turns the OS ROM off while the code runs from it. A `PORTB` value always keeps bit 0 = 1, because the code runs from the
 OS ROM.
 
 ### System test method for disks and executables
@@ -726,11 +728,14 @@ the test code writes (usually `$A5` at `$0600`), with the frame limit of the req
 | REQ-637 | `media.rs` `req637_export_unchanged` (1, 2, 5), `req637_export_after_write` (3, 5), `req637_export_after_format` (4, 5) |
 | REQ-638 | `media.rs` `req638_seek_time` (1-4, 6), `req638_write_verify_time` (5) |
 
-`req623_fast_sio_xl_os` uses a user-supplied Atari XL/XE OS ROM (REQ-004). When the ROM is not
-there, the test prints a message that names the ROM and passes with no check.
+`req623_fast_sio_xl_os` uses a user-supplied Atari XL/XE OS ROM (REQ-004), which the project
+cannot download. The test has `#[ignore = "needs a user-supplied Atari XL/XE OS ROM: REQ-623"]`
+and runs only with `cargo test -- --ignored`. If the ROM is missing then, the test fails with
+`HarnessError::Missing` (REQ-021). It never passes without a check. Because it is ignored, the
+other REQ-623 tests must give the running test that a `done` package needs (REQ-027).
 
 The REQ-638 tests have the attribute `#[ignore = "needs seek model: REQ-638"]` until the seek
-model is enabled. The REQ-608 and REQ-609 tests wait for the MaxFlash kinds in the same way.
+model is enabled. The MaxFlash kinds exist (WP-7 of SLICE-01), so the REQ-608 tests run.
 
 ## Open issues
 

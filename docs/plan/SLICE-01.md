@@ -14,7 +14,7 @@ packages:
     requirements: [REQ-100, REQ-101, REQ-102, REQ-103, REQ-104, REQ-105, REQ-106, REQ-107, REQ-108, REQ-110, REQ-113, REQ-114, REQ-115, REQ-116, REQ-117, REQ-124]
   - id: WP-2
     title: Video
-    status: in-progress
+    status: done
     requirements: [REQ-300, REQ-301, REQ-302, REQ-303, REQ-304, REQ-305, REQ-308, REQ-309, REQ-310, REQ-312, REQ-313, REQ-314, REQ-319, REQ-320, REQ-321, REQ-322, REQ-323, REQ-331, REQ-332, REQ-333, REQ-336, REQ-338, REQ-400, REQ-401, REQ-402, REQ-403, REQ-404, REQ-405, REQ-406, REQ-408, REQ-409, REQ-435, REQ-437]
   - id: WP-3
     title: Keyboard
@@ -26,7 +26,7 @@ packages:
     requirements: [REQ-008, REQ-009, REQ-013]
   - id: WP-5
     title: Machine and harness
-    status: in-progress
+    status: done
     requirements: [REQ-201, REQ-202, REQ-203, REQ-204, REQ-205, REQ-206, REQ-207, REQ-208, REQ-211, REQ-216, REQ-217, REQ-218, REQ-219, REQ-220, REQ-221, REQ-222, REQ-224, REQ-229, REQ-230, REQ-003, REQ-005, REQ-020, REQ-021, REQ-023, REQ-024, REQ-025, REQ-027]
   - id: WP-6
     title: Specification gates
@@ -73,10 +73,10 @@ Each teammate works in its own git worktree (see `CLAUDE.md`). Each package must
 | --- | --- | --- | --- | --- |
 | WP-0 Interfaces | Done | Teammate | The workspace, the decided interfaces as stubs that compile, the `atari-harness` crate with its helpers, the traceability check | `tests/harness_self_test.rs`, `tests/traceability.rs` |
 | WP-1 CPU | Done | Teammate | `crates/atari-core/src/cpu.rs` and submodules, from [cpu.md](../design/cpu.md) | `tests/cpu_functional.rs`, `tests/cpu_single_step.rs`, CPU unit tests |
-| WP-2 Video | In progress | Teammate | `antic.rs`, `gtia.rs`, `palette.rs`, from [antic.md](../design/antic.md) and [gtia.md](../design/gtia.md) | ANTIC and GTIA unit tests |
+| WP-2 Video | Done | Teammate | `antic.rs`, `gtia.rs`, `palette.rs`, from [antic.md](../design/antic.md) and [gtia.md](../design/gtia.md) | ANTIC and GTIA unit tests |
 | WP-3 Keyboard | Done | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
 | WP-4 Frontend | In progress | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
-| WP-5 Machine and harness | In progress | Teammate | `machine.rs`, `pia.rs`, `timing.rs`, the `atari-harness` crate, and the integration code for WP-1 to WP-4. The lead merges and runs the final checks. | `tests/boot.rs`, `tests/keyboard.rs`, `tests/harness_self_test.rs` |
+| WP-5 Machine and harness | Done | Teammate | `machine.rs`, `pia.rs`, `timing.rs`, the `atari-harness` crate, and the integration code for WP-1 to WP-4. The lead merges and runs the final checks. | `tests/boot.rs`, `tests/keyboard.rs`, `tests/harness_self_test.rs` |
 | WP-6 Specification gates | Done | Teammate | The frontmatter migration, `atari_harness::spec`, the gates of [spec-gates.md](../design/spec-gates.md), `spec-index`, the CI job `Specification`. It starts after WP-0 is merged. | `tests/spec_gates.rs`, `tests/traceability.rs` |
 
 ### Test rule for each package (REQ-027)
@@ -132,3 +132,5 @@ Items that a work package found and that belong to a later package or slice.
 | WP-2 | With the power-on values of the design, the display list starts on scan line 9 in the first frame, and on line 8 after that. | The lead: check `antic.md` |
 | WP-5 | OI-017 is open again: with the real CPU, the NMI start cycles of REQ-334 and the BRK takeover of REQ-335 fail. | The user (OI-017) |
 | WP-5 | The frontend does not call `Machine::set_control` yet, so CONTROL alone does nothing. | A frontend teammate |
+| WP-7 | REQ-203 criterion 4 needs code that runs from `$D500`, so a cartridge must drive the bus at `$D5xx`. No cartridge kind in `media.md` does. `rdy_reads_reach_cartridge_control` checks the part that is possible. Change the criterion, or add such a cartridge kind. | The lead |
+| WP-7 | `press_reset` in the REQ-302 test plan row was the name of a function, not a test. WP-7 wrote a real test with that name. Rename it to a test name (for example `press_reset_keeps_position`). | The lead and a teammate |
