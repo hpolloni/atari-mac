@@ -3,6 +3,8 @@
 //! A test makes a `Gtia`, writes registers and calls `clock` with synthetic `CycleOutput`
 //! values. The code of HPOS `h` goes into the cycle `c` with `h = (2c - 2) mod 228`.
 
+mod objects;
+
 use super::{ConsoleKeys, FRAME_HEIGHT, FRAME_WIDTH, Gtia};
 use crate::antic::{AnCode, CycleOutput};
 use crate::timing::VideoStandard;
