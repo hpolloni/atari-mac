@@ -133,8 +133,11 @@ file error.
 | REQ-006 | `crates/harness/tests/boot.rs` `option_key_disables_basic`, `basic_is_mapped_without_option` |
 | REQ-012 | `tests/cli.rs` `loads_media`, `rejects_bad_media` |
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
-| REQ-007, REQ-008, REQ-011 | Demonstration: the commands in the acceptance criteria |
-| REQ-009, REQ-010, REQ-017 | `src/keymap.rs` unit tests `every_table_entry_maps`, `every_atari_key_has_a_host_key`, `joystick_keys`, `control_keys` |
+| REQ-007, REQ-011 | Demonstration: the commands in the acceptance criteria |
+| REQ-008 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-008.md` |
+| REQ-009 | `src/keymap.rs` unit tests `every_table_entry_maps`, `every_atari_key_has_a_host_key` |
+| REQ-010 | `src/keymap.rs` unit test `joystick_keys` |
+| REQ-017 | `src/keymap.rs` unit test `control_keys` |
 | REQ-017 | `src/frontend.rs` unit test `pause_stops_frames` |
 | REQ-014 | `crates/harness/tests/boot.rs` `emulation_is_deterministic`; clippy `disallowed-methods` |
 | REQ-016 | `crates/harness/tests/robustness.rs` `random_files_do_not_panic`, `random_programs_do_not_panic` |

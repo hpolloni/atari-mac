@@ -87,7 +87,6 @@ REQ-047 docs/spec/README.md: `REQ-699` names no file
 REQ-047 docs/spec/requirements/REQ-334.md: `REQ-199` names no file
 REQ-047 docs/spec/requirements/REQ-347.md: `REQ-299` names no file
 REQ-048 docs/design/architecture.md: the test plan row of REQ-007 (demonstration) does not name docs/verification/REQ-007.md
-REQ-048 docs/design/architecture.md: the test plan row of REQ-008 (demonstration) does not name docs/verification/REQ-008.md
 REQ-048 docs/design/architecture.md: the test plan row of REQ-011 (demonstration) does not name docs/verification/REQ-011.md
 REQ-048 docs/design/architecture.md: the test plan row of REQ-042 names no test in backticks
 REQ-048 docs/design/test-harness.md: the test plan row of REQ-023 names no test in backticks

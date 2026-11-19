@@ -12,4 +12,4 @@ implements, the work packages, and the conditions that tell when it is done.
 
 | Slice | Goal | Status |
 | --- | --- | --- |
-| [SLICE-01](SLICE-01.md) | Boot to BASIC `READY` in a window, and type `PRINT 2+2` | In progress |
+| [SLICE-01](SLICE-01.md) | Boot to BASIC `READY` in a window, and type `PRINT 2+2` | Done |

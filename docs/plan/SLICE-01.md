@@ -1,7 +1,7 @@
 ---
 id: SLICE-01
 title: Boot to BASIC and type a command
-status: in-progress
+status: done
 depends_on: "The committed specification (`docs/spec/`, `docs/design/`)"
 packages:
   - id: WP-0
@@ -22,7 +22,7 @@ packages:
     requirements: [REQ-500, REQ-501, REQ-515, REQ-518, REQ-519, REQ-522, REQ-523, REQ-524]
   - id: WP-4
     title: Frontend
-    status: in-progress
+    status: done
     requirements: [REQ-008, REQ-009, REQ-013]
   - id: WP-5
     title: Machine and harness
@@ -75,7 +75,7 @@ Each teammate works in its own git worktree (see `CLAUDE.md`). Each package must
 | WP-1 CPU | Done | Teammate | `crates/atari-core/src/cpu.rs` and submodules, from [cpu.md](../design/cpu.md) | `tests/cpu_functional.rs`, `tests/cpu_single_step.rs`, CPU unit tests |
 | WP-2 Video | Done | Teammate | `antic.rs`, `gtia.rs`, `palette.rs`, from [antic.md](../design/antic.md) and [gtia.md](../design/gtia.md) | ANTIC and GTIA unit tests |
 | WP-3 Keyboard | Done | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
-| WP-4 Frontend | In progress | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
+| WP-4 Frontend | Done | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
 | WP-5 Machine and harness | Done | Teammate | `machine.rs`, `pia.rs`, `timing.rs`, the `atari-harness` crate, and the integration code for WP-1 to WP-4. The lead merges and runs the final checks. | `tests/boot.rs`, `tests/keyboard.rs`, `tests/harness_self_test.rs` |
 | WP-6 Specification gates | Done | Teammate | The frontmatter migration, `atari_harness::spec`, the gates of [spec-gates.md](../design/spec-gates.md), `spec-index`, the CI job `Specification`. It starts after WP-0 is merged. | `tests/spec_gates.rs`, `tests/traceability.rs` |
 
