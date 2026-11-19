@@ -135,12 +135,35 @@ also on small synthetic files in a temporary directory, so that each failure rul
 | `sources` | REQ-046: `HRM n.m` against `docs/spec/hrm-sections.txt` |
 | `references` | REQ-047: `REQ-`, `OI-`, `SLICE-` references and relative links |
 | `test_plans` | REQ-048: each requirement in exactly one test plan, with tests or evidence |
-| `trace` | REQ-027, REQ-049: test plan to code and code to test plan, for `done` packages |
-| `slices` | REQ-050, REQ-054: planned requirements, package status |
+| `trace` | REQ-027, REQ-049: test plan to code and code to test plan for all packages; a running test for `done` packages |
+| `slices` | REQ-050, REQ-054: each requirement in a package, package status |
 | `evidence` | REQ-051: evidence records for `done` packages |
 | `indexes` | REQ-053: the generated indexes are up to date |
 
 `tests/traceability.rs` moves into this design: its rules become the `trace` gate.
+
+### Planned test stubs
+
+Each test that a test plan names exists in the code before its package starts (REQ-049). A
+test that is not written yet is a stub:
+
+```rust
+/// Verifies REQ-327: the scroll shifts the playfield by HSCROL color clocks.
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn hscrol_shifts_playfield() {
+    planned();
+}
+```
+
+- The reason is exactly `planned: SLICE-NN`. The slice must plan each requirement that the
+  test names, and the packages of these requirements must not be `done` (REQ-027).
+- The body fails when the test runs (`cargo test -- --include-ignored`), so that a stub never
+  counts as a pass. Each crate has one small helper for this.
+- The documentation comment gives the test plan text for the test, so that the teammate who
+  writes the real test has the expected result.
+- A package replaces each stub with the real test and removes the `#[ignore]`.
+- The matrix shows a requirement with only ignored tests as `pending`, not `missing`.
 
 ## Generated files
 
