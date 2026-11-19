@@ -76,6 +76,10 @@ pub struct CycleOutput {
     pub video: [AnCode; 2],
     /// `true` on cycle 0 of scan line 248: the frame is complete.
     pub frame_done: bool,
+    /// The scan line of this cycle. GTIA uses bit 0 for `VDELAY` (HRM 6.5, OI-001).
+    pub line: u32,
+    /// The cycle of this tick, 0..114.
+    pub cycle: u32,
 }
 ```
 
@@ -187,7 +191,7 @@ The contract:
 3. **Horizontal blank.** ANTIC sends `%010` or `%011` outside the visible positions `$22-$DD` (project decision, see REQ-306). The code tells GTIA if the current IR mode is hi-res.
 4. **Vertical blank.** ANTIC sends horizontal blank codes for all color clocks of vertical blank scan lines, and `%001` on the vertical sync scan lines. ANTIC has no other vertical blank signal (HRM 6.2).
 5. **Player/missile data.** On a P/M DMA cycle, `halt` is `true`, `dma` is `Missile` or `Player(n)`, and `data_bus` is the fetched byte. GTIA can use `dma` directly. For the Could cases of HRM 6.5, GTIA must find the P/M bytes from the position of the halted cycles in horizontal blank. For that purpose, `halt` and `data_bus` are also given for the other cycles.
-6. **No other signals.** GTIA does not use the scan line number (HRM 6.2, Vertical positions).
+6. **Scan line.** `out.line` and `out.cycle` give the position of the cycle. GTIA uses bit 0 of `line` only, because `VDELAY` loads DMA data only on odd scan lines (HRM 6.5). This contract is decided in OI-001.
 
 The light pen input goes the other way, from the trigger inputs to ANTIC. The machine forwards it (see above).
 

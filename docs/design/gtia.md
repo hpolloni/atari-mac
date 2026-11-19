@@ -28,42 +28,8 @@ pub const FIRST_VISIBLE_LINE: u32 = 8;
 /// The HPOS that is column pair 0 of the frame buffer.
 pub const FIRST_FRAME_HPOS: u32 = 0x20;
 
-/// One 3-bit code on the ANx bus from ANTIC to GTIA (HRM Table 17).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct AnCode(pub u8);
-
-impl AnCode {
-    pub const BACKGROUND: Self = Self(0b000);
-    pub const VSYNC: Self = Self(0b001);
-    pub const HBLANK_LORES: Self = Self(0b010);
-    pub const HBLANK_HIRES: Self = Self(0b011);
-    /// Low resolution: PF0-PF3. High resolution: pixel pair %00-%11 (AN1 = left pixel).
-    pub const fn playfield(bits: u8) -> Self { Self(0b100 | (bits & 0b11)) }
-}
-
-/// The target of a P/M DMA byte.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PmDma {
-    /// The missile byte (ANTIC cycle 0).
-    Missiles,
-    /// The byte for player 0-3 (ANTIC cycles 2-5).
-    Player(u8),
-}
-
-/// What ANTIC gives GTIA in one machine cycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GtiaCycle {
-    /// The scanline, 0 to 261 (NTSC) or 0 to 311 (PAL).
-    pub line: u32,
-    /// The machine cycle in the scanline, 0 to 113.
-    pub cycle: u32,
-    /// The ANx codes for HPOS (2 * cycle - 4) mod 228 and (2 * cycle - 3) mod 228.
-    pub an: [AnCode; 2],
-    /// A P/M DMA byte that ANTIC fetched in this cycle, if any.
-    pub pm_dma: Option<(PmDma, u8)>,
-    /// The data bus value in this cycle (for REQ-441).
-    pub bus: u8,
-}
+// GTIA uses `antic::CycleOutput`, `antic::AnCode` and `antic::DmaKind` (see antic.md,
+// "Interface with GTIA"). GTIA defines no input type of its own (OI-001).
 
 /// The state of the three console keys. `true` = pressed.
 pub struct ConsoleKeys { pub start: bool, pub select: bool, pub option: bool }
@@ -81,8 +47,9 @@ impl Gtia {
     pub fn read(&self, reg: u8) -> u8;
     /// CPU write. `reg` is `addr & 0x1F`. Applies in the cycle of the last `tick`.
     pub fn write(&mut self, reg: u8, value: u8);
-    /// One machine cycle of display from ANTIC.
-    pub fn tick(&mut self, input: &GtiaCycle);
+    /// One machine cycle, after the CPU access of the cycle. `antic` is the output of
+    /// `Antic::tick` for this cycle. `data_bus` is the data bus value of this cycle.
+    pub fn clock(&mut self, antic: &CycleOutput, data_bus: u8);
     /// The last complete frame (REQ-405).
     pub fn frame(&self) -> &[u8];
     /// Trigger input `index` 0-3. `true` = active (the register reads 0).
@@ -114,33 +81,38 @@ pub fn pal_blend_row(prev: &[u8], row: &[u8], out: &mut [u32]);
 
 ### Call contract
 
-1. `Antic::tick` calls `Gtia::tick` exactly once for each machine cycle, on all scanlines,
-   also in vertical blank. ANTIC calls it before the CPU bus access of that cycle.
-2. The machine calls `Gtia::read` and `Gtia::write` after `Antic::tick` for the same cycle.
-   The draft `System::begin_cpu_cycle` already has this order. GTIA uses the `cycle` of the
-   last `tick` as the cycle of the access.
-3. In `tick`, GTIA first stores the P/M DMA byte, then makes the two color clocks.
-4. GTIA copies the back buffer to the front buffer at the first `tick` of scanline 248.
-   This is the same cycle in which ANTIC sets `CycleOutput::frame_done`.
-5. The machine calls `set_trigger(3, !rd5)` at power-on and after each access that can
+The interface with ANTIC is decided in OI-001. The machine calls GTIA in each machine cycle
+`c` of scanline `L`, in this order (see antic.md, "Call order"):
+
+1. `Antic::tick` gives `out` for cycle `c`.
+2. The CPU part of the cycle. A CPU access to `$D0xx` calls `Gtia::read` or `Gtia::write`.
+3. `Gtia::clock(&out, data_bus)`. GTIA makes the color clocks `HPOS` `(2c - 2) mod 228`
+   and `(2c - 1) mod 228` from `out.video[0]` and `out.video[1]`.
+
+Other rules:
+
+1. GTIA keeps a CPU write in `pending`. The write takes effect at `HPOS` `2c - 2 + d`,
+   where `c` is the cycle of the write and `d` is the delay of the register (see
+   "Timing"). A write with `d` = 0 or 1 changes a color clock of the `clock` call of the
+   same cycle.
+2. In `clock`, GTIA first loads the P/M DMA byte (if any), then makes the two color clocks.
+3. GTIA copies the back buffer to the front buffer in the `clock` call where `out.line` is
+   248 and `out.cycle` is 0. This is the same cycle in which ANTIC sets `frame_done`.
+4. The machine calls `set_trigger(3, !rd5)` at power-on and after each access that can
    change the cartridge RD5 line (REQ-435).
-6. After each `CONSOL` write, the machine gives `speaker()` to the audio mixer (REQ-438).
-7. `Machine::set_joystick(port, state)` sets `PORTA` input bits through the PIA and calls
+5. After each `CONSOL` write, the machine gives `speaker()` to the audio mixer (REQ-438).
+6. `Machine::set_joystick(port, state)` sets `PORTA` input bits through the PIA and calls
    `set_trigger(port, state.fire)` (REQ-439, REQ-440).
 
-### What GTIA needs from ANTIC
+### What GTIA uses from `CycleOutput`
 
-| Item | Contract |
+| Field | Use |
 | --- | --- |
-| Call rate | One `tick` per machine cycle, all 114 cycles of all scanlines. |
-| HPOS alignment | `an[0]` is HPOS `(2c - 4) mod 228` (always even). `an[1]` is the next HPOS. |
-| Active region | Code `%000` or `%1xx` for each color clock between the horizontal blanks of scanlines 8-247. |
-| Playfield position | Narrow `$40-$BF`, normal `$30-$CF`, wide `$20-$DF` with `$20-$2B` sent as `%000` (HRM 6.2). |
-| Horizontal blank | Code `%010` or `%011` for the hires state of the next scanline (HRM 6.8, 6.9). |
-| Vertical blank | Horizontal blank codes for the full scanline. `%001` on the vertical sync scanlines. |
-| P/M DMA | `pm_dma` = `Missiles` on cycle 0 and `Player(0..=3)` on cycles 2-5, only when `DMACTL` enables the fetch, on scanlines 8-247 (HRM 4.13). |
-| Bus value | `bus` = the data bus value of the cycle (only for REQ-441). |
-| Scanline number | The same scanline count as ANTIC uses for `VCOUNT`. GTIA uses bit 0 for `VDELAY`. |
+| `video` | The ANx codes of `HPOS` `2c - 2` (even) and `2c - 1`. Playfield: narrow `$40-$BF`, normal `$30-$CF`, wide `$2C-$DD` (ANTIC sends background for `$20-$2B`). Horizontal blank: `%010` or `%011` (the hires state of the next scanline). Vertical blank: blank codes, `%001` on the vertical sync scanlines. |
+| `dma`, `halt` | `DmaKind::Missile` (cycle 0) and `DmaKind::Player(n)` (cycles 2-5) mark the P/M DMA bytes. The halt pattern finds P/M data for REQ-441. |
+| `line` | Bit 0 only: `VDELAY` masks DMA loads on even scanlines (HRM 6.5). |
+| `cycle` | The cycle of this call, for the frame buffer position and the front-buffer copy. |
+| `data_bus` (argument) | The P/M DMA byte on a P/M DMA cycle. The bus value for REQ-441. |
 
 ## State
 
@@ -192,7 +164,7 @@ register and the value. `PRIOR` makes two entries: bits 0-5 and bits 6-7.
 
 ### Color clock pipeline
 
-`tick` makes two color clocks: HPOS `h0 = (2c - 4) mod 228` and `h0 + 1`. For each color
+`clock` makes two color clocks: HPOS `h0 = (2c - 2) mod 228` and `h0 + 1`. For each color
 clock, GTIA does these steps in this order:
 
 1. Apply each `pending` write whose time is at or before this color clock.
@@ -223,12 +195,12 @@ even color clock.
 
 ### Players and missiles (REQ-413 to REQ-419, REQ-441)
 
-- DMA: a `Missiles` byte goes to `grafm` if `GRACTL` bit 0 = 1. A `Player(n)` byte goes to
-  `grafp[n]` if `GRACTL` bit 1 = 1. If the `VDELAY` bit of an object is 1 and `line` is
+- DMA: a `DmaKind::Missile` byte goes to `grafm` if `GRACTL` bit 0 = 1. A `DmaKind::Player(n)` byte goes to
+  `grafp[n]` if `GRACTL` bit 1 = 1. If the `VDELAY` bit of an object is 1 and `out.line` is
   even, the object keeps its old value. GTIA handles a DMA byte as a write on the cycle of
   the `tick`, with the delay of `GRAFx` (3 color clocks).
-- REQ-441: if `GRACTL` bit 1 = 1 and ANTIC gives a `Missiles` byte but no player bytes, GTIA
-  loads `grafp[n]` from `bus` on cycles 2-5.
+- REQ-441: if `GRACTL` bit 1 = 1 and ANTIC gives a missile DMA cycle but no player DMA cycles,
+  GTIA loads `grafp[n]` from `data_bus` on cycles 2-5.
 - Per color clock and per object: if `h == position`, then `shift |= latch` and
   `state = 0`. A missile latch is its 2 bits in bits 7-6. The object bit is bit 7 of
   `shift`. Then `state = (state + 1) & size`, and if `state == 0`, `shift <<= 1`.
@@ -286,8 +258,9 @@ output. They do not change the frame buffer.
 
 ## Timing
 
-- Machine cycle `c` of a scanline covers GTIA color clocks `2c - 4` and `2c - 3`
-  (mod 228). The base time of a CPU write in cycle `c` is color clock `2c - 2`.
+- Machine cycle `c` of a scanline covers GTIA color clocks `2c - 2` and `2c - 1`
+  (mod 228). GTIA makes them in `clock`, after the CPU access of cycle `c`. The base time
+  of a CPU write in cycle `c` is color clock `2c - 2`.
 - A write takes effect at `base + d` (HRM 6.10, REQ-434):
 
 | Register | d | Write on cycle 65 shows at |
@@ -299,8 +272,8 @@ output. They do not change the frame buffer.
 | `HPOSP0-3`, `HPOSM0-3`, `SIZEP0-3`, `SIZEM` | 5 | `$85` |
 | `VDELAY`, `GRACTL`, `HITCLR`, `CONSOL` | 0 | at once |
 
-- A write from cycle `c` takes effect at color clock `2c - 1` or later. GTIA makes that
-  color clock in `tick(c + 1)`, so `pending` always has the write in time.
+- A write from cycle `c` takes effect at color clock `2c - 2` or later. GTIA makes that
+  color clock in `clock` of cycle `c` or later, so `pending` always has the write in time.
 - The P/M DMA bytes come in cycles 0 and 2-5, in horizontal blank, so they are in the
   latches before the visible region.
 - The front buffer changes at the first `tick` of scanline 248.
@@ -309,7 +282,7 @@ output. They do not change the frame buffer.
 
 Unit tests are in `crates/atari-core/src/gtia.rs` and `crates/atari-core/src/palette.rs`
 (`#[cfg(test)] mod tests`). A GTIA unit test makes a `Gtia`, writes registers, and calls
-`tick` with synthetic `GtiaCycle` values. System tests are in `crates/harness/tests/`. They
+`clock` with synthetic `CycleOutput` values and data bus values. System tests are in `crates/harness/tests/`. They
 run a small 6502 program on the full machine and check the frame buffer or memory.
 
 | Requirement | Test |
@@ -391,7 +364,7 @@ The tests that this list adds or changes do these checks:
 - `write_delay_base_other_cycle`: a `COLBK` write on cycle 30 changes the color from HPOS `$3B`.
 - `crates/harness/tests/gtia.rs` `trig2_always_inactive`: reads `TRIG2` after boot, with both joystick buttons pressed, and with `GRACTL` = `$04`.
 - `trigger_latch_all_triggers`: latches triggers 0, 1 and 3, and latches an input that is active when `GRACTL` bit 2 is set.
-- `players_load_bus_without_player_dma` (was a system test): feeds `GtiaCycle` values with a missile DMA byte and bus values on cycles 2-5, and checks the player images.
+- `players_load_bus_without_player_dma` (was a system test): feeds `CycleOutput` values with a missile DMA cycle and bus values on cycles 2-5, and checks the player images.
 
 ## Open issues
 
@@ -418,8 +391,7 @@ The tests that this list adds or changes do these checks:
 8. HRM inconsistencies: HRM 6.5 gives `HPOSP0-3` at `[D400-D403]`. HRM 14.3 and Table 13 give
    `$D000-$D003`. The emulator uses `$D000`. HRM 14.3 gives the wide playfield as `$22-$DD`.
    HRM 4.3 and 6.2 give `$2C-$DD` for the visible playfield. ANTIC sets the clip.
-9. The HPOS alignment `2c - 4` in `GtiaCycle` must agree with the ANTIC design
-   (`docs/design/antic.md`).
+9. Resolved by OI-001: GTIA uses `antic::CycleOutput`, and cycle `c` covers HPOS `2c - 2` and `2c - 1`.
 10. The frontend has no setting to turn on the display filters of REQ-411 and REQ-412
     (`docs/design/architecture.md`). The test `display_filters_off_by_default` needs the setting.
 11. REQ-412 does not give the output of `pal_blend_row` for row 0, which has no previous row.

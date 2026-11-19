@@ -6,7 +6,7 @@ section, set the status to `Decided`, and change the affected requirements.
 
 | Item | Title | Area | Status |
 | --- | --- | --- | --- |
-| [OI-001](OI-001.md) | ANTIC-to-GTIA cycle interface | ANTIC, GTIA | Open |
+| [OI-001](OI-001.md) | ANTIC-to-GTIA cycle interface | ANTIC, GTIA | Decided |
 | [OI-002](OI-002.md) | Side effects of ANTIC DMA reads in $D500-$D5FF | System, media | Open |
 | [OI-003](OI-003.md) | Cartridge interface signatures | System, media | Open |
 | [OI-004](OI-004.md) | Duplicate cartridge requirements | System, media | Open |
