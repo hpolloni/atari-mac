@@ -159,7 +159,7 @@ withdrawn. It writes the matrix to `target/traceability.md`. A work package sets
 | --- | --- |
 | REQ-020 | `tests/harness_self_test.rs` `fetch_urls_are_pinned`, `fetch_rejects_bad_checksum` (runs the script on a temporary copy with a wrong checksum); CI runs the script |
 | REQ-021 | `tests/harness_self_test.rs` `missing_file_names_fetch_command`; inspection of the test files for early returns |
-| REQ-023 | `tests/cpu_single_step.rs`: the seven `single_step_*` tests |
+| REQ-023 | `cpu_single_step.rs` `single_step_bus_cycles`. The other single-step tests in that file also use the runner, but they verify CPU requirements (`docs/design/cpu.md`). |
 | REQ-024 | `tests/harness_self_test.rs` `screen_text_has_24_rows_of_40`, `internal_to_ascii_values` |
 | REQ-025 | `tests/keyboard.rs` `basic_prints_sum`, `type_text_rejects_unknown_character` |
 | REQ-026 | `tests/golden.rs` `boot_screen_matches_golden`, `difference_writes_failure_images`, `update_mode_writes_reference` |

@@ -729,13 +729,11 @@ the test code writes (usually `$A5` at `$0600`), with the frame limit of the req
 | REQ-638 | `media.rs` `req638_seek_time` (1-4, 6), `req638_write_verify_time` (5) |
 
 `req623_fast_sio_xl_os` uses a user-supplied Atari XL/XE OS ROM (REQ-004), which the project
-cannot download. The test has `#[ignore = "needs a user-supplied Atari XL/XE OS ROM: REQ-623"]`
-and runs only with `cargo test -- --ignored`. If the ROM is missing then, the test fails with
-`HarnessError::Missing` (REQ-021). It never passes without a check. Because it is ignored, the
-other REQ-623 tests must give the running test that a `done` package needs (REQ-027).
+cannot download. How this test runs without the ROM is open: see OI-040. REQ-623 criterion 7 and this
+document do not agree, and the REQ-027 gate permits only the ignore reason `planned: SLICE-NN`.
+The other REQ-623 tests must give the running test that a `done` package needs (REQ-027).
 
-The REQ-638 tests have the attribute `#[ignore = "needs seek model: REQ-638"]` until the seek
-model is enabled. The MaxFlash kinds exist (WP-7 of SLICE-01), so the REQ-608 tests run.
+The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model is built. The MaxFlash kinds exist (WP-7 of SLICE-01), so the REQ-608 tests run.
 
 ## Open issues
 

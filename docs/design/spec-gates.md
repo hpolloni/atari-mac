@@ -94,7 +94,7 @@ pub struct TestPlanRow { pub document: PathBuf, pub requirements: Vec<u16>,
                          pub tests: Vec<TestRef>, pub evidence: Option<PathBuf> }
 pub struct TestRef { pub file: Option<String>, pub function: String }
 pub struct CodeTest { pub file: PathBuf, pub function: String, pub ignored: bool,
-                      pub verifies: Vec<u16> }
+                      pub ignore_reason: Option<String>, pub verifies: Vec<u16> }
 
 pub struct Spec { pub requirements: ..., pub open_items: ..., pub slices: ...,
                   pub evidence: ..., pub test_plans: Vec<TestPlanRow>,

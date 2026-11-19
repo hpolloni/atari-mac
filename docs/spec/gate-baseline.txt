@@ -88,7 +88,6 @@ REQ-047 docs/spec/requirements/REQ-334.md: `REQ-199` names no file
 REQ-047 docs/spec/requirements/REQ-347.md: `REQ-299` names no file
 REQ-048 docs/design/architecture.md: the test plan row of REQ-007 (demonstration) does not name docs/verification/REQ-007.md
 REQ-048 docs/design/architecture.md: the test plan row of REQ-011 (demonstration) does not name docs/verification/REQ-011.md
-REQ-048 docs/design/test-harness.md: the test plan row of REQ-023 names no test in backticks
 REQ-048 docs/spec/requirements/REQ-001.md: REQ-001 is in no design test plan
 REQ-048 docs/spec/requirements/REQ-015.md: REQ-015 is in no design test plan
 REQ-048 docs/spec/requirements/REQ-027.md: REQ-027 is in the test plans of docs/design/spec-gates.md, docs/design/test-harness.md
@@ -101,7 +100,6 @@ REQ-049 crates/atari-core/src/machine.rs: `console_keys_reach_gtia` verifies REQ
 REQ-049 crates/atari-core/src/media.rs: `raw_sizes_select_kind` verifies REQ-604, but the test plan of REQ-604 does not name it
 REQ-049 crates/atari-core/src/media.rs: `standard_mapping` verifies REQ-600, but the test plan of REQ-600 does not name it
 REQ-049 crates/harness/tests/boot.rs: `boots_to_basic_ready` verifies REQ-024, but the test plan of REQ-024 does not name it
-REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-023, but the test plan of REQ-023 does not name it
 REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-102, but the test plan of REQ-102 does not name it
 REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-103, but the test plan of REQ-103 does not name it
 REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-105, but the test plan of REQ-105 does not name it
