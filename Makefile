@@ -11,6 +11,14 @@ export CARGO_TERM_COLOR := always
 
 COVERAGE_MIN := 80
 
+# The frontend (`atari-mac`) builds on macOS only (docs/design/architecture.md, "CI targets").
+# On another host, the gates that build code skip it, as the Linux CI jobs do.
+ifeq ($(shell uname -s),Darwin)
+PACKAGES := --workspace
+else
+PACKAGES := --workspace --exclude atari-mac
+endif
+
 .PHONY: check pre-commit fmt fmt-check spec-check clippy test doc deny typos toml-check \
         machete msrv features coverage roms test-data tools hooks clean
 
@@ -28,7 +36,7 @@ fmt-check:
 	cargo fmt --all --check
 
 clippy:
-	cargo clippy --workspace --all-targets --all-features --locked
+	cargo clippy $(PACKAGES) --all-targets --all-features --locked
 
 ## ROMs and the small test data (fast). `make test-data` adds the 1.1 GB single-step suite.
 roms:
@@ -38,11 +46,11 @@ test-data:
 	scripts/fetch-roms.sh --single-step
 
 test: roms
-	cargo test --workspace --all-targets --all-features --locked
-	cargo test --workspace --doc --all-features --locked
+	cargo test $(PACKAGES) --all-targets --all-features --locked
+	cargo test $(PACKAGES) --doc --all-features --locked
 
 doc:
-	cargo doc --workspace --no-deps --document-private-items --all-features --locked
+	cargo doc $(PACKAGES) --no-deps --document-private-items --all-features --locked
 
 deny:
 	cargo deny --all-features --locked check
@@ -61,13 +69,13 @@ machete:
 	cargo machete
 
 msrv:
-	cargo hack check --rust-version --workspace --all-targets --locked
+	cargo hack check --rust-version $(PACKAGES) --all-targets --locked
 
 features:
-	cargo hack check --feature-powerset --workspace --all-targets --locked
+	cargo hack check --feature-powerset $(PACKAGES) --all-targets --locked
 
 coverage: roms
-	cargo llvm-cov --workspace --all-features --locked --fail-under-lines $(COVERAGE_MIN)
+	cargo llvm-cov $(PACKAGES) --all-features --locked --fail-under-lines $(COVERAGE_MIN)
 
 tools:
 	cargo install --locked cargo-deny cargo-hack cargo-llvm-cov cargo-machete taplo-cli typos-cli

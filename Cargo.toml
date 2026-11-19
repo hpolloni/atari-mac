@@ -25,6 +25,12 @@ publish.workspace = true
 
 [dependencies]
 atari-core.workspace = true
+# Window and keyboard (docs/design/architecture.md, "Frontend"). The Linux backends are not
+# needed: `x11` is on only because the build script of minifb 0.29.0 does not detect a
+# `-darwin` target and stops without `x11` or `wayland`. On macOS, `x11` compiles no code.
+minifb = { version = "0.29.0", default-features = false, features = ["x11"] }
+# The PNG screenshot of the headless mode (REQ-013).
+png = "0.18.1"
 
 [lints]
 workspace = true
