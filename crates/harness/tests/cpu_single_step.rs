@@ -24,7 +24,6 @@ fn stable_undocumented() -> Vec<u8> {
 
 /// Verifies REQ-100 and REQ-107: all documented opcodes.
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-100"]
 fn single_step_documented_opcodes() {
     let summary = check(&DOCUMENTED_OPCODES).unwrap();
     assert!(summary.is_empty(), "single-step failures:\n{summary}");
@@ -32,7 +31,6 @@ fn single_step_documented_opcodes() {
 
 /// Verifies REQ-101 to REQ-106 and REQ-023: every bus cycle of every non-KIL opcode.
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-101"]
 fn single_step_bus_cycles() {
     let all: Vec<u8> = (0..=u8::MAX)
         .filter(|op| !KIL_OPCODES.contains(op))
@@ -43,7 +41,6 @@ fn single_step_bus_cycles() {
 
 /// Verifies REQ-108: decimal mode `ADC` and `SBC` (the cases include `D` = 1).
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-108"]
 fn single_step_decimal() {
     let summary = check(&[
         0x61, 0x65, 0x69, 0x6D, 0x71, 0x75, 0x79, 0x7D, 0xE1, 0xE5, 0xE9, 0xED, 0xF1, 0xF5, 0xF9,
@@ -55,7 +52,6 @@ fn single_step_decimal() {
 
 /// Verifies REQ-114: `BRK`.
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-114"]
 fn single_step_brk() {
     let summary = check(&[0x00]).unwrap();
     assert!(summary.is_empty(), "single-step failures:\n{summary}");
@@ -63,7 +59,6 @@ fn single_step_brk() {
 
 /// Verifies REQ-113: the KIL opcodes.
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-113"]
 fn single_step_kil() {
     let summary = check(&KIL_OPCODES).unwrap();
     assert!(summary.is_empty(), "single-step failures:\n{summary}");
@@ -71,7 +66,6 @@ fn single_step_kil() {
 
 /// Verifies REQ-111: the stable undocumented opcodes.
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-111"]
 fn single_step_undocumented_stable() {
     let summary = check(&stable_undocumented()).unwrap();
     assert!(summary.is_empty(), "single-step failures:\n{summary}");
@@ -79,7 +73,6 @@ fn single_step_undocumented_stable() {
 
 /// Verifies REQ-112: the unstable undocumented opcodes.
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-112"]
 fn single_step_undocumented_unstable() {
     let summary = check(&UNSTABLE_OPCODES).unwrap();
     assert!(summary.is_empty(), "single-step failures:\n{summary}");

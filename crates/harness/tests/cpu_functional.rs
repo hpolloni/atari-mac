@@ -15,7 +15,6 @@ const MAX_CYCLES: u64 = 100_000_000;
 
 /// Verifies REQ-110: the CPU reaches the success trap at `$3469`.
 #[test]
-#[ignore = "needs WP-1 (CPU): REQ-110"]
 fn klaus_dormann_functional_test() {
     let image =
         data::read_test_file("test-data/klaus/6502_functional_test.bin", data::FETCH_ROMS).unwrap();
