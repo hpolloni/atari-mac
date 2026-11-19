@@ -83,3 +83,13 @@ Items that a work package found and that belong to a later package or slice.
 | WP-3 | `Machine::drain_audio` is `const fn`, so `Pokey::drain_samples` must be `const` and has an `expect`. Remove both when audio exists. | The audio package |
 | WP-3 | The machine calls `set_speaker(!gtia.speaker())`. Check the polarity against `pokey.md` and `gtia.md`. | The audio package |
 | WP-3 | Linked timers, two-tone resync and the asynchronous receive hold are not implemented. With `AUDCTL` bits 3 or 4 set, the timers count as unlinked. | The timer and serial packages |
+| WP-1 | REQ-120 criterion 3 (`PLP`+`SEI`, `PLP`+`PLP`) is not met; it waits for OI-007. | The lead, after OI-007 |
+| WP-4 | `every_atari_key_has_a_host_key` uses its own copy of the 54 keys. Switch it to `keyboard::KEYS`, which WP-3 added. | A frontend teammate |
+| WP-4 | `Machine` has no `set_key` or `set_control` wrappers, so CONTROL alone does nothing in the frontend. | WP-5 part 2 |
+| WP-4 | `flate2` is held at 1.1.9: 1.1.10 adds a second `miniz_oxide`, which `cargo-deny` rejects. | Dependabot review |
+| WP-4 | REQ-014 adds `Instant::now` to `disallowed-methods`. The frontend needs it for frame timing, so it needs a scoped exception. | The REQ-014 package |
+| WP-4 | CI does not measure the frontend's coverage. Only a local `make check` on macOS does. | Known; matches `architecture.md` |
+| WP-5 | `machine.rs` calls `pokey.set_speaker(gtia.speaker())`. HRM 6.11 gives `!gtia.speaker()`. `system.md` and `pokey.md` are corrected. | WP-5 part 2 |
+| WP-5 | The CPU gives no signal that an IRQ or BRK sequence started, so the machine cannot call `Antic::irq_sequence_started` (REQ-335). | A CPU teammate and WP-5 part 2 |
+| WP-5 | REQ-203 criteria 3 and 4 and REQ-206 criterion 6 need a test cartridge that counts `$D5xx` accesses or has RD5 off. `media::Cartridge` has no test hook. | The media package |
+| WP-5 | There is no `SioBus` yet, so the machine keeps SIO DATA IN high and drops the serial bytes. | The media package |

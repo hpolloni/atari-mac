@@ -128,7 +128,8 @@ pub const fn ascii_to_kbcode(c: char) -> Option<u8>;
    cycle N shows each event whose visible cycle is N or earlier.
 3. The machine gives `irq()` to the CPU together with the PIA IRQ (logical OR). POKEY does not
    model the 2-3 cycle delay of HRM 5.7 Interrupt timing. The CPU design owns that delay.
-4. The machine calls `set_speaker` after each GTIA write, with the level of `CONSOL` bit 3.
+4. The machine calls `set_speaker(!gtia.speaker())` after each GTIA write: the speaker line is
+   high when `CONSOL` bit 3 was written as 0 (HRM 6.11).
 5. Input functions (`set_key`, `set_shift`, `set_control`, `set_break`, `set_pot`,
    `set_serial_in`, `set_serial_clock_in`) can be called between two `tick` calls. The new
    level applies from the next `tick`.

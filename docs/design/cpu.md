@@ -56,7 +56,9 @@ pub struct Registers {
     pub x: u8,
     pub y: u8,
     pub s: u8,
-    /// Processor status. Bits 4 and 5 always read as 1 (REQ-107).
+    /// Processor status. The CPU never changes bits 4 and 5: they are 1 after power-on and
+    /// keep the value that `registers_mut` writes (the SingleStepTests data needs this).
+    /// `PHP` and interrupts push them as REQ-107 states.
     pub p: u8,
     pub pc: u16,
 }

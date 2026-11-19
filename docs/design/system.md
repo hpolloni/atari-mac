@@ -166,7 +166,7 @@ The draft names `cold_reset`, `reset_key` and `step` change to `power_on`, `pres
 | `ram` | 65,536 bytes | all `$00` (REQ-215) |
 | `os` | 16,384 bytes | from the configuration |
 | `basic` | 8,192 bytes or none | from the configuration |
-| `portb_pins` | `u8` | `$FF` after the PIA reset (bits 2-6 not used) |
+| `portb_pins` | `u8` | `$83` after the PIA reset: bits 0, 1 and 7 are pulled up (HRM 2.6), bits 2-6 float (REQ-222) |
 | `cycles` | `u64` | 0 |
 | `line`, `line_cycle` | `u32`, `u32` | 0, 0 (owned by ANTIC; the machine reads them) |
 
@@ -182,6 +182,7 @@ The draft names `cold_reset`, `reset_key` and `step` change to `power_on`, `pres
 | `ca1`, `cb1`, `ca2_in`, `cb2_in` | `bool` | true (not reset) | External control line levels. |
 | `ca2_low`, `cb2_low` | `bool` | false | Output low because of a pulse mode. |
 | `cb2_rose` | `bool` | false | CB2 output went from `110` to `111` (REQ-231). |
+| `ca2_pulse`, `cb2_pulse` | `u8` | 0 | Cycles left of a one-cycle pulse output (REQ-227). A write that changes the mode bits clears it (project decision). |
 | `float_high` | `u8` | `$00` | Port B bits 2-6 that still read 1. |
 | `float_timer` | `[u32; 8]` | 0 | Cycles left until each floating bit reads 0. |
 
@@ -244,8 +245,9 @@ read of the other I/O pages in `$D000-$D7FF` has no side effect and gives `$FF`.
 
 ### Power-on (REQ-215, REQ-216)
 
-`power_on` fills RAM with `$00`, then calls `reset` on ANTIC, GTIA, POKEY and the PIA, and
-`Cpu::reset`. The CPU registers get the power-on values of REQ-128. The CPU reset sequence
+`power_on` fills RAM with `$00`, replaces ANTIC with `Antic::new(standard)` (the RESET line
+does not move the beam position, but a power-on starts at line 0, cycle 0, REQ-303), then
+calls `reset` on ANTIC, GTIA, POKEY and the PIA, and `Cpu::reset`. The CPU registers get the power-on values of REQ-128. The CPU reset sequence
 runs in the first 7 CPU cycles.
 
 ### Reset button (REQ-217)
@@ -319,9 +321,9 @@ to `110` clears it. If `cb2_rose` is true and the new bits 5-3 are `0xx`, the PI
 ### TRIG3 (REQ-232)
 
 After each CPU access to `$8000-$BFFF` or `$D5xx`, and after `power_on` and `press_reset`,
-the machine calls `gtia.set_trigger_input(3, cart.rd5())`. `true` means "not pressed", so
-`TRIG3` reads 1 while RD5 is active. With no cartridge the input is `false`. GTIA input 2 is
-always `true` (HRM 2.8).
+the machine calls `gtia.set_trigger(3, !cart.rd5())`. `true` means "active" (`gtia.md`), so
+`TRIG3` reads 1 while RD5 is active. With no cartridge the trigger is active (`TRIG3` = 0).
+GTIA trigger 2 is never active (HRM 2.8).
 
 ## Timing
 
@@ -336,7 +338,8 @@ One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
    the level of cycle `c`. The PIA level is the level from the end of cycle `c - 1`.
 4. If `out.halt` is false: `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
    `portb_pins`. A PIA write updates `portb_pins` at the end of the access. A GTIA write
-   also calls `pokey.set_speaker(gtia.speaker())`.
+   also calls `pokey.set_speaker(!gtia.speaker())`: a `CONSOL` bit written as 1 pulls its
+   line down (HRM 6.11), so the speaker line is high when bit 3 was written as 0.
 5. The machine finds the data bus value of the cycle (`antic.md`, "Call order", step 3),
    then calls `antic.end_cycle(data_bus)` and `gtia.clock(&out, data_bus)`.
 6. `pia.tick()`. Then each byte from `pokey.take_serial_byte()` goes to `sio.host_byte`. If
