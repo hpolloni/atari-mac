@@ -366,7 +366,7 @@ count its accesses. "PORTB pins = `$xx`" in the requirements means that the test
 | REQ-200 | `crates/atari-core/src/timing.rs` unit tests `machine_clock_values`, `color_clocks_per_line`; `machine.rs` unit test `machine_uses_configured_standard` |
 | REQ-201 | `timing.rs` unit test `frame_rates_match_the_hardware`; `machine.rs` unit tests `scan_line_is_114_cycles`, `ntsc_frame_is_29868_cycles`, `pal_frame_is_35568_cycles` |
 | REQ-202 | `machine.rs` unit tests `dma_cycles_halt_cpu`, `free_cycles_run_cpu`, `antic_never_writes` |
-| REQ-203 | `machine.rs` unit tests `dummy_read_clears_pia_status`, `rmw_writes_portb_twice`, `dummy_read_reaches_cartridge_control`, `rdy_reads_reach_cartridge_control` |
+| REQ-203 | `machine.rs` unit tests `dummy_read_clears_pia_status`, `rmw_writes_portb_twice`, `dummy_read_reaches_cartridge_control`, `rdy_reads_reach_cartridge_control`; `machine.rs` unit test `bus_reads_have_side_effects` |
 | REQ-204 | `machine.rs` unit tests `all_ram_visible_with_roms_off`, `low_ram_always_visible` |
 | REQ-205 | `machine.rs` unit tests `io_area_cannot_be_disabled`, `io_write_does_not_change_ram`, `io_pages_reach_chips` |
 | REQ-206 | `machine.rs` unit tests `write_to_os_rom_ignored`, `write_to_basic_ignored`, `write_to_cartridge_rom_ignored`, `write_to_self_test_ignored` |
@@ -392,7 +392,7 @@ count its accesses. "PORTB pins = `$xx`" in the requirements means that the test
 | REQ-226 | `pia.rs` unit tests `ca2_input_negative_edge_no_irq`, `ca2_input_positive_edge_irq`, `cb2_input_negative_edge_irq`, `ca2_cb2_input_idle_high` |
 | REQ-227 | `pia.rs` unit tests `cb2_command_line_levels`, `ca2_motor_line_levels`, `ca2_pulse_one_cycle_on_read`, `ca2_low_until_ca1`, `cb2_pulse_modes_on_write` |
 | REQ-228 | `pia.rs` unit tests `data_read_clears_status`, `ddr_read_keeps_status`, `disable_keeps_status`, `output_mode_clears_bit_6` |
-| REQ-229 | `pia.rs` unit tests `irq_from_ca1`, `irq_from_cb2`, `irq_released_after_read`, `no_irq_when_disabled`; `machine.rs` unit test `irq_line_is_pia_or_pokey` |
+| REQ-229 | `pia.rs` unit tests `irq_from_ca1`, `irq_from_cb2`, `irq_released_after_read`, `no_irq_when_disabled`; `machine.rs` unit test `irq_line_is_pia_or_pokey`; `machine.rs` unit test `irq_line_with_pokey` |
 | REQ-230 | `pia.rs` unit tests `reset_clears_all_registers`, `reset_selects_ddr`, `reset_clears_output_registers`, `reset_no_irq` |
 | REQ-231 | `pia.rs` unit tests `spurious_ca2_positive_edge_mode`, `spurious_ca2_with_irq`, `spurious_cb2_after_rise`, `no_spurious_cb2_without_low` |
 | REQ-232 | `machine.rs` unit tests `trig3_zero_without_cartridge`, `trig3_one_with_cartridge`, `trig3_follows_cartridge_bank_switch`, `trig3_ignores_basic`, `trig2_reads_one`, `trig3_after_power_on_and_reset` |

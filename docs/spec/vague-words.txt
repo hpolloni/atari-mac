@@ -1,0 +1,14 @@
+# Vague words and phrases (REQ-045). One word or phrase per line, without regard to case.
+# Lines that start with `#` are comments. A match is a whole word. Text in backticks is not
+# checked.
+correct
+correctly
+properly
+appropriate
+as expected
+reasonable
+etc
+and so on
+user-friendly
+fast
+quickly

@@ -1,9 +1,39 @@
+---
+id: SLICE-01
+title: Boot to BASIC and type a command
+status: in-progress
+depends_on: "The committed specification (`docs/spec/`, `docs/design/`)"
+packages:
+  - id: WP-0
+    title: Interfaces
+    status: done
+    requirements: []
+  - id: WP-1
+    title: CPU
+    status: done
+    requirements: [REQ-100, REQ-101, REQ-102, REQ-103, REQ-104, REQ-105, REQ-106, REQ-107, REQ-108, REQ-110, REQ-113, REQ-114, REQ-115, REQ-116, REQ-117, REQ-124]
+  - id: WP-2
+    title: Video
+    status: in-progress
+    requirements: [REQ-300, REQ-301, REQ-302, REQ-303, REQ-304, REQ-305, REQ-308, REQ-309, REQ-310, REQ-312, REQ-313, REQ-314, REQ-319, REQ-320, REQ-321, REQ-322, REQ-323, REQ-331, REQ-332, REQ-333, REQ-336, REQ-338, REQ-400, REQ-401, REQ-402, REQ-403, REQ-404, REQ-405, REQ-406, REQ-408, REQ-409, REQ-435, REQ-437]
+  - id: WP-3
+    title: Keyboard
+    status: done
+    requirements: [REQ-500, REQ-501, REQ-515, REQ-518, REQ-519, REQ-522, REQ-523, REQ-524]
+  - id: WP-4
+    title: Frontend
+    status: in-progress
+    requirements: [REQ-008, REQ-009, REQ-013]
+  - id: WP-5
+    title: Machine and harness
+    status: in-progress
+    requirements: [REQ-201, REQ-202, REQ-203, REQ-204, REQ-205, REQ-206, REQ-207, REQ-208, REQ-211, REQ-216, REQ-217, REQ-218, REQ-219, REQ-220, REQ-221, REQ-222, REQ-224, REQ-229, REQ-230, REQ-003, REQ-005, REQ-020, REQ-021, REQ-023, REQ-024, REQ-025, REQ-027]
+  - id: WP-6
+    title: Specification gates
+    status: done
+    requirements: [REQ-043, REQ-044, REQ-045, REQ-046, REQ-047, REQ-048, REQ-049, REQ-050, REQ-051, REQ-052, REQ-053, REQ-054, REQ-055]
+---
 # SLICE-01: Boot to BASIC and type a command
-
-| Field | Value |
-| --- | --- |
-| Status | In progress |
-| Depends on | The committed specification (`docs/spec/`, `docs/design/`) |
 
 ## Goal
 
@@ -47,7 +77,7 @@ Each teammate works in its own git worktree (see `CLAUDE.md`). Each package must
 | WP-3 Keyboard | Done | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
 | WP-4 Frontend | In progress | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
 | WP-5 Machine and harness | In progress | Teammate | `machine.rs`, `pia.rs`, `timing.rs`, the `atari-harness` crate, and the integration code for WP-1 to WP-4. The lead merges and runs the final checks. | `tests/boot.rs`, `tests/keyboard.rs`, `tests/harness_self_test.rs` |
-| WP-6 Specification gates | In progress | Teammate | The frontmatter migration, `atari_harness::spec`, the gates of [spec-gates.md](../design/spec-gates.md), `spec-index`, the CI job `Specification`. It starts after WP-0 is merged. | `tests/spec_gates.rs`, `tests/traceability.rs` |
+| WP-6 Specification gates | Done | Teammate | The frontmatter migration, `atari_harness::spec`, the gates of [spec-gates.md](../design/spec-gates.md), `spec-index`, the CI job `Specification`. It starts after WP-0 is merged. | `tests/spec_gates.rs`, `tests/traceability.rs` |
 
 ### Test rule for each package (REQ-027)
 
@@ -93,3 +123,7 @@ Items that a work package found and that belong to a later package or slice.
 | WP-5 | The CPU gives no signal that an IRQ or BRK sequence started, so the machine cannot call `Antic::irq_sequence_started` (REQ-335). | A CPU teammate and WP-5 part 2 |
 | WP-5 | REQ-203 criteria 3 and 4 and REQ-206 criterion 6 need a test cartridge that counts `$D5xx` accesses or has RD5 off. `media::Cartridge` has no test hook. | The media package |
 | WP-5 | There is no `SioBus` yet, so the machine keeps SIO DATA IN high and drops the serial bytes. | The media package |
+| WP-6 merge | `kil_machine_keeps_running` (REQ-113, `machine.rs`) is in the `cpu.md` test plan but is not written. It is in `docs/spec/gate-baseline.txt`. | WP-5 part 2 |
+| WP-6 merge | `break_stops_basic_program` (REQ-522, `crates/harness/tests/keyboard.rs`) is in the `pokey.md` test plan but is not written. It is in the baseline. | WP-5 part 2 |
+| WP-6 merge | `basic_prints_sum` is in the REQ-518 test plan, but its `Verifies` comment names only REQ-025. It is in the baseline. | WP-5 part 2 |
+| WP-6 | The baseline holds about 130 violations in the existing specification: `depends_on` cycles, vague words, project decisions without notes, requirements in no test plan or in two. | The lead |

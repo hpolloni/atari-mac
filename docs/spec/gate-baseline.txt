@@ -1,0 +1,141 @@
+# Known violations of the specification gates (docs/design/spec-gates.md).
+#
+# The gates found these violations when they were added (WP-6 of SLICE-01). Each line is one
+# violation: the rule (the requirement that states it), the file and the message, without the
+# line number. The gates ignore the violations on this list. A violation that is not on the
+# list fails, and a line that matches no violation fails too: remove the line when the
+# violation is fixed. The lead decides each line; do not add lines to hide a new violation.
+REQ-043 docs/spec/requirements/REQ-115.md: `depends_on` has a cycle: REQ-115 -> REQ-118 -> REQ-117 -> REQ-115
+REQ-043 docs/spec/requirements/REQ-116.md: `depends_on` has a cycle: REQ-116 -> REQ-118 -> REQ-117 -> REQ-116
+REQ-043 docs/spec/requirements/REQ-117.md: `depends_on` has a cycle: REQ-117 -> REQ-115 -> REQ-118 -> REQ-117
+REQ-043 docs/spec/requirements/REQ-118.md: `depends_on` has a cycle: REQ-118 -> REQ-117 -> REQ-115 -> REQ-118
+REQ-043 docs/spec/requirements/REQ-331.md: `depends_on` has a cycle: REQ-331 -> REQ-332 -> REQ-334 -> REQ-331
+REQ-043 docs/spec/requirements/REQ-332.md: `depends_on` has a cycle: REQ-332 -> REQ-334 -> REQ-331 -> REQ-332
+REQ-043 docs/spec/requirements/REQ-333.md: `depends_on` has a cycle: REQ-333 -> REQ-334 -> REQ-331 -> REQ-333
+REQ-043 docs/spec/requirements/REQ-334.md: `depends_on` has a cycle: REQ-334 -> REQ-331 -> REQ-332 -> REQ-334
+REQ-043 docs/spec/requirements/REQ-339.md: `depends_on` has a cycle: REQ-339 -> REQ-340 -> REQ-339
+REQ-043 docs/spec/requirements/REQ-340.md: `depends_on` has a cycle: REQ-340 -> REQ-339 -> REQ-340
+REQ-043 docs/spec/requirements/REQ-516.md: `depends_on` has a cycle: REQ-516 -> REQ-525 -> REQ-516
+REQ-043 docs/spec/requirements/REQ-525.md: `depends_on` has a cycle: REQ-525 -> REQ-516 -> REQ-525
+REQ-043 docs/spec/requirements/REQ-526.md: `depends_on` has a cycle: REQ-526 -> REQ-528 -> REQ-526
+REQ-043 docs/spec/requirements/REQ-528.md: `depends_on` has a cycle: REQ-528 -> REQ-526 -> REQ-528
+REQ-043 docs/spec/requirements/REQ-534.md: `depends_on` has a cycle: REQ-534 -> REQ-535 -> REQ-534
+REQ-043 docs/spec/requirements/REQ-535.md: `depends_on` has a cycle: REQ-535 -> REQ-534 -> REQ-535
+REQ-043 docs/spec/requirements/REQ-600.md: `depends_on` has a cycle: REQ-600 -> REQ-604 -> REQ-600
+REQ-043 docs/spec/requirements/REQ-604.md: `depends_on` has a cycle: REQ-604 -> REQ-600 -> REQ-604
+REQ-044 docs/spec/requirements/REQ-605.md: the section heading `## Format` is not permitted
+REQ-044 docs/spec/requirements/REQ-610.md: the section heading `## Format` is not permitted
+REQ-044 docs/spec/requirements/REQ-611.md: the section heading `## Defects` is not permitted
+REQ-044 docs/spec/requirements/REQ-623.md: the section heading `## Device control block` is not permitted
+REQ-044 docs/spec/requirements/REQ-625.md: the section heading `## Format` is not permitted
+REQ-045 docs/spec/requirements/REQ-103.md: requirement statement: vague word `correct`
+REQ-045 docs/spec/requirements/REQ-535.md: criterion 3: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-536.md: criterion 3: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-536.md: criterion 4: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-612.md: criterion 5: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-613.md: criterion 2: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-614.md: criterion 3: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-623.md: criterion 1: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-623.md: criterion 8: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-623.md: requirement statement: vague word `fast`
+REQ-045 docs/spec/requirements/REQ-636.md: criterion 3: vague word `fast`
+REQ-046 docs/spec/requirements/REQ-004.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-005.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-007.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-012.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-013.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-014.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-016.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-017.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-018.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-020.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-021.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-022.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-023.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-024.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-025.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-026.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-027.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-040.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-041.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-042.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-604.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-605.md: `source` `Project decision (CAR file format)` names no HRM section and is not `Project decision`
+REQ-046 docs/spec/requirements/REQ-610.md: `source` `Project decision (Atari DOS 2 binary load format)` names no HRM section and is not `Project decision`
+REQ-046 docs/spec/requirements/REQ-610.md: `source` is a project decision, but there is no `Notes` section
+REQ-046 docs/spec/requirements/REQ-613.md: `source` `Project decision (Atari DOS 2 binary load format)` names no HRM section and is not `Project decision`
+REQ-046 docs/spec/requirements/REQ-614.md: `source` `Project decision (Atari DOS 2 binary load format)` names no HRM section and is not `Project decision`
+REQ-046 docs/spec/requirements/REQ-637.md: `source` is a project decision, but there is no `Notes` section
+REQ-047 docs/design/README.md: `REQ-099` names no file
+REQ-047 docs/design/README.md: `REQ-199` names no file
+REQ-047 docs/design/README.md: `REQ-299` names no file
+REQ-047 docs/design/README.md: `REQ-399` names no file
+REQ-047 docs/design/README.md: `REQ-499` names no file
+REQ-047 docs/design/README.md: `REQ-599` names no file
+REQ-047 docs/design/README.md: `REQ-699` names no file
+REQ-047 docs/design/antic.md: `REQ-199` names no file
+REQ-047 docs/design/antic.md: `REQ-299` names no file
+REQ-047 docs/design/architecture.md: `REQ-019` names no file
+REQ-047 docs/spec/README.md: `REQ-019` names no file
+REQ-047 docs/spec/README.md: `REQ-039` names no file
+REQ-047 docs/spec/README.md: `REQ-099` names no file
+REQ-047 docs/spec/README.md: `REQ-199` names no file
+REQ-047 docs/spec/README.md: `REQ-299` names no file
+REQ-047 docs/spec/README.md: `REQ-399` names no file
+REQ-047 docs/spec/README.md: `REQ-499` names no file
+REQ-047 docs/spec/README.md: `REQ-599` names no file
+REQ-047 docs/spec/README.md: `REQ-699` names no file
+REQ-047 docs/spec/requirements/REQ-334.md: `REQ-199` names no file
+REQ-047 docs/spec/requirements/REQ-347.md: `REQ-299` names no file
+REQ-048 docs/design/architecture.md: the test plan row of REQ-007 (demonstration) does not name docs/verification/REQ-007.md
+REQ-048 docs/design/architecture.md: the test plan row of REQ-008 (demonstration) does not name docs/verification/REQ-008.md
+REQ-048 docs/design/architecture.md: the test plan row of REQ-011 (demonstration) does not name docs/verification/REQ-011.md
+REQ-048 docs/design/architecture.md: the test plan row of REQ-042 names no test in backticks
+REQ-048 docs/design/spec-gates.md: the test plan row of REQ-027 (inspection) does not name docs/verification/REQ-027.md
+REQ-048 docs/design/test-harness.md: the test plan row of REQ-023 names no test in backticks
+REQ-048 docs/spec/requirements/REQ-001.md: REQ-001 is in no design test plan
+REQ-048 docs/spec/requirements/REQ-015.md: REQ-015 is in no design test plan
+REQ-048 docs/spec/requirements/REQ-027.md: REQ-027 is in the test plans of docs/design/spec-gates.md, docs/design/test-harness.md
+REQ-048 docs/spec/requirements/REQ-040.md: REQ-040 is in no design test plan
+REQ-048 docs/spec/requirements/REQ-041.md: REQ-041 is in no design test plan
+REQ-048 docs/spec/requirements/REQ-206.md: REQ-206 is in the test plans of docs/design/media.md, docs/design/system.md
+REQ-048 docs/spec/requirements/REQ-210.md: REQ-210 is in the test plans of docs/design/media.md, docs/design/system.md
+REQ-048 docs/spec/requirements/REQ-232.md: REQ-232 is in the test plans of docs/design/media.md, docs/design/system.md
+REQ-049 crates/atari-core/src/machine.rs: `console_keys_reach_gtia` verifies REQ-437, but the test plan of REQ-437 does not name it
+REQ-049 crates/atari-core/src/media.rs: `raw_sizes_select_kind` verifies REQ-604, but the test plan of REQ-604 does not name it
+REQ-049 crates/atari-core/src/media.rs: `standard_mapping` verifies REQ-600, but the test plan of REQ-600 does not name it
+REQ-049 crates/harness/tests/boot.rs: `boots_to_basic_ready` verifies REQ-024, but the test plan of REQ-024 does not name it
+REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-102, but the test plan of REQ-102 does not name it
+REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-103, but the test plan of REQ-103 does not name it
+REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_bus_cycles` verifies REQ-105, but the test plan of REQ-105 does not name it
+REQ-049 crates/harness/tests/cpu_single_step.rs: `single_step_documented_opcodes` verifies REQ-107, but the test plan of REQ-107 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `boot_program_uses_options` verifies REQ-024, but the test plan of REQ-024 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `failure_summary_lists_failed_opcodes` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `flat_bus_default_is_empty` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `flat_bus_logs_accesses` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `harness_error_messages` verifies REQ-024, but the test plan of REQ-024 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `harness_error_messages` verifies REQ-025, but the test plan of REQ-025 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `hold_console_keys_releases_keys` verifies REQ-024, but the test plan of REQ-024 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `hold_console_keys_releases_keys` verifies REQ-437, but the test plan of REQ-437 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `load_cases_errors` verifies REQ-021, but the test plan of REQ-021 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `load_cases_errors` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `load_cases_reads_nop_file` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `opcode_lists_are_consistent` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `run_case_fails_impossible_case` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `run_case_passes_and_clears_memory` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `run_case_reports_memory_difference` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `run_case_reports_register_difference` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `run_frames_counts_frames` verifies REQ-024, but the test plan of REQ-024 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `run_opcodes_reports_nop_file` verifies REQ-023, but the test plan of REQ-023 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `run_until_counts_frames` verifies REQ-024, but the test plan of REQ-024 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `test_os_rom_layout` verifies REQ-024, but the test plan of REQ-024 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `type_text_checks_all_characters_first` verifies REQ-025, but the test plan of REQ-025 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `type_text_presses_return` verifies REQ-025, but the test plan of REQ-025 does not name it
+REQ-049 crates/harness/tests/harness_self_test.rs: `unreadable_file_gives_read_error` verifies REQ-021, but the test plan of REQ-021 does not name it
+
+# Added by the lead at the WP-6 merge (2026-11-19). These planned tests are not written
+# yet. They are follow-up items in docs/plan/SLICE-01.md. Remove each line with its fix.
+REQ-049 docs/design/cpu.md: REQ-113: the test plan names `kil_machine_keeps_running` in crates/atari-core/src/machine.rs, which is not a #[test] function
+REQ-049 docs/design/pokey.md: REQ-518: the test `basic_prints_sum` in crates/harness/tests/keyboard.rs has no `Verifies` comment for REQ-518
+REQ-049 docs/design/pokey.md: REQ-522: the test plan names `break_stops_basic_program` in crates/harness/tests/keyboard.rs, which is not a #[test] function

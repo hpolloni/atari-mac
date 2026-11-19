@@ -1,3 +1,6 @@
+---
+product_complete: false
+---
 # Plan
 
 This directory holds the delivery plan. The work is done in vertical slices. A vertical slice

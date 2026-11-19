@@ -1,0 +1,203 @@
+# Section numbers and titles of the Altirra Hardware Reference Manual (HRM), from its table
+# of contents. The specification cites the edition of 2026-01-03; the title page of the text
+# file says "2026-01-02 Edition". Format: one section per line, number<TAB>title.
+# Made with this command, in the directory that holds `reference/`:
+#   sed -n '/^Table of Contents/,/^Index of Tables/p' reference/altirra-hardware-reference.txt |
+#     sed -nE 's/^ +([0-9A-G]+\.[0-9]+)\. (.*[^ ]) \.{2,}.*$/\1\t\2/p'
+1.1	Introduction
+1.2	Conventions in this manual
+1.3	What's new in this edition
+1.4	Concepts
+2.1	Basic architecture
+2.2	Clocks
+2.3	Memory system
+2.4	System Reset button
+2.5	Peripheral Interface Adapter (PIA)
+2.6	Bank switching
+2.7	Extended memory
+2.8	Miscellaneous connections
+2.9	Examples
+2.10	Further reading
+3.1	Flags
+3.2	Decimal mode
+3.3	Cycle timing
+3.4	Interrupts
+3.5	Undocumented instructions
+3.6	65C02 compatibility
+3.7	65C816 compatibility
+3.8	65C816 new features
+3.9	Examples
+3.10	Further reading
+4.1	Basic operation
+4.2	Display timing
+4.3	Playfield
+4.4	Character modes
+4.5	Mapped (bitmap) modes
+4.6	Display list
+4.7	Scrolling
+4.8	Non-maskable interrupts
+4.9	WSYNC
+4.10	VCOUNT
+4.11	Playfield DMA
+4.12	Abnormal playfield DMA
+4.13	Player/missile DMA
+4.14	Scan line timing
+4.15	Cycle counting example
+4.16	Examples
+4.17	Further reading
+5.1	Addressing
+5.2	Initialization
+5.3	Sound generation
+5.4	Clock generation
+5.5	Noise generators
+5.6	Serial port
+5.7	Interrupts
+5.8	Keyboard scan
+5.9	Paddle scan
+5.10	Examples
+5.11	Further reading
+6.1	System role
+6.2	Display generation
+6.3	Color encoding
+6.4	Artifacting
+6.5	Player/missile graphics
+6.6	Collision detection
+6.7	Priority control
+6.8	High resolution modes
+6.9	GTIA special modes
+6.10	Cycle timing
+6.11	General purpose I/O
+6.12	Further reading
+7.1	Joystick
+7.2	Paddle
+7.3	Mouse
+7.4	Light Pen/Gun
+7.5	CX-75 Light Pen
+7.6	Stack Lightpen
+7.7	CX-85 Numerical Keypad
+7.8	CX-20 Driving Controller
+7.9	CX-21/23/50 Keyboard Controller
+7.10	XEP80 Interface Module
+7.11	Corvus Disk System
+7.12	ComputerEyes Video Acquisition System
+8.1	Cartridge slot
+8.2	Atarimax flash cartridges
+8.3	Atarimax MyIDE-II
+8.4	SIC!
+8.5	SIDE 1 / SIDE 2
+8.6	SIDE 3
+8.7	Corina
+8.8	R-Time 8
+8.9	Veronica
+8.10	The Multiplexer
+9.1	Basic SIO protocol
+9.2	Poll Commands
+9.3	820 40 Column Printer
+9.4	820 Hardware
+9.5	1020 Color Printer
+9.6	1025 80 Column Printer
+9.7	1025 Hardware
+9.8	1029 Programmable Printer
+9.9	1029 Hardware
+9.10	850 Interface Module
+9.11	835 Modem
+9.12	835 Hardware
+9.13	1030 Modem
+9.14	1030 Hardware
+9.15	SX212 Modem
+9.16	R-Verter
+9.17	410/1010 Program Recorder
+9.18	MidiMate
+9.19	Pocket Modem
+10.1	Introduction
+10.2	Basic protocol
+10.3	Extended protocols
+10.4	Commands
+10.5	Timing
+10.6	Anomalies
+10.7	6532 RIOT
+10.8	177X/179X/279X FDC
+10.9	810 disk drive
+10.10	810 hardware
+10.11	Happy 810
+10.12	810 Turbo
+10.13	815 disk drive
+10.14	815 hardware
+10.15	1050 disk drive
+10.16	1050 hardware
+10.17	1450XLD disk drive
+10.18	1450XLD disk hardware
+10.19	US Doubler
+10.20	Super Archiver
+10.21	Happy 1050
+10.22	I.S. Plate
+10.23	XF551 disk drive
+10.24	XF551 hardware
+10.25	Speedy XF disk drive
+10.26	Indus GT disk drive
+10.27	Indus GT hardware
+10.28	ATR8000 hardware
+10.29	Percom RFD
+10.30	Percom AT88
+10.31	Percom AT88-SPD/S1PD
+10.32	Amdek AMDC-I/II
+11.1	Introduction
+11.2	Common memory map
+11.3	ICD Multi I/O (MIO)
+11.4	CSS Black Box
+11.5	CSS Black Box Floppy Board
+11.6	Atari 1090 80 Column Video Card
+11.7	Atari 1400XL/1450XLD
+12.1	Introduction
+12.2	Covox
+12.3	Ultimate1MB
+12.4	VideoBoard XE
+12.5	APE Warp+ OS 32-in-1
+12.6	Bit-3 Full-View 80
+13.1	Introduction
+13.2	Differences from the 8-bit computer line
+13.3	Controller
+13.4	5200 Memory map
+14.1	Memory map
+14.2	Register list
+14.3	GTIA registers
+14.4	POKEY registers
+14.5	PIA registers
+14.6	ANTIC registers
+14.7	Register listing
+15.1	List of references
+15.2	Errata
+B.1	Raw geometry
+B.2	Bit encoding
+B.3	Address field
+B.4	Data field
+B.5	CRC algorithm
+C.1	Signal encoding
+C.2	Framing
+C.3	FSK demodulation
+C.4	Zero crossing detection
+C.5	Peak detection
+C.6	DFT detection
+C.7	Quadrature demodulation
+C.8	Asynchronous serial decoding
+D.1	Introduction
+D.2	NTSC color encoding
+D.3	NTSC artifacting
+D.4	PAL color encoding
+D.5	PAL artifacting
+D.6	Synchronization
+E.1	Introduction
+E.2	POKEY output
+E.3	First amplifier stage
+E.4	External signal sum point
+E.5	Second amplifier stage
+E.6	Final output
+F.1	Introduction
+F.2	5200 firmware
+F.3	400/800 firmware
+F.4	XL/XE/XEGS firmware
+F.5	Game cartridges
+F.6	BASIC
+F.7	Disk Drives
+15.3	Printers
+G.1	CPU opcode table

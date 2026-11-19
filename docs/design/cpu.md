@@ -346,35 +346,35 @@ call `tick` if the script halts cycle `c`. A `TestBus` records each access as
 
 | Requirement | Test |
 | --- | --- |
-| REQ-100 | `crates/harness/tests/cpu_single_step.rs` `single_step_documented_opcodes`; unit tests `address_calculation_keeps_flags`, `bit_sets_n_v_z` |
-| REQ-101 | `cpu_single_step.rs` `single_step_bus_cycles`; unit tests `implied_dummy_read`, `one_access_per_tick` |
-| REQ-102 | unit tests `abs_x_read_page_cross_dummy_read`, `abs_y_and_ind_y_read_page_cross_dummy_read`, `abs_x_read_no_page_cross`, `ind_y_pointer_ff_no_extra_cycle`, `zero_page_index_no_extra_cycle` |
-| REQ-103 | unit tests `indexed_store_dummy_read_page_cross` (abs,X and abs,Y), `indexed_store_dummy_read_same_page`, `ind_y_store_six_cycles` (with and without page crossing) |
-| REQ-104 | unit test `rmw_writes_old_value_then_new_value`; `single_step_bus_cycles` |
-| REQ-105 | unit tests `zero_page_x_wraps`, `zero_page_y_wraps`, `ind_x_pointer_wraps`, `ind_y_pointer_wraps_at_ff`, `jmp_indirect_page_bug` |
-| REQ-106 | unit tests `branch_page_cross_from_next_instruction`, `branch_same_page_three_cycles`, `branch_not_taken_two_cycles`; `single_step_bus_cycles` |
-| REQ-107 | unit tests `php_pushes_bits_4_and_5`, `irq_pushes_b_clear`, `nmi_pushes_b_clear`, `brk_pushes_b_set` |
-| REQ-108 | unit tests `decimal_adc_0f_0f`, `decimal_adc_99_01_flags`, `decimal_adc_ff_01_zero`, `decimal_sbc_borrow`, `decimal_sbc_no_borrow`, `decimal_no_extra_cycle`; `cpu_single_step.rs` `single_step_decimal` |
-| REQ-109 | unit tests `decimal_flag_ignored_by_compare_and_increment`, `interrupt_keeps_decimal_flag`, `reset_keeps_decimal_flag`; `single_step_decimal` (`ISB`, `RRA` and `ARR` files) |
+| REQ-100 | `crates/harness/tests/cpu_single_step.rs` `single_step_documented_opcodes`; `cpu/tests.rs` unit tests `address_calculation_keeps_flags`, `bit_sets_n_v_z` |
+| REQ-101 | `cpu_single_step.rs` `single_step_bus_cycles`; `cpu/tests.rs` unit tests `implied_dummy_read`, `one_access_per_tick` |
+| REQ-102 | `cpu/tests.rs` unit tests `abs_x_read_page_cross_dummy_read`, `abs_y_and_ind_y_read_page_cross_dummy_read`, `abs_x_read_no_page_cross`, `ind_y_pointer_ff_no_extra_cycle`, `zero_page_index_no_extra_cycle` |
+| REQ-103 | `cpu/tests.rs` unit tests `indexed_store_dummy_read_page_cross` (abs,X and abs,Y), `indexed_store_dummy_read_same_page`, `ind_y_store_six_cycles` (with and without page crossing) |
+| REQ-104 | `cpu/tests.rs` unit test `rmw_writes_old_value_then_new_value`; `cpu_single_step.rs` `single_step_bus_cycles` |
+| REQ-105 | `cpu/tests.rs` unit tests `zero_page_x_wraps`, `zero_page_y_wraps`, `ind_x_pointer_wraps`, `ind_y_pointer_wraps_at_ff`, `jmp_indirect_page_bug` |
+| REQ-106 | `cpu/tests.rs` unit tests `branch_page_cross_from_next_instruction`, `branch_same_page_three_cycles`, `branch_not_taken_two_cycles`; `cpu_single_step.rs` `single_step_bus_cycles` |
+| REQ-107 | `cpu/tests.rs` unit tests `php_pushes_bits_4_and_5`, `irq_pushes_b_clear`, `nmi_pushes_b_clear`, `brk_pushes_b_set` |
+| REQ-108 | `cpu/tests.rs` unit tests `decimal_adc_0f_0f`, `decimal_adc_99_01_flags`, `decimal_adc_ff_01_zero`, `decimal_sbc_borrow`, `decimal_sbc_no_borrow`, `decimal_no_extra_cycle`; `cpu_single_step.rs` `single_step_decimal` |
+| REQ-109 | `cpu/tests.rs` unit tests `decimal_flag_ignored_by_compare_and_increment`, `interrupt_keeps_decimal_flag`, `reset_keeps_decimal_flag`; `single_step_decimal` (`ISB`, `RRA` and `ARR` files) |
 | REQ-110 | `crates/harness/tests/cpu_functional.rs` `klaus_dormann_functional_test` |
-| REQ-111 | `cpu_single_step.rs` `single_step_undocumented_stable`; unit tests `isb_uses_inc_result`, `lax_loads_a_and_x`, `sax_keeps_flags`, `nop_abs_x_page_cross` |
-| REQ-112 | `cpu_single_step.rs` `single_step_undocumented_unstable`; unit tests `shx_and_high_byte_plus_one`, `shx_page_cross_replaces_high_byte`, `shs_sets_s` |
-| REQ-113 | `cpu_single_step.rs` `single_step_kil`; unit tests `kil_reads_ffff_forever`, `kil_ignores_interrupts`, `reset_ends_kil`; `crates/atari-core/src/machine.rs` unit test `kil_machine_keeps_running` |
-| REQ-114 | `cpu_single_step.rs` `single_step_brk`; unit test `brk_pushes_and_sets_i` |
-| REQ-115 | unit tests `irq_sequence_seven_cycles`, `irq_masked_by_i`, `irq_removed_before_cli_is_lost`, `irq_repeats_while_asserted` |
-| REQ-116 | unit tests `nmi_ignores_i_and_uses_fffa`, `nmi_level_held_one_interrupt`, `nmi_two_edges_one_interrupt` |
-| REQ-117 | unit tests `nmi_waits_for_seven_cycle_instruction`, `nmi_waits_for_eight_cycle_rmw`, `irq_waits_for_long_instructions` |
-| REQ-118 | unit tests `nmi_two_cycle_recognition_delay`, `nmi_in_last_cycle_runs_next_instruction`, `irq_two_cycle_recognition_delay` |
-| REQ-119 | unit tests `cli_delays_irq_one_instruction`, `plp_delays_irq_one_instruction`, `rti_irq_immediate` |
-| REQ-120 | unit tests `cli_sei_irq_with_i_set`, `cli_plp_irq_with_i_set`, `pairs_without_irq_dispatch`, `rti_pairs_irq_after_rti` |
-| REQ-121 | unit tests `taken_branch_delays_nmi`, `taken_branch_early_nmi_no_delay`, `page_cross_branch_no_delay`, `not_taken_branch_no_delay`, `jump_instructions_no_delay`, `taken_branch_delays_irq` |
-| REQ-122 | unit tests `nmi_after_irq_handler_first_instruction` (S = N-5), `nmi_lost_when_irq_starts_four_cycles_before` (S = N-4), `nmi_hijacks_irq_sequence` (S = N-3 to N+1), `nmi_hijacks_brk_with_b_set` (`BRK`, S = N-5 to N+1) |
-| REQ-123 | unit tests `handler_first_instruction_always_runs`, `nmi_handler_first_instruction_before_second_nmi`, `nmi_hijacks_brk_as_first_handler_instruction` |
-| REQ-124 | unit tests `reset_loads_fffc_in_seven_cycles`, `reset_decrements_s_by_three_no_writes`, `reset_sets_i_keeps_d`, `reset_ends_kil`, `reset_clears_pending_nmi` |
-| REQ-125 | unit tests `halted_cycles_delay_accesses`, `halted_rmw_writes`, `halted_cycles_do_not_change_results`; `machine.rs` unit test `dma_cycles_halt_cpu` |
-| REQ-126 | unit tests `rdy_low_repeats_read`, `rdy_low_after_inc_wsync`, `rdy_low_does_not_stop_write`, `rdy_low_keeps_registers` |
-| REQ-127 | unit tests `halted_cycles_extend_recognition_delay`, `nmi_edge_in_halted_cycle_kept`, `nmi_during_rdy_after_stopped_instruction`, `nmi_sequence_stops_on_rdy` |
-| REQ-128 | unit tests `power_on_registers`, `power_on_is_deterministic` |
+| REQ-111 | `cpu_single_step.rs` `single_step_undocumented_stable`; `cpu/tests.rs` unit tests `isb_uses_inc_result`, `lax_loads_a_and_x`, `sax_keeps_flags`, `nop_abs_x_page_cross`, `opcode_table_counts` |
+| REQ-112 | `cpu_single_step.rs` `single_step_undocumented_unstable`; `cpu/tests.rs` unit tests `shx_and_high_byte_plus_one`, `shx_page_cross_replaces_high_byte`, `shs_sets_s` |
+| REQ-113 | `cpu_single_step.rs` `single_step_kil`; `cpu/tests.rs` unit tests `kil_reads_ffff_forever`, `kil_ignores_interrupts`, `reset_ends_kil`, `opcode_table_counts`; `crates/atari-core/src/machine.rs` unit test `kil_machine_keeps_running` |
+| REQ-114 | `cpu_single_step.rs` `single_step_brk`; `cpu/tests.rs` unit test `brk_pushes_and_sets_i` |
+| REQ-115 | `cpu/tests.rs` unit tests `irq_sequence_seven_cycles`, `irq_masked_by_i`, `irq_removed_before_cli_is_lost`, `irq_repeats_while_asserted` |
+| REQ-116 | `cpu/tests.rs` unit tests `nmi_ignores_i_and_uses_fffa`, `nmi_level_held_one_interrupt`, `nmi_two_edges_one_interrupt` |
+| REQ-117 | `cpu/tests.rs` unit tests `nmi_waits_for_seven_cycle_instruction`, `nmi_waits_for_eight_cycle_rmw`, `irq_waits_for_long_instructions` |
+| REQ-118 | `cpu/tests.rs` unit tests `nmi_two_cycle_recognition_delay`, `nmi_in_last_cycle_runs_next_instruction`, `irq_two_cycle_recognition_delay` |
+| REQ-119 | `cpu/tests.rs` unit tests `cli_delays_irq_one_instruction`, `plp_delays_irq_one_instruction`, `rti_irq_immediate` |
+| REQ-120 | `cpu/tests.rs` unit tests `cli_sei_irq_with_i_set`, `cli_plp_irq_with_i_set`, `pairs_without_irq_dispatch`, `rti_pairs_irq_after_rti` |
+| REQ-121 | `cpu/tests.rs` unit tests `taken_branch_delays_nmi`, `taken_branch_early_nmi_no_delay`, `page_cross_branch_no_delay`, `not_taken_branch_no_delay`, `jump_instructions_no_delay`, `taken_branch_delays_irq` |
+| REQ-122 | `cpu/tests.rs` unit tests `nmi_after_irq_handler_first_instruction` (S = N-5), `nmi_lost_when_irq_starts_four_cycles_before` (S = N-4), `nmi_hijacks_irq_sequence` (S = N-3 to N+1), `nmi_hijacks_brk_with_b_set` (`BRK`, S = N-5 to N+1) |
+| REQ-123 | `cpu/tests.rs` unit tests `handler_first_instruction_always_runs`, `nmi_handler_first_instruction_before_second_nmi`, `nmi_hijacks_brk_as_first_handler_instruction` |
+| REQ-124 | `cpu/tests.rs` unit tests `reset_loads_fffc_in_seven_cycles`, `reset_decrements_s_by_three_no_writes`, `reset_sets_i_keeps_d`, `reset_ends_kil`, `reset_clears_pending_nmi`, `reset_keeps_decimal_flag` |
+| REQ-125 | `cpu/tests.rs` unit tests `halted_cycles_delay_accesses`, `halted_rmw_writes`, `halted_cycles_do_not_change_results`; `machine.rs` unit test `dma_cycles_halt_cpu` |
+| REQ-126 | `cpu/tests.rs` unit tests `rdy_low_repeats_read`, `rdy_low_after_inc_wsync`, `rdy_low_does_not_stop_write`, `rdy_low_keeps_registers` |
+| REQ-127 | `cpu/tests.rs` unit tests `halted_cycles_extend_recognition_delay`, `nmi_edge_in_halted_cycle_kept`, `nmi_during_rdy_after_stopped_instruction`, `nmi_sequence_stops_on_rdy` |
+| REQ-128 | `cpu/tests.rs` unit tests `power_on_registers`, `power_on_is_deterministic` |
 
 New tests in this plan, one line each:
 
