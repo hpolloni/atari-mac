@@ -199,5 +199,69 @@ mod tests {
         assert_eq!(pia.read(1), 0x00, "DDRB");
         assert!(!pia.irq(), "no IRQ");
         assert!(pia.cb2(), "CB2 high");
+        assert_eq!(pia, Pia::default(), "reset state = power-on state");
+    }
+
+    /// Verifies REQ-219: the acceptance criteria 1 to 5 (DDR and data register select).
+    #[test]
+    fn ddr_select_criteria() {
+        let mut pia = Pia::new();
+        pia.write(2, 0x30);
+        pia.write(0, 0xF0);
+        assert_eq!(pia.read(0), 0xF0, "1: DDRA");
+        pia.write(2, 0x34);
+        pia.write(0, 0x55);
+        assert_eq!(pia.read(0), 0x5F, "2: inputs high, outputs from ORA");
+        pia.write(2, 0x30);
+        assert_eq!(pia.read(0), 0xF0, "2: DDRA kept");
+        pia.write(0, 0x01);
+        pia.write(2, 0x34);
+        pia.write(0, 0x00);
+        assert_eq!(pia.read(0), 0xFE, "3: bit 0 is an output");
+        pia.write(2, 0x30);
+        pia.write(0, 0x00);
+        pia.write(2, 0x34);
+        assert_eq!(pia.read(0), 0xFF, "3: all inputs");
+        pia.write(0, 0x55);
+        pia.write(2, 0x30);
+        pia.write(0, 0xFF);
+        pia.write(2, 0x34);
+        assert_eq!(pia.read(0), 0x55, "4: ORA kept its value");
+        pia.write(3, 0x38);
+        pia.write(1, 0xFF);
+        assert_eq!(pia.read(1), 0xFF, "5: DDRB");
+        pia.write(3, 0x3C);
+        pia.write(1, 0xFD);
+        assert_eq!(pia.read(1), 0xFD, "5: ORB");
+    }
+
+    /// Verifies REQ-220: the acceptance criteria 1 to 3 (port A output bits read as the AND
+    /// of the output register and the pin).
+    #[test]
+    fn port_a_read_criteria() {
+        let mut pia = Pia::new();
+        pia.write(0, 0xF0); // DDRA
+        pia.write(2, 0x3C);
+        pia.write(0, 0x00);
+        assert_eq!(pia.read(0), 0x0F, "1: outputs low");
+        pia.write(0, 0xF0);
+        pia.set_port_a_input(0xEF);
+        assert_eq!(pia.read(0), 0xEF, "2: pin 4 pulled low");
+        pia.write(2, 0x38);
+        pia.write(0, 0x00); // DDRA
+        pia.write(2, 0x3C);
+        pia.set_port_a_input(0xFB);
+        assert_eq!(pia.read(0), 0xFB, "3: pin 2 pulled low");
+    }
+
+    /// Verifies REQ-224: the acceptance criteria 1 and 5 (bits 6 and 7 of a write are
+    /// ignored).
+    #[test]
+    fn control_write_ignores_bits_6_and_7() {
+        let mut pia = Pia::new();
+        pia.write(2, 0xFF);
+        assert_eq!(pia.read(2), 0x3F, "1: PACTL");
+        pia.write(2, 0xC0);
+        assert_eq!(pia.read(2), 0x00, "5: PACTL");
     }
 }
