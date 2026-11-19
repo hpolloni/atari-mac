@@ -456,6 +456,7 @@ fn jump_ignores_scroll_bits() {
 }
 
 /// Verifies REQ-321: a jump target is not limited to the 1K block.
+/// Verifies REQ-324: a jump at `$07FD` loads all 16 bits of the next instruction address.
 #[test]
 fn jump_crosses_1k() {
     let mut rig = Rig::new(VideoStandard::Ntsc);
