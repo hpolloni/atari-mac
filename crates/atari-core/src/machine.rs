@@ -1522,7 +1522,7 @@ mod tests {
         m.run_frame();
         let ram = m.mem.ram.clone();
         let gtia = m.gtia.clone();
-        let pokey = m.pokey;
+        let pokey = m.pokey.clone();
         m.press_reset();
         assert!(m.mem.ram == ram, "RAM");
         assert_eq!(m.gtia, gtia, "GTIA");
@@ -1613,7 +1613,6 @@ mod tests {
     /// Verifies REQ-229: the CPU IRQ line with a POKEY IRQ (criterion 5, the cases with
     /// POKEY).
     #[test]
-    #[ignore = "needs the WP-3 POKEY keyboard IRQ; the lead enables it after the merge"]
     fn irq_line_with_pokey() {
         let mut m = machine();
         cpu_write(&mut m, 0xD20F, 0x03); // SKCTL: keyboard scan
