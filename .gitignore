@@ -6,3 +6,5 @@
 .DS_Store
 /roms/*.rom
 /test-data/
+/reference/
+/.claude/worktrees/

@@ -10,6 +10,7 @@
 #   roms/altirraos-xl.rom, roms/altirra-basic.rom          see roms/README.md
 #   test-data/klaus/6502_functional_test.bin                GPL-3.0, test use only
 #   test-data/single-step/6502/<opcode>.json                MIT
+#   reference/altirra-hardware-reference.pdf                hardware spec, (C) Avery Lee
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,7 +24,7 @@ for arg in "$@"; do
     case "$arg" in
         --single-step) single_step=true ;;
         -h | --help)
-            sed -n '2,13p' "$0"
+            sed -n '2,14p' "$0"
             exit 0
             ;;
         *)
@@ -33,8 +34,13 @@ for arg in "$@"; do
     esac
 done
 
+# sha256sum is on Linux and in Git Bash on Windows; shasum is on macOS.
 sha256_of() {
-    shasum -a 256 "$1" | cut -d' ' -f1
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
 }
 
 # verify_sha256 <file> <expected sha256>
@@ -90,6 +96,12 @@ fetch_c_array altirra_basic roms/altirra-basic.rom \
 fetch "https://raw.githubusercontent.com/Klaus2m5/6502_65C02_functional_tests/$KLAUS_COMMIT/bin_files/6502_functional_test.bin" \
     test-data/klaus/6502_functional_test.bin \
     fa12bfc761e6f9057e4cc01a665a7b800ff01ae91f598af1e39a1201d01953fd
+
+# The manual is updated in place at a fixed URL. If the checksum fails after an update,
+# read the new version, then update the checksum here.
+fetch "https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf" \
+    reference/altirra-hardware-reference.pdf \
+    1909927618a7f4a6771d2dc7ef1785ba9b13453edba57122165f57c1504d1c89
 
 if [[ "$single_step" == true ]]; then
     # scripts/single-step-6502.sha1 holds the git blob SHA-1 of each file at the pinned commit.

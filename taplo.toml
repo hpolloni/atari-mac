@@ -1,6 +1,6 @@
 # taplo TOML formatter: https://taplo.tamasfe.dev/
 include = ["**/*.toml"]
-exclude = ["target/**"]
+exclude = ["target/**", ".claude/**"]
 
 [formatting]
 align_comments = false

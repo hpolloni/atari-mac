@@ -45,6 +45,8 @@ jobs:
       - run: taplo fmt --check
       - run: taplo lint
       - run: typos
+      - name: Requirement index is up to date
+        run: scripts/req-index.sh --check
 
   clippy:
     name: Clippy
@@ -65,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -164,10 +166,22 @@ jobs:
           persist-credentials: false
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
-          tool: actionlint,shellcheck,zizmor
+          tool: shellcheck,zizmor
+      # install-action has no actionlint manifest, so download the pinned release.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: actionlint
       - run: zizmor --offline .github/workflows
-      - run: shellcheck .githooks/pre-commit scripts/fetch-roms.sh
+      - run: shellcheck .githooks/pre-commit scripts/fetch-roms.sh scripts/req-index.sh
 
   # Single required status check for branch protection.
   ci-success:

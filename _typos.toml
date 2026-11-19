@@ -1,5 +1,31 @@
 # typos spell checker: https://github.com/crate-ci/typos
 [files]
-extend-exclude = ["target/", "Cargo.lock", "test-data/", "roms/*.rom", "*.sha1"]
+extend-exclude = [
+    "target/",
+    "Cargo.lock",
+    "test-data/",
+    "roms/*.rom",
+    "*.sha1",
+    "reference/",
+    ".claude/",
+]
+
+[default]
+# Hex byte values in the specification, for example `BA` in an SIO frame.
+extend-ignore-re = ["`[0-9A-Fa-f]{2}`", "\\b[0-9A-F]{2}\\b"]
 
 [default.extend-words]
+# Atari hardware register names.
+CONSOL = "CONSOL"
+consol = "consol"
+# 6502 mnemonics.
+ANC = "ANC"
+ANE = "ANE"
+CPY = "CPY"
+SHS = "SHS"
+shs = "shs"
+# Register families written with a placeholder, for example PnPF, GRAFPn, SIZEx.
+Pn = "Pn"
+SIZ = "SIZ"
+# POKEY serial state names, for example ser_in_clk.
+ser = "ser"

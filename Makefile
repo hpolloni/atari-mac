@@ -11,11 +11,11 @@ export CARGO_TERM_COLOR := always
 
 COVERAGE_MIN := 80
 
-.PHONY: check pre-commit fmt fmt-check clippy test doc deny typos toml-check \
+.PHONY: check pre-commit fmt fmt-check spec-check clippy test doc deny typos toml-check \
         machete msrv features coverage roms test-data tools hooks clean
 
 ## Full gate set (same as CI, except the OS matrix).
-check: fmt-check toml-check typos clippy test doc deny machete msrv features coverage
+check: fmt-check toml-check typos spec-check clippy test doc deny machete msrv features coverage
 
 ## Fast subset used by the git pre-commit hook.
 pre-commit: fmt-check clippy test
@@ -49,6 +49,9 @@ deny:
 
 typos:
 	typos
+
+spec-check:
+	scripts/req-index.sh --check
 
 toml-check:
 	taplo fmt --check
