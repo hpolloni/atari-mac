@@ -114,6 +114,12 @@ first cell names requirement IDs. A test in backticks, for example
 `` `antic.rs` `nmist_visible_from_cycle_7` ``, is a `TestRef`: the file is the nearest
 `.rs` name in backticks before it in the same cell, if any.
 
+A file name in a test plan names a Rust module, not one file: `antic.rs` matches
+`antic.rs` and every file below the directory `antic/` of the same crate (for example
+`antic/tests/dma.rs`). A path with a directory, for example `crates/harness/tests/boot.rs`,
+matches that file only. The `trace` gate uses this rule in both directions (REQ-049). It was
+decided at the WP-2 merge, because the chip packages keep their tests in submodule files.
+
 ## Gates
 
 Each gate is a function in `atari_harness::spec` and has its own test in

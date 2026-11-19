@@ -837,7 +837,6 @@ mod tests {
     /// Verifies REQ-202: the CPU makes no access in the cycles in which ANTIC does DMA or
     /// refresh (criterion 1).
     #[test]
-    #[ignore = "needs the WP-1 CPU and the WP-2 ANTIC DMA; the lead enables it after the merge"]
     fn dma_cycles_halt_cpu() {
         let mut m = dma_program([0x4C, 0x0F, 0xC2]); // JMP $C20F
         m.run_frame();
@@ -1479,7 +1478,6 @@ mod tests {
     /// Verifies REQ-217: the Reset button resets ANTIC: no NMI, and the same DMA as a new
     /// machine (criterion 3).
     #[test]
-    #[ignore = "needs the WP-1 CPU and the WP-2 ANTIC; the lead enables it after the merge"]
     fn reset_button_resets_antic() {
         let code = [0x4C, 0x00, 0xC2]; // JMP $C200
         let mut m = program_machine(&code);
@@ -1528,7 +1526,6 @@ mod tests {
     /// Verifies REQ-217: the Reset button sends no reset NMI: `NMIST` bit 5 stays 0
     /// (criterion 5).
     #[test]
-    #[ignore = "needs the WP-2 ANTIC NMIST; the lead enables it after the merge"]
     fn reset_button_no_nmi() {
         let mut m = machine();
         cpu_write(&mut m, 0xD40F, 0x00); // NMIRES
