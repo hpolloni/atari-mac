@@ -44,7 +44,7 @@ Each teammate works in its own git worktree (see `CLAUDE.md`). Each package must
 | WP-0 Interfaces | Done | Teammate | The workspace, the decided interfaces as stubs that compile, the `atari-harness` crate with its helpers, the traceability check | `tests/harness_self_test.rs`, `tests/traceability.rs` |
 | WP-1 CPU | In progress | Teammate | `crates/atari-core/src/cpu.rs` and submodules, from [cpu.md](../design/cpu.md) | `tests/cpu_functional.rs`, `tests/cpu_single_step.rs`, CPU unit tests |
 | WP-2 Video | In progress | Teammate | `antic.rs`, `gtia.rs`, `palette.rs`, from [antic.md](../design/antic.md) and [gtia.md](../design/gtia.md) | ANTIC and GTIA unit tests |
-| WP-3 Keyboard | In progress | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
+| WP-3 Keyboard | Done | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
 | WP-4 Frontend | In progress | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
 | WP-5 Machine and harness | In progress | Teammate | `machine.rs`, `pia.rs`, `timing.rs`, the `atari-harness` crate, and the integration code for WP-1 to WP-4. The lead merges and runs the final checks. | `tests/boot.rs`, `tests/keyboard.rs`, `tests/harness_self_test.rs` |
 | WP-6 Specification gates | In progress | Teammate | The frontmatter migration, `atari_harness::spec`, the gates of [spec-gates.md](../design/spec-gates.md), `spec-index`, the CI job `Specification`. It starts after WP-0 is merged. | `tests/spec_gates.rs`, `tests/traceability.rs` |
@@ -71,3 +71,15 @@ design documents. WP-5 does the integration after the other packages are merged.
 3. `atari-mac` shows the `READY` screen in a window on macOS. Typing `PRINT 2+2` and RETURN
    shows `4`.
 4. Each requirement in the slice has a test that names its ID (REQ-027), and the test passes.
+
+## Follow-up items
+
+Items that a work package found and that belong to a later package or slice.
+
+| From | Item | For |
+| --- | --- | --- |
+| WP-3 | REQ-500 criterion 1 checks the audio mix level. Audio is not in SLICE-01, so the test checks the stored `AUDC1` instead. | The audio package |
+| WP-3 | `pokey.md` functions that are not in the code yet: `serial_clock_out`, `set_serial_clock_in`, `serial_clock_in_drive`, `set_nonlinear_audio`. | The serial and audio packages |
+| WP-3 | `Machine::drain_audio` is `const fn`, so `Pokey::drain_samples` must be `const` and has an `expect`. Remove both when audio exists. | The audio package |
+| WP-3 | The machine calls `set_speaker(!gtia.speaker())`. Check the polarity against `pokey.md` and `gtia.md`. | The audio package |
+| WP-3 | Linked timers, two-tone resync and the asynchronous receive hold are not implemented. With `AUDCTL` bits 3 or 4 set, the timers count as unlinked. | The timer and serial packages |
