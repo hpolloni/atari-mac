@@ -20,7 +20,7 @@
 use core::error::Error;
 use core::fmt;
 
-use crate::antic::{Antic, DmaKind, DmaMemory};
+use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
 use crate::gtia::{ConsoleKeys, Gtia};
 use crate::media::Cartridge;
@@ -228,6 +228,17 @@ impl DmaMemory for Memory {
     }
 }
 
+/// One CPU bus access: for the debugger view of the last cycle and the bus log of the tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BusAccess {
+    /// The address.
+    addr: u16,
+    /// The byte read or written.
+    value: u8,
+    /// `true` for a write.
+    write: bool,
+}
+
 /// The CPU's view of the machine for one CPU cycle.
 struct CpuBus<'a> {
     /// RAM, ROMs and cartridge.
@@ -242,6 +253,8 @@ struct CpuBus<'a> {
     pia: &'a mut Pia,
     /// The value on the data bus after the access.
     data: u8,
+    /// The access of this cycle, if the CPU made one.
+    access: Option<BusAccess>,
 }
 
 impl Bus for CpuBus<'_> {
@@ -257,17 +270,27 @@ impl Bus for CpuBus<'_> {
             _ => self.mem.read(addr),
         };
         self.data = value;
+        self.access = Some(BusAccess {
+            addr,
+            value,
+            write: false,
+        });
         value
     }
 
     fn write(&mut self, addr: u16, value: u8) {
         self.data = value;
+        self.access = Some(BusAccess {
+            addr,
+            value,
+            write: true,
+        });
         let [reg, page] = addr.to_le_bytes();
         match page {
             0xD0 => {
                 self.gtia.write(reg, value);
-                // The speaker line is high when CONSOL bit 3 was written as 0.
-                self.pokey.set_speaker(!self.gtia.speaker());
+                // The console speaker signal is `CONSOL` bit 3 (REQ-438, system.md "Timing").
+                self.pokey.set_speaker(self.gtia.speaker());
             }
             0xD2 => self.pokey.write(reg, value),
             0xD3 => {
@@ -307,6 +330,10 @@ pub struct Machine {
     cycles: u64,
     /// Frames completed since power-on.
     frames: u64,
+    /// The ANTIC output of the last machine cycle.
+    last_out: CycleOutput,
+    /// The CPU bus access of the last machine cycle, if the CPU had the bus.
+    last_access: Option<BusAccess>,
 }
 
 impl Machine {
@@ -341,15 +368,20 @@ impl Machine {
             data_bus: 0xFF,
             cycles: 0,
             frames: 0,
+            last_out: CycleOutput::default(),
+            last_access: None,
         };
         machine.power_on();
         Ok(machine)
     }
 
     /// Power off and on (REQ-215, REQ-216): RAM is `$00`, all chips are reset, and the CPU
-    /// starts its reset sequence.
+    /// starts its reset sequence. The cycle and frame counters start again at 0.
     pub fn power_on(&mut self) {
         self.mem.ram.fill(0);
+        // `Antic::reset` keeps the beam position, but a power-on must give the same machine
+        // each time (REQ-216 criterion 3), so ANTIC also starts at line 0, cycle 0.
+        self.antic = Antic::new(self.standard);
         self.antic.reset();
         self.gtia.reset();
         self.pokey.reset();
@@ -359,27 +391,42 @@ impl Machine {
             cart.cold_reset();
         }
         self.update_trig3();
+        // The power-on registers of REQ-128 and a pending reset sequence (REQ-124).
         self.cpu = Cpu::new();
+        self.cpu.reset();
+        self.data_bus = 0xFF;
+        self.cycles = 0;
+        self.frames = 0;
+        self.last_out = CycleOutput::default();
+        self.last_access = None;
     }
 
-    /// The System Reset button (REQ-217): resets the CPU, ANTIC and the PIA.
-    pub const fn press_reset(&mut self) {
+    /// The System Reset button (REQ-217): resets the CPU, ANTIC and the PIA. RAM, GTIA and
+    /// POKEY do not change, and ANTIC sends no NMI (HRM 2.4).
+    pub fn press_reset(&mut self) {
         self.cpu.reset();
         self.antic.reset();
         self.pia.reset();
         self.mem.portb = self.pia.port_b_pins();
+        self.update_trig3();
     }
 
     /// Runs one machine cycle, in the order of `docs/design/system.md`, "Timing".
     pub fn run_cycle(&mut self) {
+        // 1. ANTIC, with the memory map of the end of the last cycle.
         let out = self.antic.tick(&mut self.mem);
-        // The SIO bus is not in SLICE-01: the DATA IN line is idle (high).
+        // 2. POKEY before the CPU access. The SIO bus is not in SLICE-01: DATA IN is idle
+        //    (high).
         self.pokey.set_serial_in(true);
         self.pokey.tick();
+        // 3. The interrupt lines. The PIA level is the level of the end of the last cycle.
         self.cpu.set_nmi(out.nmi);
-        self.cpu.set_irq(self.pokey.irq() || self.pia.irq());
+        self.cpu.set_irq(self.irq_line());
+        // 4. The CPU access, if ANTIC does not halt the CPU (REQ-202).
         let mut data = self.data_bus;
+        self.last_access = None;
         if out.halt {
+            // 5. A refresh cycle drives no byte: the bus keeps the last value.
             if out.dma != DmaKind::Refresh {
                 data = out.dma_data;
             }
@@ -391,19 +438,33 @@ impl Machine {
                 pokey: &mut self.pokey,
                 pia: &mut self.pia,
                 data,
+                access: None,
             };
             let _tick = self.cpu.tick(&mut bus, out.rdy);
             data = bus.data;
+            self.last_access = bus.access;
         }
+        // 5. The data bus value goes to ANTIC and GTIA.
         self.data_bus = data;
         self.antic.end_cycle(data);
         self.gtia.clock(&out, data);
+        // 6. The PIA, then the serial output. With no SIO bus in SLICE-01, the bytes that
+        //    POKEY sent are dropped.
         self.pia.tick();
+        while self.pokey.take_serial_byte().is_some() {}
+        // TRIG3 follows RD5 after each access that can switch the cartridge (REQ-232).
         self.update_trig3();
+        // 7. The counters.
         self.cycles += 1;
+        self.last_out = out;
         if out.frame_done {
             self.frames += 1;
         }
+    }
+
+    /// The CPU IRQ line: the PIA IRQ or the POKEY IRQ (REQ-229).
+    const fn irq_line(&self) -> bool {
+        self.pia.irq() || self.pokey.irq()
     }
 
     /// Runs machine cycles until ANTIC ends the frame.
@@ -529,12 +590,24 @@ impl Machine {
 
 #[cfg(test)]
 mod tests {
-    use super::{CpuBus, Machine, MachineConfig};
+    use super::{BusAccess, ConfigError, CpuBus, JoystickState, Machine, MachineConfig};
     use crate::antic::DmaMemory as _;
     use crate::cpu::Bus as _;
-    use crate::gtia::ConsoleKeys;
+    use crate::gtia::{ConsoleKeys, FRAME_HEIGHT, FRAME_WIDTH};
     use crate::media::Cartridge;
     use crate::timing::VideoStandard;
+
+    /// The address of the test programs in the OS ROM.
+    const PROGRAM: usize = 0x0200;
+
+    /// What the machine did in one cycle, for the bus logs of the tests.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct CycleLog {
+        /// ANTIC halted the CPU.
+        halt: bool,
+        /// The CPU bus access.
+        access: Option<BusAccess>,
+    }
 
     /// The OS ROM of the tests: byte `i` is `i >> 8` (the page number in the ROM).
     fn os_rom() -> Vec<u8> {
@@ -543,21 +616,50 @@ mod tests {
             .collect()
     }
 
-    /// A machine with the test OS ROM, BASIC of `$BB` bytes, and an optional cartridge.
-    fn machine_with(cartridge: Option<Cartridge>) -> Machine {
-        Machine::new(MachineConfig {
-            os_rom: os_rom(),
+    /// A test OS ROM with `code` at `$C200`. The reset vector points to `$C200`, and the NMI
+    /// and IRQ vectors point to an `RTI` at `$C100`.
+    fn program_os(code: &[u8]) -> Vec<u8> {
+        let mut os = os_rom();
+        os[PROGRAM..PROGRAM + code.len()].copy_from_slice(code);
+        os[0x0100] = 0x40;
+        os[0x3FFA..].copy_from_slice(&[0x00, 0xC1, 0x00, 0xC2, 0x00, 0xC1]);
+        os
+    }
+
+    /// A configuration with `os_rom`, BASIC of `$BB` bytes, and an optional cartridge.
+    fn config(os_rom: Vec<u8>, cartridge: Option<Cartridge>) -> MachineConfig {
+        MachineConfig {
+            os_rom,
             basic_rom: Some(vec![0xBB; super::BASIC_ROM_SIZE]),
             cartridge,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,
-        })
-        .unwrap()
+        }
+    }
+
+    /// A machine with the test OS ROM, BASIC of `$BB` bytes, and an optional cartridge.
+    fn machine_with(cartridge: Option<Cartridge>) -> Machine {
+        Machine::new(config(os_rom(), cartridge)).unwrap()
     }
 
     /// A machine with the test OS ROM and BASIC.
     fn machine() -> Machine {
         machine_with(None)
+    }
+
+    /// A machine that runs `code` from `$C200` after power-on.
+    fn program_machine(code: &[u8]) -> Machine {
+        Machine::new(config(program_os(code), None)).unwrap()
+    }
+
+    /// An 8 KB cartridge of `$CC` bytes (RD5).
+    fn cart_8k() -> Cartridge {
+        Cartridge::from_raw(vec![0xCC; 0x2000]).unwrap()
+    }
+
+    /// A 16 KB cartridge of `$CC` bytes (RD4 and RD5).
+    fn cart_16k() -> Cartridge {
+        Cartridge::from_raw(vec![0xCC; 0x4000]).unwrap()
     }
 
     /// One CPU write through the machine bus.
@@ -569,6 +671,7 @@ mod tests {
             pokey: &mut m.pokey,
             pia: &mut m.pia,
             data: 0,
+            access: None,
         };
         bus.write(addr, value);
     }
@@ -582,6 +685,7 @@ mod tests {
             pokey: &mut m.pokey,
             pia: &mut m.pia,
             data: 0,
+            access: None,
         };
         bus.read(addr)
     }
@@ -594,16 +698,105 @@ mod tests {
         cpu_write(m, 0xD301, value);
     }
 
-    /// Verifies REQ-201: one frame is 29,868 cycles (NTSC) or 35,568 cycles (PAL).
+    /// Sets `DDRB` and the port B output register by CPU writes; `PBCTL` = `$04` after.
+    fn set_ddrb_orb(m: &mut Machine, ddrb: u8, orb: u8) {
+        cpu_write(m, 0xD303, 0x04);
+        cpu_write(m, 0xD301, orb);
+        cpu_write(m, 0xD303, 0x00);
+        cpu_write(m, 0xD301, ddrb);
+        cpu_write(m, 0xD303, 0x04);
+    }
+
+    /// Runs `n` machine cycles and logs them.
+    fn log_cycles(m: &mut Machine, n: u32) -> Vec<CycleLog> {
+        (0..n)
+            .map(|_| {
+                m.run_cycle();
+                CycleLog {
+                    halt: m.last_out.halt,
+                    access: m.last_access,
+                }
+            })
+            .collect()
+    }
+
+    /// Runs machine cycles until ANTIC ends the frame, and logs them.
+    fn log_frame(m: &mut Machine) -> Vec<CycleLog> {
+        let mut log = Vec::new();
+        loop {
+            log.extend(log_cycles(m, 1));
+            if m.last_out.frame_done {
+                return log;
+            }
+        }
+    }
+
+    /// The CPU accesses in a log.
+    fn accesses(log: &[CycleLog]) -> Vec<BusAccess> {
+        log.iter().filter_map(|cycle| cycle.access).collect()
+    }
+
+    /// A machine whose program sets a display list of mode 2 lines at `$3000` and `DMACTL` =
+    /// `$22`, and then runs `end` (3 bytes at `$C20F`).
+    fn dma_program(end: [u8; 3]) -> Machine {
+        let mut code = vec![
+            0xA9, 0x00, // LDA #$00
+            0x8D, 0x02, 0xD4, // STA DLISTL
+            0xA9, 0x30, // LDA #$30
+            0x8D, 0x03, 0xD4, // STA DLISTH
+            0xA9, 0x22, // LDA #$22
+            0x8D, 0x00, 0xD4, // STA DMACTL
+        ];
+        code.extend(end);
+        let mut m = program_machine(&code);
+        let mut list = vec![0x70, 0x70, 0x70, 0x42, 0x00, 0x40];
+        list.extend([0x02; 23]);
+        list.extend([0x41, 0x00, 0x30]);
+        for (addr, byte) in (0x3000_u16..).zip(list) {
+            m.poke_ram(addr, byte);
+        }
+        m
+    }
+
+    /// Checks the frame length of `standard` (REQ-201 criteria 2 and 3).
+    fn check_frame_length(standard: VideoStandard, cycles: u32) {
+        let mut m = Machine::new(MachineConfig {
+            standard,
+            basic_rom: None,
+            ..config(os_rom(), None)
+        })
+        .unwrap();
+        assert_eq!((m.antic.scanline(), m.antic.cycle()), (0, 0), "start");
+        for _ in 0..cycles {
+            m.run_cycle();
+        }
+        assert_eq!(
+            m.cycle_count(),
+            u64::from(cycles),
+            "{standard:?} cycle counter"
+        );
+        assert_eq!(
+            (m.antic.scanline(), m.antic.cycle()),
+            (0, 0),
+            "{standard:?}: line 0, cycle 0 again"
+        );
+        m.run_frame();
+        let start = m.cycle_count();
+        m.run_frame();
+        assert_eq!(
+            m.cycle_count() - start,
+            u64::from(cycles),
+            "{standard:?} run_frame"
+        );
+    }
+
+    /// Verifies REQ-200: the machine uses the video standard of its configuration.
     #[test]
-    fn frame_length_matches_standard() {
+    fn machine_uses_configured_standard() {
         for (standard, cycles) in [(VideoStandard::Ntsc, 29_868), (VideoStandard::Pal, 35_568)] {
             let mut m = Machine::new(MachineConfig {
-                os_rom: os_rom(),
-                basic_rom: None,
-                cartridge: None,
                 standard,
-                audio_sample_rate: 48_000,
+                ..config(os_rom(), None)
             })
             .unwrap();
             m.run_frame();
@@ -611,50 +804,196 @@ mod tests {
             m.run_frame();
             assert_eq!(m.cycle_count() - start, cycles, "{standard:?} frame length");
             assert_eq!(m.standard(), standard, "standard");
+            assert_eq!(m.frame_count(), 2, "frames");
         }
     }
 
-    /// Verifies REQ-204: with all ROMs off, each address outside `$D000-$D7FF` is RAM.
+    /// Verifies REQ-201: 114 machine cycles are one scan line (criterion 1).
     #[test]
-    fn all_ram_with_roms_off() {
+    fn scan_line_is_114_cycles() {
         let mut m = machine();
-        set_portb(&mut m, 0x82); // OS off, BASIC off, self-test off
-        for addr in (0x0000..=0xFFFF_u16).step_by(0x100) {
+        assert_eq!((m.antic.scanline(), m.antic.cycle()), (0, 0), "start");
+        for _ in 0..113 {
+            m.run_cycle();
+        }
+        assert_eq!((m.antic.scanline(), m.antic.cycle()), (0, 113), "cycle 113");
+        m.run_cycle();
+        assert_eq!((m.antic.scanline(), m.antic.cycle()), (1, 0), "line 1");
+        assert_eq!(m.cycle_count(), 114, "cycle counter");
+    }
+
+    /// Verifies REQ-201: an NTSC frame is 262 lines of 29,868 cycles (criterion 2).
+    #[test]
+    fn ntsc_frame_is_29868_cycles() {
+        check_frame_length(VideoStandard::Ntsc, 29_868);
+    }
+
+    /// Verifies REQ-201: a PAL frame is 312 lines of 35,568 cycles (criterion 3).
+    #[test]
+    fn pal_frame_is_35568_cycles() {
+        check_frame_length(VideoStandard::Pal, 35_568);
+    }
+
+    /// Verifies REQ-202: the CPU makes no access in the cycles in which ANTIC does DMA or
+    /// refresh (criterion 1).
+    #[test]
+    #[ignore = "needs the WP-1 CPU and the WP-2 ANTIC DMA; the lead enables it after the merge"]
+    fn dma_cycles_halt_cpu() {
+        let mut m = dma_program([0x4C, 0x0F, 0xC2]); // JMP $C20F
+        m.run_frame();
+        m.run_frame();
+        let log = log_frame(&mut m);
+        let halted: Vec<_> = log.iter().filter(|cycle| cycle.halt).collect();
+        assert!(
+            halted.len() >= 192 * 40,
+            "{} halted cycles: at least 40 for each mode 2 scan line",
+            halted.len()
+        );
+        assert!(
+            halted.iter().all(|cycle| cycle.access.is_none()),
+            "no CPU access while ANTIC has the bus"
+        );
+    }
+
+    /// Verifies REQ-202: the CPU makes exactly one access in each cycle without DMA or
+    /// refresh, also while RDY is low (criterion 2).
+    #[test]
+    fn free_cycles_run_cpu() {
+        let mut m = dma_program([0x4C, 0x0F, 0xC2]); // JMP $C20F
+        m.run_frame();
+        let log = log_frame(&mut m);
+        assert_eq!(log.len(), 29_868, "one frame");
+        for (cycle, entry) in log.iter().enumerate() {
+            assert_eq!(
+                entry.access.is_some(),
+                !entry.halt,
+                "cycle {cycle}: one CPU access exactly when ANTIC does not halt the CPU"
+            );
+        }
+    }
+
+    /// Verifies REQ-202: ANTIC never writes: RAM does not change while the CPU is jammed
+    /// (criterion 3).
+    #[test]
+    fn antic_never_writes() {
+        let mut m = dma_program([0x02, 0xEA, 0xEA]); // KIL
+        m.run_frame();
+        let before = m.mem.ram.clone();
+        for _ in 0..10 {
+            m.run_frame();
+        }
+        assert!(m.mem.ram == before, "RAM did not change in 10 frames");
+    }
+
+    /// Verifies REQ-203: a CPU bus access reaches the PIA with its side effects.
+    #[test]
+    fn bus_reads_have_side_effects() {
+        let mut m = machine();
+        set_ddrb_orb(&mut m, 0xFF, 0xFD);
+        cpu_write(&mut m, 0xD303, 0x3C);
+        m.pia.set_cb1(false);
+        assert_eq!(m.peek(0xD303), 0xBC, "PBCTL bit 7 set");
+        assert_eq!(m.peek(0xD301), 0xFD, "peek of PORTB");
+        assert_eq!(m.peek(0xD303), 0xBC, "peek has no side effect");
+        assert_eq!(cpu_read(&mut m, 0xD3F1), 0xFD, "CPU read of PORTB");
+        assert_eq!(m.peek(0xD303), 0x3C, "the read cleared bit 7");
+    }
+
+    /// Verifies REQ-203: the dummy read of `LDA $D3F0,X` reads `$D301` and clears the PIA
+    /// status (criterion 1).
+    #[test]
+    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
+    fn dummy_read_clears_pia_status() {
+        let mut m = program_machine(&[
+            0xA2, 0x11, // LDX #$11
+            0xBD, 0xF0, 0xD3, // LDA $D3F0,X
+            0x4C, 0x05, 0xC2, // JMP $C205
+        ]);
+        cpu_write(&mut m, 0xD303, 0x3C);
+        m.pia.set_cb1(false);
+        assert_eq!(m.peek(0xD303), 0xBC, "PBCTL bit 7 set");
+        let log = accesses(&log_cycles(&mut m, 100));
+        let reads: Vec<u16> = log
+            .iter()
+            .filter(|access| (0xD000..0xD800).contains(&access.addr))
+            .map(|access| access.addr)
+            .take(2)
+            .collect();
+        assert_eq!(reads, [0xD301, 0xD401], "dummy read, then the real read");
+        assert_eq!(m.peek(0xD303) & 0xC0, 0, "PBCTL bits 7 and 6 are 0");
+    }
+
+    /// Verifies REQ-203: `INC $D301` writes `PORTB` twice (criterion 2).
+    #[test]
+    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
+    fn rmw_writes_portb_twice() {
+        let mut m = program_machine(&[0x4C, 0x00, 0x20]); // JMP $2000
+        for (addr, byte) in (0x2000_u16..).zip([0xEE, 0x01, 0xD3, 0x4C, 0x03, 0x20]) {
+            m.poke_ram(addr, byte); // INC $D301, JMP $2003
+        }
+        m.poke_ram(0xC000, 0xAA);
+        set_ddrb_orb(&mut m, 0xFF, 0xFD);
+        cpu_write(&mut m, 0xD303, 0x3C);
+        let log = accesses(&log_cycles(&mut m, 100));
+        let writes: Vec<u8> = log
+            .iter()
+            .filter(|access| access.write && access.addr == 0xD301)
+            .map(|access| access.value)
+            .collect();
+        assert_eq!(writes, [0xFD, 0xFE], "the PIA receives 2 writes");
+        assert_eq!(m.peek(0xC000), 0xAA, "OS ROM disabled");
+    }
+
+    /// Verifies REQ-204: with all ROMs off, each address outside `$D000-$D7FF` is RAM
+    /// (criterion 1).
+    #[test]
+    fn all_ram_visible_with_roms_off() {
+        let mut m = machine();
+        set_portb(&mut m, 0xFE); // OS off, BASIC off, self-test off
+        for addr in 0x0000..=0xFFFF_u16 {
             if (0xD000..=0xD7FF).contains(&addr) {
                 continue;
             }
-            cpu_write(&mut m, addr, 0x5A);
-            assert_eq!(cpu_read(&mut m, addr), 0x5A, "RAM at ${addr:04X}");
+            for value in [0xA5, 0x5A] {
+                cpu_write(&mut m, addr, value);
+                assert_eq!(cpu_read(&mut m, addr), value, "RAM at ${addr:04X}");
+            }
         }
     }
 
-    /// Verifies REQ-205: the I/O pages reach the chips and unused pages read `$FF`.
+    /// Verifies REQ-204: the low RAM is visible with all ROMs and a cartridge on
+    /// (criterion 2).
     #[test]
-    fn io_pages_reach_chips() {
+    fn low_ram_always_visible() {
+        let mut m = machine_with(Some(cart_8k()));
+        set_portb(&mut m, 0x7D); // OS, BASIC and self-test on
+        for addr in (0x0000..=0x4FFF).chain(0x5800..=0x9FFF_u16) {
+            let [value, _] = addr.to_le_bytes();
+            cpu_write(&mut m, addr, value ^ 0x5A);
+            assert_eq!(cpu_read(&mut m, addr), value ^ 0x5A, "RAM at ${addr:04X}");
+        }
+    }
+
+    /// Verifies REQ-205: `$D40B` reads `VCOUNT` for each `PORTB` value (criterion 1).
+    #[test]
+    fn io_area_cannot_be_disabled() {
         let mut m = machine();
-        assert_eq!(cpu_read(&mut m, 0xD014), 0x0F, "GTIA PAL register (NTSC)");
-        assert_eq!(cpu_read(&mut m, 0xD0F4), 0x0F, "GTIA mirror");
-        assert_eq!(
-            cpu_read(&mut m, 0xD20F) & 0x04,
-            0x04,
-            "POKEY SKSTAT: no key"
-        );
-        assert_eq!(cpu_read(&mut m, 0xD40B), m.peek(0xD40B), "ANTIC VCOUNT");
-        for addr in [0xD100, 0xD5FF, 0xD600, 0xD7FF] {
-            assert_eq!(cpu_read(&mut m, addr), 0xFF, "unused I/O ${addr:04X}");
+        m.poke_ram(0xD40B, 0xFF);
+        for portb in 0..=0xFF {
+            set_portb(&mut m, portb);
+            assert_eq!(
+                cpu_read(&mut m, 0xD40B),
+                m.antic.read(0x0B),
+                "VCOUNT with PORTB ${portb:02X}"
+            );
         }
-        // Criterion 3: ANTIC decodes 4 address bits, the PIA 2.
-        assert_eq!(cpu_read(&mut m, 0xD47B), m.peek(0xD40B), "VCOUNT at $D47B");
-        cpu_write(&mut m, 0xD3FF, 0x3C);
-        assert_eq!(cpu_read(&mut m, 0xD303), 0x3C, "PBCTL written at $D3FF");
-        assert_eq!(m.peek(0xD303), 0x3C, "peek of PBCTL");
-        assert_eq!(m.peek(0xD20F) & 0x04, 0x04, "peek of SKSTAT");
     }
 
-    /// Verifies REQ-205: writes to `$D000-$D7FF` do not change the RAM under the I/O area.
+    /// Verifies REQ-205: writes to `$D000-$D7FF` do not change the RAM under the I/O area
+    /// (criterion 2).
     #[test]
-    fn io_writes_keep_ram() {
-        let mut m = machine_with(Some(Cartridge::from_raw(vec![0xCC; 0x2000]).unwrap()));
+    fn io_write_does_not_change_ram() {
+        let mut m = machine_with(Some(cart_8k()));
         set_portb(&mut m, 0xFE);
         for addr in 0xD000..=0xD7FF {
             m.poke_ram(addr, 0xAA);
@@ -666,64 +1005,204 @@ mod tests {
         }
     }
 
-    /// Verifies REQ-214: unmapped I/O pages, and `$D5xx` without a driving cartridge, read
-    /// `$FF` for the CPU and for `peek`.
+    /// Verifies REQ-205: the I/O pages reach the chips at their mirror addresses
+    /// (criteria 3 and 4).
     #[test]
-    fn unmapped_io_reads_ff() {
-        let mut m = machine_with(Some(Cartridge::from_raw(vec![0xCC; 0x2000]).unwrap()));
-        for addr in (0xD100..=0xD1FF).chain(0xD500..=0xD7FF) {
-            assert_eq!(cpu_read(&mut m, addr), 0xFF, "CPU read of ${addr:04X}");
-            assert_eq!(m.peek(addr), 0xFF, "peek of ${addr:04X}");
-        }
+    fn io_pages_reach_chips() {
+        let mut m = machine();
+        assert_eq!(cpu_read(&mut m, 0xD014), 0x0F, "GTIA PAL register (NTSC)");
+        assert_eq!(cpu_read(&mut m, 0xD0F4), 0x0F, "GTIA mirror");
+        assert_eq!(
+            cpu_read(&mut m, 0xD20F) & 0x04,
+            0x04,
+            "POKEY SKSTAT: no key"
+        );
+        assert_eq!(cpu_read(&mut m, 0xD40B), m.peek(0xD40B), "ANTIC VCOUNT");
+        assert_eq!(cpu_read(&mut m, 0xD47B), m.peek(0xD40B), "VCOUNT at $D47B");
+        cpu_write(&mut m, 0xD3FF, 0x3C);
+        assert_eq!(cpu_read(&mut m, 0xD303), 0x3C, "PBCTL written at $D3FF");
+        assert_eq!(m.peek(0xD303), 0x3C, "peek of PBCTL");
+        assert_eq!(m.peek(0xD20F) & 0x04, 0x04, "peek of SKSTAT");
+        let mut mirror = machine();
+        let mut base = machine();
+        cpu_write(&mut mirror, 0xD2F0, 0xA0);
+        cpu_write(&mut base, 0xD200, 0xA0);
+        assert_eq!(mirror.pokey, base.pokey, "POKEY write at $D2F0 = at $D200");
+        m.poke_ram(0xD013, 0xAA);
+        assert_eq!(cpu_read(&mut m, 0xD013), 0x00, "TRIG3, not RAM");
     }
 
-    /// Verifies REQ-206: a write to a ROM address does not change the RAM under it.
+    /// Verifies REQ-206: a write to the OS ROM does not change the RAM under it
+    /// (criterion 1).
     #[test]
-    fn write_to_rom_keeps_ram() {
-        let mut m = machine_with(Some(Cartridge::from_raw(vec![0xCC; 0x2000]).unwrap()));
-        for addr in [0xE000, 0xB000] {
-            m.poke_ram(addr, 0xAA);
-            cpu_write(&mut m, addr, 0x55);
-            assert_eq!(m.peek_ram(addr), 0xAA, "RAM under ROM at ${addr:04X}");
-        }
-        assert_eq!(m.peek(0xB000), 0xCC, "the cartridge shows at $B000");
-    }
-
-    /// Verifies REQ-207 and REQ-211: `PORTB` bit 0 switches the OS ROM.
-    #[test]
-    fn portb_bit0_switches_os_rom() {
+    fn write_to_os_rom_ignored() {
         let mut m = machine();
         m.poke_ram(0xE000, 0xAA);
-        assert_eq!(m.peek(0xE000), 0x20, "OS ROM after power-on (pins $FF)");
+        set_portb(&mut m, 0xFF);
+        cpu_write(&mut m, 0xE000, 0x55);
         set_portb(&mut m, 0xFE);
-        assert_eq!(m.peek(0xE000), 0xAA, "RAM with OS ROM off");
-        assert_eq!(
-            m.peek(0xC000),
-            m.peek_ram(0xC000),
-            "RAM at $C000 with OS ROM off"
-        );
+        assert_eq!(cpu_read(&mut m, 0xE000), 0xAA, "RAM under the OS ROM");
     }
 
-    /// Verifies REQ-208: `PORTB` bit 1 = 0 maps BASIC at `$A000-$BFFF`.
+    /// Verifies REQ-206: a write to BASIC does not change the RAM under it (criterion 2).
     #[test]
-    fn portb_bit1_switches_basic() {
+    fn write_to_basic_ignored() {
         let mut m = machine();
-        assert_eq!(
-            m.peek(0xA000),
-            0x00,
-            "BASIC is off after power-on (pins $FF)"
-        );
+        m.poke_ram(0xA000, 0xAA);
         set_portb(&mut m, 0xFD);
-        assert_eq!(m.peek(0xA000), 0xBB, "BASIC on");
-        assert_eq!(m.peek(0xBFFF), 0xBB, "BASIC end");
+        cpu_write(&mut m, 0xA000, 0x55);
+        set_portb(&mut m, 0xFF);
+        assert_eq!(cpu_read(&mut m, 0xA000), 0xAA, "RAM under BASIC");
     }
 
-    /// Verifies REQ-209: `PORTB` bit 7 = 0 maps the self-test ROM, only with the OS ROM on.
+    /// Verifies REQ-206: a write to the cartridge ROM does not change the RAM under it
+    /// (criteria 3 and 5).
     #[test]
-    fn portb_bit7_switches_self_test() {
+    fn write_to_cartridge_rom_ignored() {
+        let mut m = machine_with(Some(cart_8k()));
+        m.poke_ram(0xB000, 0xAA);
+        cpu_write(&mut m, 0xB000, 0x55);
+        assert_eq!(m.peek_ram(0xB000), 0xAA, "3: RAM at $B000");
+        assert_eq!(cpu_read(&mut m, 0xB000), 0xCC, "3: the cartridge byte");
+        let mut big = machine_with(Some(cart_16k()));
+        big.poke_ram(0x8000, 0x77);
+        cpu_write(&mut big, 0x8000, 0x00);
+        assert_eq!(big.peek_ram(0x8000), 0x77, "5: RAM at $8000");
+        assert_eq!(cpu_read(&mut big, 0x8000), 0xCC, "5: the cartridge byte");
+    }
+
+    /// Verifies REQ-206: a write to the self-test ROM does not change the RAM under it
+    /// (criterion 4).
+    #[test]
+    fn write_to_self_test_ignored() {
+        let mut m = machine();
+        m.poke_ram(0x5000, 0xAA);
+        set_portb(&mut m, 0x7F);
+        cpu_write(&mut m, 0x5000, 0x55);
+        assert_eq!(m.peek_ram(0x5000), 0xAA, "RAM at $5000");
+        assert_eq!(cpu_read(&mut m, 0x5000), 0x10, "OS image byte $1000");
+    }
+
+    /// Verifies REQ-207: the OS ROM shows at `$C000-$CFFF` and `$D800-$FFFF` (criterion 1).
+    #[test]
+    fn os_rom_mapping() {
+        let mut m = machine();
+        set_portb(&mut m, 0xFF);
+        let os = os_rom();
+        for (addr, offset) in [
+            (0xC000, 0x0000),
+            (0xCFFF, 0x0FFF),
+            (0xD800, 0x1800),
+            (0xFFFF, 0x3FFF),
+        ] {
+            assert_eq!(cpu_read(&mut m, addr), os[offset], "${addr:04X}");
+        }
+    }
+
+    /// Verifies REQ-207: the I/O area hides the OS ROM at `$D000-$D7FF` (criterion 2).
+    #[test]
+    fn os_rom_hidden_under_io() {
+        let mut m = machine();
+        set_portb(&mut m, 0xFF);
+        assert_ne!(m.antic.read(0x0B), 0x14, "the test needs VCOUNT != OS byte");
+        assert_eq!(cpu_read(&mut m, 0xD40B), m.antic.read(0x0B), "VCOUNT");
+    }
+
+    /// Verifies REQ-207: with `PORTB` pin 0 = 0, RAM shows at the OS ROM addresses
+    /// (criterion 3).
+    #[test]
+    fn os_rom_disabled_shows_ram() {
+        let mut m = machine();
+        set_portb(&mut m, 0xFE);
+        for addr in (0xC000..=0xCFFF).chain(0xD800..=0xFFFF_u16) {
+            let [value, _] = addr.to_le_bytes();
+            cpu_write(&mut m, addr, !value);
+            assert_eq!(cpu_read(&mut m, addr), !value, "RAM at ${addr:04X}");
+        }
+    }
+
+    /// Verifies REQ-207: the OS ROM must be 16,384 bytes (criterion 4).
+    #[test]
+    fn os_rom_size_checked() {
+        assert!(Machine::new(config(os_rom(), None)).is_ok(), "16,384 bytes");
+        for size in [0x2000, 0x3FFF, 0x4001] {
+            let error = Machine::new(config(vec![0; size], None)).unwrap_err();
+            assert_eq!(error, ConfigError::OsRomSize(size), "{size} bytes");
+            assert_eq!(
+                error.to_string(),
+                format!("OS ROM must be 16384 bytes, not {size} bytes"),
+                "message"
+            );
+        }
+        let error = Machine::new(MachineConfig {
+            basic_rom: Some(vec![0; 100]),
+            ..config(os_rom(), None)
+        })
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "BASIC ROM must be 8192 bytes, not 100 bytes",
+            "BASIC size"
+        );
+    }
+
+    /// Verifies REQ-208: `PORTB` pin 1 = 0 shows BASIC (criterion 1).
+    #[test]
+    fn basic_enabled_by_bit_1_low() {
+        let mut basic = vec![0xBB; super::BASIC_ROM_SIZE];
+        basic[0] = 0x01;
+        basic[0x1FFF] = 0x02;
+        let mut m = Machine::new(MachineConfig {
+            basic_rom: Some(basic),
+            ..config(os_rom(), None)
+        })
+        .unwrap();
+        set_portb(&mut m, 0xFD);
+        assert_eq!(cpu_read(&mut m, 0xA000), 0x01, "BASIC byte $0000");
+        assert_eq!(cpu_read(&mut m, 0xBFFF), 0x02, "BASIC byte $1FFF");
+    }
+
+    /// Verifies REQ-208: `PORTB` pin 1 = 1 shows RAM at `$A000-$BFFF` (criterion 2).
+    #[test]
+    fn basic_disabled_shows_ram() {
+        let mut m = machine();
+        set_portb(&mut m, 0xFF);
+        for addr in 0xA000..=0xBFFF_u16 {
+            let [value, _] = addr.to_le_bytes();
+            cpu_write(&mut m, addr, value);
+            assert_eq!(cpu_read(&mut m, addr), value, "RAM at ${addr:04X}");
+        }
+    }
+
+    /// Verifies REQ-208: with no BASIC image, RAM shows at `$A000-$BFFF` (criterion 3).
+    #[test]
+    fn no_basic_image_shows_ram() {
+        let mut m = Machine::new(MachineConfig {
+            basic_rom: None,
+            ..config(os_rom(), None)
+        })
+        .unwrap();
+        set_portb(&mut m, 0xFD);
+        for addr in 0xA000..=0xBFFF_u16 {
+            let [value, _] = addr.to_le_bytes();
+            cpu_write(&mut m, addr, value);
+            assert_eq!(cpu_read(&mut m, addr), value, "RAM at ${addr:04X}");
+        }
+    }
+
+    /// Verifies REQ-209: `PORTB` bit 7 = 0 maps the self-test ROM.
+    #[test]
+    fn self_test_rom_mapping() {
         let mut m = machine();
         set_portb(&mut m, 0x7F);
         assert_eq!(m.peek(0x5000), 0x10, "self-test ROM = OS ROM offset $1000");
+        assert_eq!(m.peek(0x57FF), 0x17, "self-test ROM end");
+    }
+
+    /// Verifies REQ-209: the self-test ROM needs the OS ROM.
+    #[test]
+    fn self_test_needs_os_rom() {
+        let mut m = machine();
         set_portb(&mut m, 0x7E);
         assert_eq!(m.peek(0x5000), 0x00, "no self-test ROM without the OS ROM");
     }
@@ -731,7 +1210,7 @@ mod tests {
     /// Verifies REQ-210: cartridge before BASIC before RAM.
     #[test]
     fn cartridge_before_basic() {
-        let mut m = machine_with(Some(Cartridge::from_raw(vec![0xCC; 0x4000]).unwrap()));
+        let mut m = machine_with(Some(cart_16k()));
         set_portb(&mut m, 0xFD);
         assert_eq!(m.peek(0xA000), 0xCC, "cartridge before BASIC");
         assert_eq!(
@@ -751,93 +1230,429 @@ mod tests {
         );
     }
 
+    /// Writes `$11` to the RAM at `$C000`, `$A000` and `$5000`, and returns what a CPU read
+    /// of those addresses gives.
+    fn map_view(m: &mut Machine) -> [u8; 3] {
+        for addr in [0xC000, 0xA000, 0x5000] {
+            m.poke_ram(addr, 0x11);
+        }
+        [0xC000, 0xA000, 0x5000].map(|addr| cpu_read(m, addr))
+    }
+
+    /// OS ROM at `$C000`, RAM at `$A000` and `$5000`.
+    const RESET_MAP: [u8; 3] = [0x00, 0x11, 0x11];
+
+    /// Verifies REQ-211: after a PIA reset, the OS ROM is on, BASIC and self-test are off
+    /// (criteria 1 and 3).
+    #[test]
+    fn reset_memory_map() {
+        let mut m = machine();
+        assert_eq!(map_view(&mut m), RESET_MAP, "1: after power-on");
+        set_ddrb_orb(&mut m, 0x00, 0x00);
+        assert_eq!(map_view(&mut m), RESET_MAP, "3: DDRB = $00, ORB = $00");
+    }
+
+    /// Verifies REQ-211: output bits select the map (criterion 2).
+    #[test]
+    fn portb_output_selects_map() {
+        let mut m = machine();
+        set_ddrb_orb(&mut m, 0xFF, 0xFC);
+        assert_eq!(map_view(&mut m), [0x11, 0xBB, 0x11], "OS off, BASIC on");
+    }
+
+    /// Verifies REQ-211: input bits 0, 1 and 7 are pulled up (criteria 1 and 3).
+    #[test]
+    fn portb_inputs_pulled_up() {
+        let mut m = machine();
+        set_ddrb_orb(&mut m, 0x7C, 0x00);
+        assert_eq!(m.mem.portb & 0x83, 0x83, "pins 0, 1 and 7 high");
+        assert_eq!(map_view(&mut m), RESET_MAP, "map of the pull-ups");
+    }
+
+    /// Verifies REQ-211: a `DDRB` write changes the map (criterion 4).
+    #[test]
+    fn ddrb_write_changes_map() {
+        let mut m = machine();
+        set_ddrb_orb(&mut m, 0x00, 0x00);
+        assert_eq!(map_view(&mut m)[0], 0x00, "OS ROM before the write");
+        cpu_write(&mut m, 0xD303, 0x00);
+        cpu_write(&mut m, 0xD301, 0x01);
+        assert_eq!(map_view(&mut m)[0], 0x11, "RAM after the write");
+    }
+
+    /// Verifies REQ-211: `DDRB` = `$80` with output register `$00` maps the self-test ROM
+    /// and keeps BASIC off (criterion 5).
+    #[test]
+    fn mixed_inputs_and_outputs_select_map() {
+        let mut m = machine();
+        set_ddrb_orb(&mut m, 0x80, 0x00);
+        assert_eq!(cpu_read(&mut m, 0x5000), 0x10, "OS image byte $1000");
+        assert_eq!(map_view(&mut m), [0x00, 0x11, 0x10], "OS on, BASIC off");
+    }
+
+    /// Verifies REQ-212: the next DMA read after a PIA write uses the new map (criterion 3).
+    #[test]
+    fn bank_switch_next_dma_access() {
+        let mut m = machine();
+        m.poke_ram(0xE000, 0xAA);
+        assert_eq!(m.mem.dma_read(0xE000), 0x20, "OS ROM before");
+        set_portb(&mut m, 0xFE);
+        assert_eq!(m.mem.dma_read(0xE000), 0xAA, "RAM after the write");
+    }
+
     /// Verifies REQ-213: ANTIC DMA reads use the CPU memory map.
     #[test]
     fn dma_map_equals_cpu_map() {
-        let mut m = machine();
-        for portb in [0xFF, 0xFE, 0xFD, 0x7F] {
-            set_portb(&mut m, portb);
-            for addr in (0x0000..=0xFFFF_u16).step_by(0x80) {
-                if (0xD000..=0xD7FF).contains(&addr) {
-                    continue;
+        for cart in [None, Some(cart_8k()), Some(cart_16k())] {
+            let mut m = machine_with(cart);
+            for portb in [0xFF, 0xFE, 0xFD, 0x7F, 0x7C] {
+                set_portb(&mut m, portb);
+                let addrs = (0x0000..=0xFFFF_u16)
+                    .step_by(0x40)
+                    .filter(|addr| !(0xD000..=0xD7FF).contains(addr));
+                for addr in addrs {
+                    let cpu = m.peek(addr);
+                    assert_eq!(
+                        m.mem.dma_read(addr),
+                        cpu,
+                        "PORTB ${portb:02X} at ${addr:04X}"
+                    );
                 }
-                let cpu = m.peek(addr);
-                assert_eq!(
-                    m.mem.dma_read(addr),
-                    cpu,
-                    "PORTB ${portb:02X} at ${addr:04X}"
-                );
+            }
+            assert_eq!(
+                m.mem.dma_read(0xD500),
+                0xFF,
+                "DMA read of cartridge control"
+            );
+            assert_eq!(m.mem.dma_read(0xD40B), 0xFF, "DMA read of other I/O");
+        }
+    }
+
+    /// Verifies REQ-214: unmapped I/O pages, and `$D5xx` without a driving cartridge, read
+    /// `$FF` for the CPU and for `peek`.
+    #[test]
+    fn unmapped_io_reads_ff() {
+        for cart in [None, Some(cart_8k())] {
+            let mut m = machine_with(cart);
+            for addr in (0xD100..=0xD1FF).chain(0xD500..=0xD7FF) {
+                assert_eq!(cpu_read(&mut m, addr), 0xFF, "CPU read of ${addr:04X}");
+                assert_eq!(m.peek(addr), 0xFF, "peek of ${addr:04X}");
             }
         }
-        assert_eq!(
-            m.mem.dma_read(0xD500),
-            0xFF,
-            "DMA read of cartridge control"
-        );
-        assert_eq!(m.mem.dma_read(0xD40B), 0xFF, "DMA read of other I/O");
     }
 
-    /// Verifies REQ-215 and REQ-216: power-on clears RAM and resets the PIA.
+    /// Verifies REQ-215: after power-on, all RAM is `$00` (criterion 1).
     #[test]
-    fn power_on_clears_ram_and_pia() {
-        let mut m = machine();
-        m.poke_ram(0x1234, 0x99);
-        set_portb(&mut m, 0xFE);
-        m.power_on();
-        assert_eq!(m.peek_ram(0x1234), 0x00, "RAM is $00");
-        assert_eq!(m.peek(0xE000), 0x20, "OS ROM on again (PIA reset)");
-        assert_eq!(m.frame_count(), 0, "no frame yet");
+    fn power_on_ram_zero() {
+        let m = machine();
+        assert!(
+            (0..=0xFFFF).all(|addr| m.peek_ram(addr) == 0),
+            "all RAM is $00"
+        );
     }
 
-    /// Verifies REQ-217: the Reset button resets the PIA, so the OS ROM is on again.
+    /// Verifies REQ-215: a second power-on clears RAM (criterion 2).
+    #[test]
+    fn second_power_on_clears_ram() {
+        let mut m = machine();
+        cpu_write(&mut m, 0x1000, 0x55);
+        m.poke_ram(0xE000, 0xFF);
+        m.run_frame();
+        m.power_on();
+        assert!(
+            (0..=0xFFFF).all(|addr| m.peek_ram(addr) == 0),
+            "all RAM is $00"
+        );
+        assert_eq!((m.cycle_count(), m.frame_count()), (0, 0), "counters");
+    }
+
+    /// Verifies REQ-215: two machines with the same configuration have the same RAM after
+    /// one frame (criterion 3).
+    #[test]
+    fn power_on_deterministic() {
+        let mut a = machine();
+        let mut b = machine();
+        a.run_frame();
+        b.run_frame();
+        assert!(a.mem.ram == b.mem.ram, "the same RAM");
+        assert_eq!(a, b, "the same machine");
+    }
+
+    /// Verifies REQ-216: after power-on, the CPU runs the reset sequence and fetches the
+    /// opcode at the reset vector (criterion 1).
+    #[test]
+    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
+    fn power_on_starts_at_reset_vector() {
+        let mut os = os_rom();
+        os[0x3FFC] = 0x34;
+        os[0x3FFD] = 0xC2;
+        let mut m = Machine::new(config(os, None)).unwrap();
+        let log = accesses(&log_cycles(&mut m, 20));
+        assert!(log[..7].iter().all(|access| !access.write), "7 reads");
+        assert_eq!((log[7].addr, log[7].write), (0xC234, false), "opcode fetch");
+    }
+
+    /// Verifies REQ-216: power-on resets the PIA (criterion 2).
+    #[test]
+    fn power_on_clears_pia() {
+        let mut m = machine();
+        cpu_write(&mut m, 0xD300, 0xFF);
+        cpu_write(&mut m, 0xD301, 0xFF);
+        cpu_write(&mut m, 0xD302, 0x3C);
+        cpu_write(&mut m, 0xD303, 0x3C);
+        m.power_on();
+        for addr in 0xD300..=0xD303 {
+            assert_eq!(cpu_read(&mut m, addr), 0x00, "${addr:04X}");
+        }
+        assert_eq!(m.peek(0xE000), 0x20, "OS ROM on");
+    }
+
+    /// Verifies REQ-216: a power-on resets all chips: a used machine after power-on makes
+    /// the same bus accesses as a new machine (criterion 3).
+    #[test]
+    fn power_on_resets_chips() {
+        let code = [
+            0xA0, 0x46, // LDY #$46
+            0xA2, 0x00, // LDX #$00
+            0xCA, // DEX
+            0xD0, 0xFD, // BNE $C204
+            0x88, // DEY
+            0xD0, 0xF8, // BNE $C202
+            0xA9, 0xC0, // LDA #$C0
+            0x8D, 0x0E, 0xD4, // STA NMIEN
+            0xA9, 0x22, // LDA #$22
+            0x8D, 0x00, 0xD4, // STA DMACTL
+            0xA9, 0xFF, // LDA #$FF
+            0xA2, 0x1F, // LDX #$1F
+            0x9D, 0x00, 0xD0, // STA $D000,X
+            0xCA, // DEX
+            0x10, 0xFA, // BPL $C218
+            0xA2, 0x0F, // LDX #$0F
+            0x9D, 0x00, 0xD2, // STA $D200,X
+            0xCA, // DEX
+            0x10, 0xFA, // BPL $C220
+            0x4C, 0x26, 0xC2, // JMP $C226
+        ];
+        let mut a = program_machine(&code);
+        let mut b = program_machine(&code);
+        for _ in 0..10 {
+            b.run_frame();
+        }
+        b.power_on();
+        let log_a = log_cycles(&mut a, 2 * 29_868);
+        let log_b = log_cycles(&mut b, 2 * 29_868);
+        assert!(log_a == log_b, "the same bus accesses in the same cycles");
+    }
+
+    /// Verifies REQ-217: the Reset button starts the reset sequence (criterion 1).
+    #[test]
+    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
+    fn reset_button_runs_reset_sequence() {
+        let mut m = program_machine(&[0x4C, 0x00, 0x20]); // JMP $2000
+        for addr in 0x2000..0x2010 {
+            m.poke_ram(addr, 0xEA); // NOP
+        }
+        for (addr, byte) in (0x2010_u16..).zip([0x4C, 0x00, 0x20]) {
+            m.poke_ram(addr, byte);
+        }
+        let _warmup = log_cycles(&mut m, 200);
+        assert!(m.cpu().registers().pc < 0x2020, "running the NOPs in RAM");
+        m.press_reset();
+        let log = accesses(&log_cycles(&mut m, 20));
+        assert!(log[..7].iter().all(|access| !access.write), "7 reads");
+        assert_eq!((log[7].addr, log[7].write), (0xC200, false), "opcode fetch");
+    }
+
+    /// Verifies REQ-217: the Reset button resets the PIA and the memory map (criterion 2).
     #[test]
     fn reset_button_resets_pia() {
         let mut m = machine();
-        m.poke_ram(0x1234, 0x99);
-        set_portb(&mut m, 0xFE);
+        m.poke_ram(0xA000, 0x99);
+        set_ddrb_orb(&mut m, 0xFF, 0xFC);
+        cpu_write(&mut m, 0xD302, 0x3C);
+        cpu_write(&mut m, 0xD303, 0x3C);
+        assert_eq!(m.peek(0xA000), 0xBB, "BASIC on before");
         m.press_reset();
-        assert_eq!(m.peek(0xE000), 0x20, "OS ROM on");
-        assert_eq!(m.peek_ram(0x1234), 0x99, "RAM is kept");
+        for addr in 0xD300..=0xD303 {
+            assert_eq!(cpu_read(&mut m, addr), 0x00, "${addr:04X}");
+        }
+        assert_eq!(cpu_read(&mut m, 0xC000), 0x00, "OS image byte $0000");
+        assert_eq!(cpu_read(&mut m, 0xA000), 0x99, "RAM at $A000");
     }
 
-    /// Verifies REQ-232: `TRIG3` is 1 with a cartridge and 0 without.
+    /// Verifies REQ-217: the Reset button resets ANTIC: no NMI, and the same DMA as a new
+    /// machine (criterion 3).
     #[test]
-    fn trig3_follows_cartridge() {
-        let mut with = machine_with(Some(Cartridge::from_raw(vec![0; 0x2000]).unwrap()));
-        assert_eq!(cpu_read(&mut with, 0xD013), 0x01, "cartridge present");
-        let mut without = machine();
-        assert_eq!(cpu_read(&mut without, 0xD013), 0x00, "no cartridge");
+    #[ignore = "needs the WP-1 CPU and the WP-2 ANTIC; the lead enables it after the merge"]
+    fn reset_button_resets_antic() {
+        let code = [0x4C, 0x00, 0xC2]; // JMP $C200
+        let mut m = program_machine(&code);
+        cpu_write(&mut m, 0xD40E, 0x40); // NMIEN: VBI
+        cpu_write(&mut m, 0xD400, 0x22); // DMACTL
+        m.run_frame();
+        m.run_frame();
+        m.press_reset();
+        let mut after = log_frame(&mut m);
+        after.extend(log_frame(&mut m));
+        assert!(
+            accesses(&after).iter().all(|access| access.addr != 0xFFFA),
+            "no NMI sequence in 2 frames"
+        );
+        let second = log_frame(&mut m);
+        let mut new = program_machine(&code);
+        let _first = log_frame(&mut new);
+        let _second = log_frame(&mut new);
+        let new_second = log_frame(&mut new);
+        let halts = |log: &[CycleLog]| log.iter().map(|cycle| cycle.halt).collect::<Vec<_>>();
+        assert_eq!(halts(&second), halts(&new_second), "the same halt cycles");
     }
 
-    /// Verifies REQ-221: the joystick sets the PIA port A pins and the trigger.
+    /// Verifies REQ-217: the Reset button keeps RAM, GTIA and POKEY (criterion 4).
     #[test]
-    fn joystick_reaches_pia_and_trigger() {
+    fn reset_button_keeps_ram_gtia_pokey() {
         let mut m = machine();
-        let state = super::JoystickState {
+        for addr in 0..=0xFFFF_u16 {
+            let [low, high] = addr.to_le_bytes();
+            m.poke_ram(addr, low ^ high);
+        }
+        cpu_write(&mut m, 0xD01F, 0x08);
+        cpu_write(&mut m, 0xD01A, 0x46);
+        cpu_write(&mut m, 0xD20E, 0x40);
+        cpu_write(&mut m, 0xD20F, 0x03);
+        m.run_frame();
+        let ram = m.mem.ram.clone();
+        let gtia = m.gtia.clone();
+        let pokey = m.pokey;
+        m.press_reset();
+        assert!(m.mem.ram == ram, "RAM");
+        assert_eq!(m.gtia, gtia, "GTIA");
+        assert_eq!(m.pokey, pokey, "POKEY");
+    }
+
+    /// Verifies REQ-217: the Reset button sends no reset NMI: `NMIST` bit 5 stays 0
+    /// (criterion 5).
+    #[test]
+    #[ignore = "needs the WP-2 ANTIC NMIST; the lead enables it after the merge"]
+    fn reset_button_no_nmi() {
+        let mut m = machine();
+        cpu_write(&mut m, 0xD40F, 0x00); // NMIRES
+        assert_eq!(cpu_read(&mut m, 0xD40F) & 0x20, 0, "NMIST bit 5 before");
+        m.press_reset();
+        assert_eq!(cpu_read(&mut m, 0xD40F) & 0x20, 0, "NMIST bit 5 after");
+    }
+
+    /// Verifies REQ-221: the joysticks set the PIA port A pins (criterion 2) and the
+    /// triggers.
+    #[test]
+    fn joystick_bits_on_port_a() {
+        let mut m = machine();
+        cpu_write(&mut m, 0xD302, 0x3C); // PACTL: select ORA
+        let up = JoystickState {
             up: true,
+            ..JoystickState::default()
+        };
+        let right = JoystickState {
+            right: true,
+            ..JoystickState::default()
+        };
+        for (port, state, expected) in [
+            (0, up, 0xFE),
+            (0, right, 0xF7),
+            (1, up, 0xEF),
+            (1, right, 0x7F),
+        ] {
+            m.set_joystick(port, state);
+            assert_eq!(cpu_read(&mut m, 0xD300), expected, "port {port}: {state:?}");
+            m.set_joystick(port, JoystickState::default());
+        }
+        let state = JoystickState {
+            down: true,
             left: true,
             fire: true,
-            ..Default::default()
+            ..JoystickState::default()
         };
         m.set_joystick(0, state);
-        cpu_write(&mut m, 0xD302, 0x04); // PACTL: select ORA
-        assert_eq!(
-            cpu_read(&mut m, 0xD300),
-            0xFA,
-            "up and left pressed on stick 1"
-        );
+        assert_eq!(cpu_read(&mut m, 0xD300), 0xF9, "down and left on stick 1");
         assert_eq!(cpu_read(&mut m, 0xD010), 0x00, "TRIG0 pressed");
-        m.set_joystick(
-            1,
-            super::JoystickState {
-                down: true,
-                right: true,
-                ..Default::default()
-            },
-        );
-        assert_eq!(cpu_read(&mut m, 0xD300), 0x5A, "stick 2 down and right");
-        m.set_joystick(2, super::JoystickState::default());
-        assert_eq!(cpu_read(&mut m, 0xD300), 0x5A, "no third port");
+        m.set_joystick(2, state);
+        assert_eq!(cpu_read(&mut m, 0xD300), 0xF9, "no third port");
+    }
+
+    /// Verifies REQ-225: with no SIO device, CA1 and CB1 stay high: no status bit in 10
+    /// frames (criterion 5).
+    #[test]
+    fn ca1_cb1_idle_high() {
+        for ctl in [0x3C, 0x3E] {
+            let mut m = machine();
+            cpu_write(&mut m, 0xD302, ctl);
+            cpu_write(&mut m, 0xD303, ctl);
+            for _ in 0..10 {
+                m.run_frame();
+            }
+            assert_eq!(m.peek(0xD302), ctl, "PACTL ${ctl:02X}");
+            assert_eq!(m.peek(0xD303), ctl, "PBCTL ${ctl:02X}");
+        }
+    }
+
+    /// Verifies REQ-229: the CPU IRQ line is the PIA IRQ or the POKEY IRQ (criterion 5, the
+    /// cases without POKEY).
+    #[test]
+    fn irq_line_is_pia_or_pokey() {
+        let mut m = machine();
+        assert!(!m.pokey.irq() && !m.pia.irq(), "no IRQ source");
+        assert!(!m.irq_line(), "neither");
+        cpu_write(&mut m, 0xD302, 0x3D);
+        m.pia.set_ca1(false);
+        assert!(m.irq_line(), "only the PIA");
+        cpu_write(&mut m, 0xD302, 0x3D);
+        let _read = cpu_read(&mut m, 0xD300);
+        m.run_cycle();
+        assert!(!m.irq_line(), "PIA IRQ acknowledged");
+    }
+
+    /// Verifies REQ-229: the CPU IRQ line with a POKEY IRQ (criterion 5, the cases with
+    /// POKEY).
+    #[test]
+    #[ignore = "needs the WP-3 POKEY keyboard IRQ; the lead enables it after the merge"]
+    fn irq_line_with_pokey() {
+        let mut m = machine();
+        cpu_write(&mut m, 0xD20F, 0x03); // SKCTL: keyboard scan
+        cpu_write(&mut m, 0xD20E, 0x40); // IRQEN: keyboard
+        m.key_down(0x3F);
+        m.run_frame();
+        assert!(m.pokey.irq() && !m.pia.irq(), "only POKEY");
+        assert!(m.irq_line(), "only POKEY");
+        cpu_write(&mut m, 0xD302, 0x3D);
+        m.pia.set_ca1(false);
+        assert!(m.irq_line(), "both");
+        let _read = cpu_read(&mut m, 0xD300);
+        assert!(m.irq_line(), "only POKEY again");
+        cpu_write(&mut m, 0xD20E, 0x00);
+        assert!(!m.irq_line(), "neither");
+    }
+
+    /// Verifies REQ-232: `TRIG3` is 0 without a cartridge, also with BASIC on.
+    #[test]
+    fn trig3_zero_without_cartridge() {
+        let mut m = machine();
+        assert_eq!(cpu_read(&mut m, 0xD013), 0x00, "no cartridge");
+        set_portb(&mut m, 0xFD);
+        m.run_cycle();
+        assert_eq!(cpu_read(&mut m, 0xD013), 0x00, "BASIC on");
+    }
+
+    /// Verifies REQ-232: `TRIG3` is 1 with an 8 KB or a 16 KB cartridge, after power-on and
+    /// after the Reset button. `TRIG2` is 1.
+    #[test]
+    fn trig3_after_power_on_and_reset() {
+        for cart in [cart_8k(), cart_16k()] {
+            let mut m = machine_with(Some(cart));
+            assert_eq!(cpu_read(&mut m, 0xD013), 0x01, "after power-on");
+            m.run_frame();
+            m.press_reset();
+            assert_eq!(cpu_read(&mut m, 0xD013), 0x01, "after the Reset button");
+            assert_eq!(cpu_read(&mut m, 0xD012), 0x01, "TRIG2");
+        }
     }
 
     /// Verifies REQ-437: the console keys reach `CONSOL` through the machine.
@@ -856,5 +1671,22 @@ mod tests {
             0x03,
             "OPTION pressed after a write of $08"
         );
+        assert!(m.gtia.speaker(), "the speaker line follows CONSOL bit 3");
+    }
+
+    /// The frontend functions reach the chips.
+    #[test]
+    fn frontend_functions_reach_chips() {
+        let mut m = machine();
+        m.run_frame();
+        assert_eq!(m.frame().len(), FRAME_WIDTH * FRAME_HEIGHT, "frame size");
+        let mut audio = Vec::new();
+        m.drain_audio(&mut audio);
+        m.key_down(0x3F);
+        m.set_shift(true);
+        m.set_break(false);
+        m.key_up();
+        m.cpu_mut().registers_mut().a = 0x12;
+        assert_eq!(m.cpu().registers().a, 0x12, "CPU registers");
     }
 }
