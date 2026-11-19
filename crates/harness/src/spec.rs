@@ -280,16 +280,49 @@ pub struct TestRef {
 }
 
 impl TestRef {
-    /// True if `test` is this test: the same function, in a file whose path ends with
-    /// `file` (if a file is given).
+    /// True if `test` is this test: the same function, in a file of the module that `file`
+    /// names (if a file is given). See [`file_matches`].
     #[must_use]
     pub fn matches(&self, test: &CodeTest) -> bool {
         test.function == self.function
             && self
                 .file
                 .as_ref()
-                .is_none_or(|file| test.file.ends_with(file))
+                .is_none_or(|file| file_matches(file, &test.file))
     }
+}
+
+/// True if the file `path` is in the module that the test plan file `file` names
+/// (`docs/design/spec-gates.md`).
+///
+/// A name without a directory, for example `antic.rs`, matches each file `antic.rs` and each
+/// file below a directory `antic/` of a crate source tree (below a `src` or `tests`
+/// directory), for example `crates/atari-core/src/antic/tests/dma.rs`. A path with a
+/// directory, for example `crates/harness/tests/boot.rs`, matches only a path that ends with
+/// all its components.
+#[must_use]
+pub fn file_matches(file: &str, path: &Path) -> bool {
+    let plan = Path::new(file);
+    if path.ends_with(plan) {
+        return true;
+    }
+    if plan.parent().is_some_and(|p| !p.as_os_str().is_empty()) {
+        return false;
+    }
+    let Some(stem) = plan.file_stem() else {
+        return false;
+    };
+    let Some(dirs) = path.parent() else {
+        return false;
+    };
+    let mut in_source = false;
+    for dir in dirs {
+        if in_source && dir == stem {
+            return true;
+        }
+        in_source |= dir == "src" || dir == "tests";
+    }
+    false
 }
 
 /// One table row of the `## Test plan` section of a design document whose first cell names

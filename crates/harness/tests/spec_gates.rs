@@ -754,6 +754,86 @@ mod gates {
         );
     }
 
+    /// A fixture whose test `first_test` (REQ-001, a `done` package) is in the file `code`
+    /// and whose test plan names it in the file `plan`.
+    fn moved_test(code: &str, plan: &str) -> Fixture {
+        let fixture = Fixture::new();
+        fixture.replace(
+            "crates/demo/tests/demo.rs",
+            &format!("/// Verifies {}.\n#[test]\nfn first_test() {{}}\n\n", req(1)),
+            "",
+        );
+        fixture.write(
+            code,
+            &format!("/// Verifies {}.\n#[test]\nfn first_test() {{}}\n", req(1)),
+        );
+        fixture.replace(
+            "docs/design/demo.md",
+            "`demo.rs` `first_test`",
+            &format!("`{plan}` `first_test`"),
+        );
+        fixture
+    }
+
+    /// Asserts that the `trace` gate reports `first_test` in both directions: the test plan
+    /// names a test that is not found, and the test is not in its test plan.
+    #[track_caller]
+    fn first_test_not_matched(fixture: &Fixture, plan: &str) {
+        let violations = fixture.run(trace);
+        assert_reports(
+            &violations,
+            49,
+            &format!("the test plan names `first_test` in {plan}, which is not"),
+        );
+        assert_reports(
+            &violations,
+            49,
+            &format!("`first_test` verifies {}, but the test plan", req(1)),
+        );
+    }
+
+    /// Verifies REQ-049: a file name without a directory in a test plan names a module, so a
+    /// test in `x/tests/y.rs` matches the plan file `x.rs` in both directions.
+    #[test]
+    fn trace_gate_matches_submodule_files() {
+        for code in [
+            "crates/demo/src/x/tests/y.rs",
+            "crates/demo/src/x.rs",
+            "crates/demo/tests/x/y.rs",
+        ] {
+            let fixture = moved_test(code, "x.rs");
+            let violations = fixture.run(trace);
+            assert!(
+                violations.is_empty(),
+                "{code} with x.rs: {:?}",
+                violations
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// Verifies REQ-049: a test in `x/tests/y.rs` does not match the plan file `z.rs`, and a
+    /// crate directory is not a module directory.
+    #[test]
+    fn trace_gate_rejects_other_modules() {
+        first_test_not_matched(&moved_test("crates/demo/src/x/tests/y.rs", "z.rs"), "z.rs");
+        first_test_not_matched(&moved_test("crates/x/src/lib.rs", "x.rs"), "x.rs");
+        first_test_not_matched(&moved_test("crates/demo/src/zx/y.rs", "x.rs"), "x.rs");
+    }
+
+    /// Verifies REQ-049: a plan file with a directory matches that file only, so a test in
+    /// `other/x.rs` does not match the plan file `crates/a/x.rs`.
+    #[test]
+    fn trace_gate_matches_paths_exactly() {
+        let plan = "crates/a/x.rs";
+        first_test_not_matched(&moved_test("crates/demo/src/other/x.rs", plan), plan);
+        first_test_not_matched(&moved_test("crates/a/x/tests/y.rs", plan), plan);
+        let fixture = moved_test("crates/a/x.rs", plan);
+        assert!(fixture.run(trace).is_empty(), "{plan} matches itself");
+    }
+
     /// Verifies REQ-050: the matrix lists each requirement that no slice plans.
     #[test]
     fn unplanned_requirements_are_reported() {
