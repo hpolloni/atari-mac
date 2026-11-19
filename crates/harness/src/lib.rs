@@ -1,6 +1,7 @@
 //! Test harness for the Atari 65XE emulator.
 //!
-//! Design: `docs/design/test-harness.md`. Requirements: REQ-020 to REQ-027.
+//! Design: `docs/design/test-harness.md`. Requirements: REQ-020 to REQ-027. The module
+//! [`spec`] holds the specification gates (`docs/design/spec-gates.md`, REQ-043 to REQ-055).
 //!
 //! The library holds the helpers. The test suites are in `tests/`. Each test names the
 //! requirements that it verifies in its documentation comment (REQ-027).
@@ -9,6 +10,7 @@ pub mod data;
 pub mod input;
 pub mod screen;
 pub mod single_step;
+pub mod spec;
 pub mod system;
 
 use core::error::Error;

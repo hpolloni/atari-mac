@@ -18,7 +18,7 @@ COVERAGE_MIN := 80
 check: fmt-check toml-check typos spec-check clippy test doc deny machete msrv features coverage
 
 ## Fast subset used by the git pre-commit hook.
-pre-commit: fmt-check clippy test
+pre-commit: fmt-check spec-check clippy test
 
 fmt:
 	cargo fmt --all
@@ -50,8 +50,10 @@ deny:
 typos:
 	typos
 
+## Specification gates (docs/design/spec-gates.md). After a change of the specification, run
+## `cargo run -p atari-harness --bin spec-index` to write the generated indexes.
 spec-check:
-	scripts/req-index.sh --check
+	cargo test -p atari-harness --locked --test spec_gates --test traceability
 
 toml-check:
 	taplo fmt --check

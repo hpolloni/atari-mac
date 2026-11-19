@@ -27,21 +27,21 @@ These items are out of scope. A requirement must not depend on them.
 3. Do not specify the implementation. Put implementation decisions in `docs/design/`.
 4. Give each requirement at least one acceptance criterion that a test can check.
 5. Do not change the ID of a requirement. If a requirement is removed, set its status to
-   `Withdrawn` and keep the file.
+   `withdrawn` and keep the file.
 
 ## ID ranges
 
-| Range | Area | Main source |
-| --- | --- | --- |
-| REQ-001 to REQ-019 | Product and frontend | This project |
-| REQ-020 to REQ-039 | Test harness | This project |
-| REQ-040 to REQ-099 | Quality | This project |
-| REQ-100 to REQ-199 | CPU (6502C) | HRM chapter 3 |
-| REQ-200 to REQ-299 | System: clocks, memory map, bank switching, reset, PIA | HRM chapter 2 |
-| REQ-300 to REQ-399 | ANTIC | HRM chapter 4 |
-| REQ-400 to REQ-499 | GTIA, color palette, joystick and paddle inputs | HRM chapters 6, 7.1, 7.2 |
-| REQ-500 to REQ-599 | POKEY: audio, timers, keyboard, interrupts, serial port | HRM chapter 5 |
-| REQ-600 to REQ-699 | Media: cartridges, executables, SIO bus, disk drives | HRM chapters 8.1, 9.1, 10 |
+| Range | Area | `area` value | Main source |
+| --- | --- | --- | --- |
+| REQ-001 to REQ-019 | Product and frontend | `product`, `frontend` | This project |
+| REQ-020 to REQ-039 | Test harness | `test-harness` | This project |
+| REQ-040 to REQ-099 | Quality | `quality` | This project |
+| REQ-100 to REQ-199 | CPU (6502C) | `cpu` | HRM chapter 3 |
+| REQ-200 to REQ-299 | System: clocks, memory map, bank switching, reset, PIA | `system` | HRM chapter 2 |
+| REQ-300 to REQ-399 | ANTIC | `antic` | HRM chapter 4 |
+| REQ-400 to REQ-499 | GTIA, color palette, joystick and paddle inputs | `gtia` | HRM chapters 6, 7.1, 7.2 |
+| REQ-500 to REQ-599 | POKEY: audio, timers, keyboard, interrupts, serial port | `pokey` | HRM chapter 5 |
+| REQ-600 to REQ-699 | Media: cartridges, executables, SIO bus, disk drives | `media` | HRM chapters 8.1, 9.1, 10 |
 
 ## Priority
 
@@ -54,16 +54,17 @@ These items are out of scope. A requirement must not depend on them.
 ## Template
 
 ```markdown
+---
+id: REQ-NNN
+title: <short title>
+status: draft            # draft | accepted | withdrawn
+priority: must           # must | should | could
+area: <`area` value from the ID range table>
+source: HRM <section number> <section title>   # or: Project decision
+verification: test       # test | inspection | demonstration
+depends_on: [REQ-NNN, REQ-NNN]                 # [] if none
+---
 # REQ-NNN: <short title>
-
-| Field | Value |
-| --- | --- |
-| Status | Draft |
-| Priority | Must |
-| Area | <area from the ID range table> |
-| Source | HRM <section number> <section title> |
-| Verification | Test |
-| Depends on | REQ-NNN, REQ-NNN (or "None") |
 
 ## Requirement
 
@@ -82,9 +83,24 @@ The emulator shall <one testable statement>.
 <Exceptions, hardware variants and open questions. Delete this section if empty.>
 ```
 
-`Verification` is one of: `Test` (an automated test), `Inspection` (a review of the code or
-the documents) or `Demonstration` (a person runs the emulator and looks at the result).
+The metadata is YAML frontmatter (REQ-043). `title` is the text of the first heading after
+`REQ-NNN: `. `verification` is one of: `test` (an automated test), `inspection` (a review of
+the code or the documents) or `demonstration` (a person runs the emulator and looks at the
+result). A source with more than one HRM section separates the sections with `;`.
 
 ## Index
 
-The index is in [`requirements/INDEX.md`](requirements/INDEX.md).
+The index is in [`requirements/INDEX.md`](requirements/INDEX.md). The index of the open
+items is in [`open-items/README.md`](open-items/README.md). Both are generated: run
+`cargo run -p atari-harness --bin spec-index` after a change.
+
+## Gates
+
+`make spec-check` runs the specification gates of
+[`spec-gates.md`](../design/spec-gates.md) (REQ-043 to REQ-055). The gates read
+[`vague-words.txt`](vague-words.txt) and [`hrm-sections.txt`](hrm-sections.txt).
+
+The violations that the gates found when they were added are in
+[`gate-baseline.txt`](gate-baseline.txt), one per line. The gates ignore these violations.
+A new violation fails. Remove a line when its violation is fixed: a line that matches no
+violation also fails.

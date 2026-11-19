@@ -45,8 +45,6 @@ jobs:
       - run: taplo fmt --check
       - run: taplo lint
       - run: typos
-      - name: Requirement index is up to date
-        run: scripts/req-index.sh --check
 
   clippy:
     name: Clippy
@@ -181,13 +179,41 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: actionlint
       - run: zizmor --offline .github/workflows
-      - run: shellcheck .githooks/pre-commit scripts/fetch-roms.sh scripts/req-index.sh
+      - run: shellcheck .githooks/pre-commit scripts/fetch-roms.sh
+
+  spec:
+    name: Specification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The gates of docs/design/spec-gates.md. They write target/traceability.md (REQ-052).
+      - run: make spec-check
+      - name: Upload the traceability matrix
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: traceability
+          path: target/traceability.md
+          if-no-files-found: error
+      - name: Counts and violations in the job summary
+        if: always()
+        run: |
+          if [ -f target/traceability.md ]; then
+            sed -n '/^## Counts/,$p' target/traceability.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "target/traceability.md was not written." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # Single required status check for branch protection.
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, doc, deny, hack, coverage, workflows]
+    needs: [fmt, clippy, test, doc, deny, hack, coverage, workflows, spec]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
