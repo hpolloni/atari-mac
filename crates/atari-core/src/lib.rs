@@ -36,6 +36,8 @@ pub mod machine;
 pub mod media;
 pub mod palette;
 pub mod pia;
+#[cfg(test)]
+mod planned;
 pub mod pokey;
 pub mod timing;
 
