@@ -211,7 +211,6 @@ All state is in `struct Antic`. Sizes are the sizes in hardware. The Rust type c
 | `chbase` | 7 bits + 2-stage pipeline | 0 | Kept | `CHBASE` bits 7-1 |
 | `nmien` | 2 bits | 0 | Cleared | `NMIEN` bits 7-6 |
 | `nmist` | 3 bits | `%011` (reads `$7F`) | Kept | `NMIST` bits 7-5 |
-| `penh`, `penv` | 8 bits each | `$00`, `$FF` | Kept | Light pen latches |
 | `ir` | 8 bits | 0 | Kept | Instruction register |
 | `prev_vs` | 1 bit | 0 | Kept | Bit 5 of the last mode line (kept across vertical blank) |
 | `row` | 4 bits | 0 | Kept | Row counter |
@@ -238,7 +237,7 @@ All state is in `struct Antic`. Sizes are the sizes in hardware. The Rust type c
 
 ### Registers (REQ-300 to REQ-303)
 
-`read` and `write` use `reg & 0x0F`. The machine passes `addr & 0xFF`, so the mask gives the mirrors (REQ-300). `read` returns `$FF` for all offsets except `$B`, `$C`, `$D` and `$F` (REQ-301). `NMIST` reads as `nmist << 5 | 0x1F`.
+`read` and `write` use `reg & 0x0F`. The machine passes `addr & 0xFF`, so the mask gives the mirrors (REQ-300). `read` returns `$FF` for all offsets except `$B`, `$C`, `$D` and `$F` (REQ-301). `NMIST` reads as `nmist << 5 | 0x1F`. `PENH` always reads `$00` and `PENV` always reads `$FF`, the power-on values of REQ-303, because the emulator has no light pen (OI-016).
 
 `reset` clears `dmactl` (with its pipeline), `nmien`, `dma_clock` and `tap_history`. It keeps all other fields (REQ-302, HRM 4.1).
 
@@ -270,7 +269,7 @@ On cycles 6 and 7 of that scan line, if a fetch occurred on cycle 1 and the inst
 
 Mode 0 (blank) and mode 1 (jump) clear the DMA clock at the start of the line (HRM 4.12). For mode 0, the height is `((ir >> 4) & 7) + 1` (REQ-320). ANTIC treats bits 4-6 of modes 0 and 1 as clear for scrolling (REQ-320, REQ-321).
 
-For Could behavior (REQ-330): a mode 1 line that vertical scrolling extends fetches two address bytes on cycles 6 and 7 of each of its scan lines.
+For Could behavior (REQ-330): a mode 1 line that vertical scrolling extends fetches two address bytes on cycles 6 and 7 of each of its later scan lines too, if display list DMA is enabled. Each pair goes into `dlist`.
 
 ### Row counter and vertical scrolling (REQ-312, REQ-328, REQ-329, REQ-330)
 
@@ -373,7 +372,7 @@ For each color clock at position `x`, `tick` sends:
 
 1. `HBLANK_*` if `x` is outside `$22-$DD`, or if the scan line is in vertical blank (REQ-306).
 2. Else `BACKGROUND` if `DMACTL` bits 1-0 are `%00` (REQ-308).
-3. Else `BACKGROUND` if `x` is outside the display window (`$40-$BF`, `$30-$CF` or `$2C-$DD`). ANTIC sets the left edge of the window at the start event and the right edge at the stop event, from the displayed width without `HSCROL`. This gives the 144 color clock case of REQ-344.
+3. Else `BACKGROUND` if `x` is outside the display window (`$40-$BF`, `$30-$CF` or `$2C-$DD`). ANTIC sets the left edge of the window at the start event. It sets the right edge in `tick` for cycle `E` of the `DMACTL` width (89, 97 or 105), without the wider fetch and without `HSCROL`. On a line without scrolling, this is the cycle of the stop event. On a scrolled line, the stop event comes later than the right edge, and the window keeps the displayed width (REQ-327 criterion 6). Both edges come from the displayed width. This gives the 144 color clock case of REQ-344.
 4. Else the code from `shifter` for `x`, or `BACKGROUND` if `shifter` has no code for `x`.
 
 ### Player/missile DMA (REQ-339, REQ-340)
@@ -474,6 +473,7 @@ All start and stop events move one cycle later for each 2 of `HSCROL` on scrolle
 
 ### Test methods
 
+Unit tests are in `crates/atari-core/src/antic.rs` (`#[cfg(test)] mod tests`). They call `tick`, `read`, `write`, `end_cycle`, `reset` and `irq_sequence_started` directly, between two ticks. They use these helpers:
 
 - **Fake memory.** A fake `DmaMemory` holds 64 KB. It logs each `dma_read` as `(cycle, address)`. It uses interior mutability (`RefCell`), because `dma_read` takes `&self`. A test finds the address of each fetch from this log.
 - **Output record.** The test records the `CycleOutput` of each cycle. "`out.dma` is X on cycle t" means the record of cycle t.

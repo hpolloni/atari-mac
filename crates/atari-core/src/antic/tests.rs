@@ -7,7 +7,6 @@
 mod display;
 mod dlist;
 mod dma;
-mod light_pen;
 mod line_buffer;
 mod modes;
 mod nmi;
@@ -85,9 +84,14 @@ impl Rig {
 
     /// Loads `dl` in vertical blank and runs to scan line 8, cycle 0.
     fn start_dl(&mut self, dmactl: u8, dl: &[u8]) {
+        self.start_dl_at(dmactl, DL, dl);
+    }
+
+    /// Like `start_dl`, with the display list at `addr`.
+    fn start_dl_at(&mut self, dmactl: u8, addr: u16, dl: &[u8]) {
         self.seek(VBLANK_START_LINE, 0);
-        self.poke(DL, dl);
-        let [lo, hi] = DL.to_le_bytes();
+        self.poke(addr, dl);
+        let [lo, hi] = addr.to_le_bytes();
         self.write(0x02, lo);
         self.write(0x03, hi);
         self.write(0x09, 0xE0);
