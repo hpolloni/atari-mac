@@ -40,7 +40,6 @@ REQ-045 docs/spec/requirements/REQ-623.md: criterion 8: vague word `fast`
 REQ-045 docs/spec/requirements/REQ-623.md: requirement statement: vague word `fast`
 REQ-045 docs/spec/requirements/REQ-636.md: criterion 3: vague word `fast`
 REQ-046 docs/spec/requirements/REQ-004.md: `source` is a project decision, but there is no `Notes` section
-REQ-046 docs/spec/requirements/REQ-005.md: `source` is a project decision, but there is no `Notes` section
 REQ-046 docs/spec/requirements/REQ-007.md: `source` is a project decision, but there is no `Notes` section
 REQ-046 docs/spec/requirements/REQ-012.md: `source` is a project decision, but there is no `Notes` section
 REQ-046 docs/spec/requirements/REQ-013.md: `source` is a project decision, but there is no `Notes` section
@@ -91,7 +90,6 @@ REQ-048 docs/design/architecture.md: the test plan row of REQ-007 (demonstration
 REQ-048 docs/design/architecture.md: the test plan row of REQ-008 (demonstration) does not name docs/verification/REQ-008.md
 REQ-048 docs/design/architecture.md: the test plan row of REQ-011 (demonstration) does not name docs/verification/REQ-011.md
 REQ-048 docs/design/architecture.md: the test plan row of REQ-042 names no test in backticks
-REQ-048 docs/design/spec-gates.md: the test plan row of REQ-027 (inspection) does not name docs/verification/REQ-027.md
 REQ-048 docs/design/test-harness.md: the test plan row of REQ-023 names no test in backticks
 REQ-048 docs/spec/requirements/REQ-001.md: REQ-001 is in no design test plan
 REQ-048 docs/spec/requirements/REQ-015.md: REQ-015 is in no design test plan
@@ -134,5 +132,3 @@ REQ-049 crates/harness/tests/harness_self_test.rs: `type_text_checks_all_charact
 REQ-049 crates/harness/tests/harness_self_test.rs: `type_text_presses_return` verifies REQ-025, but the test plan of REQ-025 does not name it
 REQ-049 crates/harness/tests/harness_self_test.rs: `unreadable_file_gives_read_error` verifies REQ-021, but the test plan of REQ-021 does not name it
 
-# Added by the lead at the WP-6 merge (2026-11-19). These planned tests are not written
-# yet. They are follow-up items in docs/plan/SLICE-01.md. Remove each line with its fix.

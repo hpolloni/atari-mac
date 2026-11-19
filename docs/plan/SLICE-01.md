@@ -127,3 +127,8 @@ Items that a work package found and that belong to a later package or slice.
 | WP-6 merge | `break_stops_basic_program` (REQ-522, `crates/harness/tests/keyboard.rs`) is in the `pokey.md` test plan but is not written. It is in the baseline. | WP-5 part 2 |
 | WP-6 merge | `basic_prints_sum` is in the REQ-518 test plan, but its `Verifies` comment names only REQ-025. It is in the baseline. | WP-5 part 2 |
 | WP-6 | The baseline holds about 130 violations in the existing specification: `depends_on` cycles, vague words, project decisions without notes, requirements in no test plan or in two. | The lead |
+| WP-2 | Criteria that need a system test in `crates/harness/tests/` are not checked yet: REQ-300 criterion 1, REQ-302 `reset_key_keeps_vcount`, REQ-310 criterion 2, REQ-333 criterion 3 (`RTCLOK`), REQ-336 criteria 1-4, REQ-400 `registers_mirror_at_d020_d0ff`, REQ-402 criteria 6-7, REQ-435 criteria 3-5. | A system-test package |
+| WP-2 | The display filters of REQ-411 and REQ-412 (Could) are not implemented. | A later slice |
+| WP-2 | With the power-on values of the design, the display list starts on scan line 9 in the first frame, and on line 8 after that. | The lead: check `antic.md` |
+| WP-5 | OI-017 is open again: with the real CPU, the NMI start cycles of REQ-334 and the BRK takeover of REQ-335 fail. | The user (OI-017) |
+| WP-5 | The frontend does not call `Machine::set_control` yet, so CONTROL alone does nothing. | A frontend teammate |

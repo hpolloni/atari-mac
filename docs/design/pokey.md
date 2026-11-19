@@ -685,3 +685,10 @@ model of REQ-600 and later.
     `take_serial_byte` (call contract item 7).
 16. `Pokey::new` takes a sample rate of 8000 to 192000 Hz (REQ-538). The behavior for a rate
     outside this range (panic, clamp or error) is not decided.
+17. WP-5 part 2 (2026-11-19): the code has the test accessor `test_fired()` (the timers that fired
+    on the last tick) instead of the `test_fires()` log of "Test accessors". The external
+    serial clock (`SKCTL` bits 6-4 = `000` and `001`) has no edges yet. At power-on the
+    speaker level is `false`, but the real line is high (`CONSOL` = `$00`, HRM 6.11).
+18. The REQ-522 system check `break_stops_basic_program`: after BREAK, Altirra BASIC prints
+    `Stopped at line 10` and no new prompt. The test then types `PRINT 2+2` to show that the
+    program stopped.

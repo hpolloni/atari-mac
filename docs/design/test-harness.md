@@ -70,7 +70,8 @@ pub fn screen_text(machine: &Machine) -> Vec<String>;
 pub fn internal_to_ascii(code: u8) -> char;
 ```
 
-`screen_text` reads the screen address from `SAVMSC` (`$58-$59`) and decodes 24 rows of 40
+`has_row` compares a row after it removes leading and trailing spaces, because the OS text
+screen has a left margin of 2 columns. `screen_text` reads the screen address from `SAVMSC` (`$58-$59`) and decodes 24 rows of 40
 ANTIC internal character codes. Bit 7 (inverse video) is ignored. Codes `$00-$3F` are
 ATASCII `$20-$5F`, codes `$40-$5F` are ATASCII `$00-$1F`, and codes `$60-$7F` are the same
 in both sets. A character that is not printable ASCII becomes `?`. This depends only on the
@@ -122,7 +123,7 @@ With `UPDATE_GOLDEN=1`, it writes the reference file instead (REQ-026).
 | --- | --- | --- |
 | `tests/cpu_functional.rs` | Klaus Dormann functional test | REQ-110 |
 | `tests/cpu_single_step.rs` | SingleStepTests 6502, in parallel threads: `single_step_documented_opcodes`, `single_step_bus_cycles`, `single_step_decimal`, `single_step_brk`, `single_step_kil`, `single_step_undocumented_stable`, `single_step_undocumented_unstable` (see [cpu.md](cpu.md)) | REQ-023, REQ-100 to REQ-113 |
-| `tests/boot.rs` | Boot to `READY`, OPTION disables BASIC, ROM sizes, frame length, determinism, save states | REQ-002, REQ-004 to REQ-006, REQ-014, REQ-018, REQ-024 |
+| `tests/boot.rs` | Boot to the `Ready` prompt (no more than `BOOT_FRAMES` = 240 frames), OPTION disables BASIC, ROM sizes, frame length, determinism, save states | REQ-002, REQ-004 to REQ-006, REQ-014, REQ-018, REQ-024 |
 | `tests/robustness.rs` | Random media files and random programs | REQ-016 |
 | `tests/keyboard.rs` | Typing in BASIC | REQ-025 |
 | `tests/golden.rs` | Frame comparisons | REQ-026 |

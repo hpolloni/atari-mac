@@ -114,6 +114,10 @@ impl Cpu {
     pub const fn registers(&self) -> &Registers;
     pub const fn registers_mut(&mut self) -> &mut Registers;
     pub const fn is_jammed(&self) -> bool;
+    /// `true` if the last tick was the first cycle of an IRQ sequence or the opcode fetch
+    /// of a `BRK`. `false` for an NMI sequence and for a stalled tick. The machine uses it
+    /// to call `Antic::irq_sequence_started` (REQ-335). Added at the WP-5 merge.
+    pub const fn irq_sequence_started(&self) -> bool;
 }
 ```
 
