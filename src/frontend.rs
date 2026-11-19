@@ -1,0 +1,518 @@
+//! The frontend logic that does not need a window: machine setup, input, pause, frame
+//! conversion, frame pacing and the PNG screenshot.
+//!
+//! Design: `docs/design/architecture.md`, "Frontend". The window loop in
+//! [`crate::window`] only moves data between `minifb` and the functions here.
+
+use std::fs::{self, File};
+use std::io::BufWriter;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
+use atari_core::media::Cartridge;
+use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
+use minifb::Key;
+
+use crate::cli::Options;
+use crate::error::FrontendError;
+use crate::keymap::InputState;
+
+/// The audio sample rate that the machine is configured with. Audio output is not part of
+/// this version; the frontend does not drain the samples.
+const AUDIO_SAMPLE_RATE: u32 = 48_000;
+
+/// Reads a whole file.
+fn read(path: &Path) -> Result<Vec<u8>, FrontendError> {
+    fs::read(path).map_err(|source| FrontendError::Read {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+/// Creates the machine from the ROM and media files of `options` (REQ-004, REQ-012).
+///
+/// # Errors
+///
+/// [`FrontendError::Read`] when a file cannot be read, [`FrontendError::Rom`] for a ROM
+/// with the wrong size and [`FrontendError::Media`] for a cartridge that is not valid.
+pub fn load_machine(options: &Options) -> Result<Machine, FrontendError> {
+    let os_rom = read(&options.os)?;
+    let basic_rom = read(&options.basic)?;
+    let cartridge = match &options.cart {
+        Some(path) => {
+            Some(
+                Cartridge::from_raw(read(path)?).map_err(|error| FrontendError::Media {
+                    path: path.clone(),
+                    error,
+                })?,
+            )
+        }
+        None => None,
+    };
+    Machine::new(MachineConfig {
+        os_rom,
+        basic_rom: Some(basic_rom),
+        cartridge,
+        standard: VideoStandard::Ntsc,
+        audio_sample_rate: AUDIO_SAMPLE_RATE,
+    })
+    .map_err(|error| FrontendError::Rom {
+        path: match error {
+            ConfigError::OsRomSize(_) => options.os.clone(),
+            ConfigError::BasicRomSize(_) => options.basic.clone(),
+        },
+        error,
+    })
+}
+
+/// The window title (REQ-008): the file name of the loaded media, or `atari-mac`.
+#[must_use]
+pub fn window_title(media: Option<&Path>) -> String {
+    media.and_then(Path::file_name).map_or_else(
+        || "atari-mac".to_owned(),
+        |name| format!("atari-mac - {}", name.display()),
+    )
+}
+
+/// The window content size in pixels for `scale` (REQ-008).
+#[must_use]
+pub const fn window_size(scale: usize) -> (usize, usize) {
+    (FRAME_WIDTH * scale, FRAME_HEIGHT * scale)
+}
+
+/// Converts the frame buffer to `0x00RRGGBB` pixels and scales it by `scale`: each frame
+/// buffer pixel becomes a block of `scale` x `scale` pixels in `out` (REQ-008).
+pub fn render(frame: &[u8], standard: VideoStandard, scale: usize, out: &mut Vec<u32>) {
+    out.clear();
+    for row in frame.as_chunks::<FRAME_WIDTH>().0 {
+        let start = out.len();
+        for &color in row {
+            let rgb = palette::rgb(standard, color);
+            out.extend((0..scale).map(|_| rgb));
+        }
+        let end = out.len();
+        for _ in 1..scale {
+            out.extend_from_within(start..end);
+        }
+    }
+}
+
+/// Writes the frame buffer as a 384 x 240 RGB PNG file (REQ-013). Each pixel is
+/// `palette::rgb` of the frame buffer byte.
+///
+/// # Errors
+///
+/// [`FrontendError::Screenshot`] when the file cannot be written.
+pub fn write_png(path: &Path, frame: &[u8], standard: VideoStandard) -> Result<(), FrontendError> {
+    let error = |source| FrontendError::Screenshot {
+        path: path.to_owned(),
+        source,
+    };
+    let file = File::create(path).map_err(|e| error(e.into()))?;
+    let width = u32::try_from(FRAME_WIDTH).unwrap_or(u32::MAX);
+    let height = u32::try_from(FRAME_HEIGHT).unwrap_or(u32::MAX);
+    let mut encoder = png::Encoder::new(BufWriter::new(file), width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let data: Vec<u8> = frame
+        .iter()
+        .flat_map(|&color| {
+            let [_, r, g, b] = palette::rgb(standard, color).to_be_bytes();
+            [r, g, b]
+        })
+        .collect();
+    let mut writer = encoder.write_header().map_err(error)?;
+    writer.write_image_data(&data).map_err(error)?;
+    writer.finish().map_err(error)
+}
+
+/// Whether the frontend continues after a step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flow {
+    /// Continue with the next host frame.
+    Continue,
+    /// The user asked to quit.
+    Quit,
+}
+
+/// The machine with the frontend state: the input of the last frame and the pause flag.
+#[derive(Debug)]
+pub struct Frontend {
+    /// The emulated machine.
+    machine: Machine,
+    /// The input of the last host frame.
+    input: InputState,
+    /// The emulation is paused (F9).
+    paused: bool,
+    /// The number of frames that [`Frontend::step`] ran.
+    frames_run: u64,
+}
+
+impl Frontend {
+    /// Wraps a machine.
+    #[must_use]
+    pub fn new(machine: Machine) -> Self {
+        Self {
+            machine,
+            input: InputState::default(),
+            paused: false,
+            frames_run: 0,
+        }
+    }
+
+    /// The machine.
+    #[must_use]
+    pub const fn machine(&self) -> &Machine {
+        &self.machine
+    }
+
+    /// The machine, for changes outside the key input (for example a test that writes RAM).
+    pub const fn machine_mut(&mut self) -> &mut Machine {
+        &mut self.machine
+    }
+
+    /// The emulation is paused.
+    #[must_use]
+    pub const fn paused(&self) -> bool {
+        self.paused
+    }
+
+    /// The number of frames that [`Frontend::step`] and [`Frontend::run_frames`] ran.
+    #[must_use]
+    pub const fn frames_run(&self) -> u64 {
+        self.frames_run
+    }
+
+    /// One host frame: sends the host keys that are down to the machine, then runs one
+    /// frame unless the emulation is paused.
+    pub fn step(&mut self, keys: &[Key]) -> Flow {
+        let input = InputState::from_keys(keys, &self.input);
+        if input.quit {
+            return Flow::Quit;
+        }
+        self.apply(&input);
+        self.input = input;
+        if !self.paused {
+            self.machine.run_frame();
+            self.frames_run += 1;
+        }
+        Flow::Continue
+    }
+
+    /// Runs `frames` frames without input (headless mode, REQ-013).
+    pub fn run_frames(&mut self, frames: u64) {
+        for _ in 0..frames {
+            self.machine.run_frame();
+        }
+        self.frames_run += frames;
+    }
+
+    /// Sends the changes from the last input to `input` to the machine.
+    fn apply(&mut self, input: &InputState) {
+        let previous = &self.input;
+        let machine = &mut self.machine;
+        // While an Atari key is down, the key code gives SHIFT; else the host Shift keys.
+        let shift = input.key.is_none() && input.shift;
+        if shift != (previous.key.is_none() && previous.shift) {
+            machine.set_shift(shift);
+        }
+        if input.key != previous.key {
+            match input.key {
+                Some(code) => machine.key_down(code),
+                None => machine.key_up(),
+            }
+        }
+        machine.set_break(input.break_key);
+        machine.set_console_keys(input.console);
+        machine.set_joystick(0, input.joystick);
+        if input.reset && !previous.reset {
+            machine.press_reset();
+        }
+        if input.cold_reset && !previous.cold_reset {
+            machine.power_on();
+        }
+        if input.pause && !previous.pause {
+            self.paused = !self.paused;
+        }
+    }
+}
+
+/// Frame pacing: the time to wait after each frame, so that the frames come at the frame
+/// rate of the machine (REQ-007).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pacer {
+    /// The time of one frame.
+    period: Duration,
+    /// The time at which the next frame starts.
+    next: Instant,
+}
+
+impl Pacer {
+    /// Starts the pacing at `now` for the frame rate of `standard`.
+    #[must_use]
+    pub fn new(standard: VideoStandard, now: Instant) -> Self {
+        let period = Duration::from_secs_f64(1.0 / standard.frames_per_second());
+        Self {
+            period,
+            next: now + period,
+        }
+    }
+
+    /// The time of one frame.
+    #[must_use]
+    pub const fn period(&self) -> Duration {
+        self.period
+    }
+
+    /// Called at `now`, after a frame: returns the time to wait until the next frame. When
+    /// the frontend is more than one frame late, the pacing starts again from `now`.
+    pub fn wait(&mut self, now: Instant) -> Duration {
+        let wait = self.next.saturating_duration_since(now);
+        if now > self.next + self.period {
+            self.next = now + self.period;
+        } else {
+            self.next += self.period;
+        }
+        wait
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env::temp_dir;
+    use std::fs::{create_dir_all, write};
+    use std::path::{Path, PathBuf};
+    use std::process::id;
+    use std::time::{Duration, Instant};
+
+    use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
+    use atari_core::{Machine, MachineConfig, VideoStandard, palette};
+    use minifb::Key;
+
+    use super::{Flow, Frontend, Pacer, load_machine, render, window_size, window_title};
+    use crate::cli::Options;
+    use crate::error::FrontendError;
+
+    fn machine() -> Machine {
+        Machine::new(MachineConfig {
+            os_rom: vec![0xEA; 0x4000],
+            basic_rom: None,
+            cartridge: None,
+            standard: VideoStandard::Ntsc,
+            audio_sample_rate: 48_000,
+        })
+        .unwrap()
+    }
+
+    fn temp_file(name: &str, size: usize) -> PathBuf {
+        let dir = temp_dir().join(format!("atari-mac-unit-{}", id()));
+        create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        write(&path, vec![0; size]).unwrap();
+        path
+    }
+
+    fn step(frontend: &mut Frontend, keys: &[Key]) {
+        assert_eq!(frontend.step(keys), Flow::Continue, "{keys:?}");
+    }
+
+    #[test]
+    fn window_size_is_scaled() {
+        assert_eq!(window_size(2), (768, 480), "default scale 2");
+        assert_eq!(window_size(3), (1152, 720), "scale 3");
+    }
+
+    #[test]
+    fn title_names_the_media() {
+        assert_eq!(window_title(None), "atari-mac", "no media");
+        assert_eq!(
+            window_title(Some(Path::new("/games/star raiders.car"))),
+            "atari-mac - star raiders.car",
+            "cartridge"
+        );
+    }
+
+    #[test]
+    fn render_scales_each_pixel_to_a_block() {
+        let mut frame = vec![0_u8; FRAME_WIDTH * FRAME_HEIGHT];
+        frame[0] = 0x0E;
+        frame[FRAME_WIDTH + 1] = 0x94;
+        frame[FRAME_WIDTH * FRAME_HEIGHT - 1] = 0x46;
+        for scale in [1, 2, 3] {
+            let mut out = vec![1, 2, 3];
+            render(&frame, VideoStandard::Ntsc, scale, &mut out);
+            let (width, height) = window_size(scale);
+            assert_eq!(out.len(), width * height, "size at scale {scale}");
+            for y in 0..height {
+                for x in 0..width {
+                    let color = frame[(y / scale) * FRAME_WIDTH + x / scale];
+                    assert_eq!(
+                        out[y * width + x],
+                        palette::rgb(VideoStandard::Ntsc, color),
+                        "pixel ({x}, {y}) at scale {scale}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn load_machine_reports_the_bad_file() {
+        let os = temp_file("os.rom", 0x4000);
+        let basic = temp_file("basic.rom", 0x2000);
+        let small = temp_file("small.rom", 100);
+        let cart = temp_file("cart.rom", 0x2000);
+        let options = Options {
+            os: os.clone(),
+            basic,
+            cart: Some(cart),
+            ..Options::default()
+        };
+        assert!(load_machine(&options).is_ok(), "valid files");
+        for (bad, expect_path) in [
+            (
+                Options {
+                    os: small.clone(),
+                    ..options.clone()
+                },
+                &small,
+            ),
+            (
+                Options {
+                    basic: small.clone(),
+                    ..options.clone()
+                },
+                &small,
+            ),
+        ] {
+            match load_machine(&bad) {
+                Err(FrontendError::Rom { path, .. }) => assert_eq!(&path, expect_path, "ROM"),
+                other => panic!("{bad:?} gave {other:?}"),
+            }
+        }
+        let bad_cart = Options {
+            cart: Some(small.clone()),
+            ..options.clone()
+        };
+        assert!(
+            matches!(load_machine(&bad_cart), Err(FrontendError::Media { path, .. }) if path == small),
+            "cartridge"
+        );
+        let missing = Options {
+            os: os.with_file_name("missing.rom"),
+            ..options
+        };
+        assert!(
+            matches!(load_machine(&missing), Err(FrontendError::Read { .. })),
+            "missing file"
+        );
+    }
+
+    #[test]
+    fn step_runs_one_frame_and_quits() {
+        let mut frontend = Frontend::new(machine());
+        assert_eq!(frontend.step(&[]), Flow::Continue, "no keys");
+        assert_eq!(frontend.machine().frame_count(), 1, "one frame");
+        assert_eq!(frontend.frames_run(), 1, "one frame run");
+        assert_eq!(
+            frontend.step(&[Key::LeftSuper, Key::Escape]),
+            Flow::Quit,
+            "Command + Escape"
+        );
+        assert_eq!(frontend.machine().frame_count(), 1, "no frame after quit");
+        frontend.run_frames(3);
+        assert_eq!(frontend.machine().frame_count(), 4, "headless frames");
+        assert_eq!(frontend.frames_run(), 4, "all frames counted");
+    }
+
+    #[test]
+    fn keys_reach_the_machine() {
+        let mut frontend = Frontend::new(machine());
+        for keys in [
+            &[Key::LeftShift][..],
+            &[Key::LeftShift, Key::A],
+            &[Key::A, Key::B],
+            &[Key::F2, Key::F7, Key::Up, Key::LeftAlt],
+            &[Key::F5],
+            &[],
+        ] {
+            step(&mut frontend, keys);
+        }
+        // TRIG0 (joystick 1 trigger) reads 1 when the trigger is up.
+        assert_eq!(frontend.machine().peek(0xD010), 1, "trigger released");
+        step(&mut frontend, &[Key::LeftAlt]);
+        assert_eq!(frontend.machine().peek(0xD010), 0, "trigger pressed");
+        frontend.machine_mut().poke_ram(0x1234, 0x99);
+        step(&mut frontend, &[Key::F10]);
+        assert_eq!(
+            frontend.machine().peek_ram(0x1234),
+            0,
+            "F10 (cold reset) clears RAM"
+        );
+        frontend.machine_mut().poke_ram(0x1234, 0x99);
+        step(&mut frontend, &[Key::F10]);
+        assert_eq!(
+            frontend.machine().peek_ram(0x1234),
+            0x99,
+            "a held F10 resets only once"
+        );
+    }
+
+    /// While paused, `Machine::frame_count` does not change for 60 host frames.
+    ///
+    /// Verifies REQ-017
+    #[test]
+    fn pause_stops_frames() {
+        let mut frontend = Frontend::new(machine());
+        step(&mut frontend, &[]);
+        step(&mut frontend, &[Key::F9]);
+        assert!(frontend.paused(), "F9 pauses");
+        let frames = frontend.machine().frame_count();
+        let start = Instant::now();
+        let mut pacer = Pacer::new(VideoStandard::Ntsc, start);
+        let mut clock = start;
+        for _ in 0..60 {
+            step(&mut frontend, &[Key::F9]);
+            clock += pacer.wait(clock);
+        }
+        assert_eq!(
+            frontend.machine().frame_count(),
+            frames,
+            "no frame while paused"
+        );
+        assert!(clock > start, "the fake clock advanced");
+        step(&mut frontend, &[]);
+        step(&mut frontend, &[Key::F9]);
+        assert!(!frontend.paused(), "F9 again continues");
+        assert_eq!(
+            frontend.machine().frame_count(),
+            frames + 1,
+            "frames run again"
+        );
+    }
+
+    #[test]
+    fn pacer_keeps_the_frame_rate() {
+        let start = Instant::now();
+        let mut pacer = Pacer::new(VideoStandard::Ntsc, start);
+        let period = pacer.period();
+        assert!(
+            (period.as_secs_f64() - 1.0 / 59.9227).abs() < 1e-6,
+            "NTSC period {period:?}"
+        );
+        // A frame that took no time waits one period.
+        assert_eq!(pacer.wait(start), period, "first wait");
+        // A frame that took half a period waits the other half.
+        let now = start + period + period / 2;
+        let wait = pacer.wait(now);
+        assert!(
+            wait.abs_diff(period / 2) < Duration::from_micros(1),
+            "second wait {wait:?}"
+        );
+        // A frontend that is far behind does not wait and starts again.
+        let late = now + period * 10;
+        assert_eq!(pacer.wait(late), Duration::ZERO, "late frame");
+        assert_eq!(pacer.wait(late), period, "pacing restarted");
+    }
+}

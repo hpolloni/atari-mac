@@ -27,6 +27,12 @@ env:
 # The toolchain comes from rust-toolchain.toml; `rustup toolchain install`
 # with no arguments installs exactly that version and its components.
 # Third-party actions are pinned to full commit SHAs; Dependabot updates them.
+#
+# The frontend (`atari-mac`, the root crate) runs on macOS only (docs/spec/README.md,
+# "Non-goals"). Its window crate needs system libraries on Linux, so the jobs that build
+# code on Linux use `--workspace --exclude atari-mac`, and the `frontend` job checks the
+# frontend on macOS (docs/design/architecture.md, "CI targets"). cargo-deny and
+# cargo-machete do not build code, so they still check the whole workspace.
 
 jobs:
   fmt:
@@ -58,7 +64,20 @@ jobs:
           persist-credentials: false
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo clippy --workspace --all-targets --all-features --locked
+      - run: cargo clippy --workspace --exclude atari-mac --all-targets --all-features --locked
+
+  frontend:
+    name: Frontend (macOS clippy, docs)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo clippy --package atari-mac --all-targets --all-features --locked
+      - run: cargo doc --package atari-mac --no-deps --document-private-items --all-features --locked
 
   test:
     name: Test (${{ matrix.os }})
@@ -67,7 +86,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          # Linux: the core and the harness. macOS: the whole workspace with the frontend.
+          - os: ubuntu-latest
+            packages: --workspace --exclude atari-mac
+          - os: macos-latest
+            packages: --workspace
+    env:
+      PACKAGES: ${{ matrix.packages }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,10 +109,21 @@ jobs:
           key: test-data-${{ hashFiles('scripts/fetch-roms.sh', 'scripts/single-step-6502.sha1') }}
       - run: scripts/fetch-roms.sh --single-step
         shell: bash
-      - run: cargo test --workspace --all-targets --all-features --locked
-      - run: cargo test --workspace --doc --all-features --locked
+      - name: Tests
+        shell: bash
+        run: |
+          read -ra packages <<< "$PACKAGES"
+          cargo test "${packages[@]}" --all-targets --all-features --locked
+      - name: Doc tests
+        shell: bash
+        run: |
+          read -ra packages <<< "$PACKAGES"
+          cargo test "${packages[@]}" --doc --all-features --locked
       - name: Release build (overflow checks on, LTO)
-        run: cargo build --workspace --release --locked
+        shell: bash
+        run: |
+          read -ra packages <<< "$PACKAGES"
+          cargo build "${packages[@]}" --release --locked
 
   doc:
     name: Docs
@@ -98,7 +135,7 @@ jobs:
           persist-credentials: false
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo doc --workspace --no-deps --document-private-items --all-features --locked
+      - run: cargo doc --workspace --exclude atari-mac --no-deps --document-private-items --all-features --locked
 
   deny:
     name: Dependencies (cargo-deny, cargo-machete)
@@ -128,8 +165,8 @@ jobs:
         with:
           tool: cargo-hack
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo hack check --rust-version --workspace --all-targets --locked
-      - run: cargo hack check --feature-powerset --workspace --all-targets --locked
+      - run: cargo hack check --rust-version --workspace --exclude atari-mac --all-targets --locked
+      - run: cargo hack check --feature-powerset --workspace --exclude atari-mac --all-targets --locked
 
   coverage:
     name: Coverage (cargo-llvm-cov)
@@ -154,7 +191,7 @@ jobs:
       - run: scripts/fetch-roms.sh --single-step
         shell: bash
       # Keep the threshold in sync with COVERAGE_MIN in the Makefile.
-      - run: cargo llvm-cov --workspace --all-features --locked --fail-under-lines 80
+      - run: cargo llvm-cov --workspace --exclude atari-mac --all-features --locked --fail-under-lines 80
 
   workflows:
     name: Workflow lint (actionlint, zizmor)
@@ -187,7 +224,7 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, doc, deny, hack, coverage, workflows]
+    needs: [fmt, clippy, frontend, test, doc, deny, hack, coverage, workflows]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
