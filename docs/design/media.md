@@ -271,7 +271,7 @@ Call contract for the machine:
    The PIA module must give the CB2 output level.
 2. After the POKEY `tick` of each machine cycle, the machine moves each byte from
    `Pokey::take_serial_byte` to `host_byte`. POKEY reports no byte that it sent with force
-   break on (OI-030).
+   break on (OI-029).
 3. In each machine cycle, before the POKEY `tick`, the machine calls
    `pokey.set_serial_in(sio.data_in_level(now))`. POKEY receives the bits from the line
    level with its own serial timing (REQ-526, REQ-528). The interface is decided in OI-038.

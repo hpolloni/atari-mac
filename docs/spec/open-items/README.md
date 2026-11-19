@@ -34,8 +34,8 @@ section, set the status to `Decided`, and change the affected requirements.
 | [OI-026](OI-026.md) | POKEY project decisions to confirm | POKEY | Open |
 | [OI-027](OI-027.md) | Audio sample rate out of range | POKEY | Open |
 | [OI-028](OI-028.md) | Linked timer reload cycle | POKEY | Open |
-| [OI-029](OI-029.md) | Force break and the SIO bus model | POKEY, media | Open |
-| [OI-030](OI-030.md) | 65XE keyboard layout | POKEY | Decided |
+| [OI-029](OI-029.md) | Force break and the SIO bus model | POKEY, media | Decided |
+| [OI-030](OI-030.md) | 65XE keyboard layout | POKEY | Open |
 | [OI-031](OI-031.md) | POKEY choices where the HRM conflicts with itself | POKEY | Open |
 | [OI-032](OI-032.md) | CAR types 41 and 42 | Media | Open |
 | [OI-033](OI-033.md) | ED Percom block and Format $21 | Media | Open |

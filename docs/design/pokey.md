@@ -137,7 +137,7 @@ pub const fn ascii_to_kbcode(c: char) -> Option<u8>;
    `take_serial_byte` to `SioBus::host_byte`. `Pokey::cycle` counts the `tick` calls since
    power-on, so it equals the machine cycle count that the SIO bus uses. The FIFO of
    `take_serial_byte` holds 64 bytes. When it is full, the oldest byte is lost.
-7. Force break (OI-030). POKEY does not put a byte into the `take_serial_byte` FIFO if
+7. Force break (OI-029). POKEY does not put a byte into the `take_serial_byte` FIFO if
    `SKCTL` bit 7 was 1 in any cycle of that byte's frame, because SIO DATA OUT was 0 and no
    device can receive the byte (REQ-532).
 7. The frontend calls `Machine::drain_audio`, which calls `drain_samples`, once per frame.
@@ -208,7 +208,7 @@ All state is in `Pokey`. Power-on values are the values after `new` and `reset` 
 | `ser_in_clk`, `ser_out_clk` | `bool` | `false` | Serial clock flip-flops |
 | `sent` | `VecDeque<SerialByte>` | empty | Sent bytes for the SIO model |
 | `out_start_cycle` | `u64` | 0 | Cycle where the start bit of the current output frame began |
-| `out_break_seen` | `bool` | `false` | `SKCTL` bit 7 was 1 in a cycle of the current output frame (OI-030) |
+| `out_break_seen` | `bool` | `false` | `SKCTL` bit 7 was 1 in a cycle of the current output frame (OI-029) |
 | `speaker` | `bool` | `false` | Console speaker level |
 | `nonlinear` | `bool` | `false` | REQ-541 option |
 | `clock_hz`, `sample_rate` | `u32` | from `new` | 1789773 (NTSC) or 1773447 (PAL); host rate |
@@ -680,7 +680,7 @@ model of REQ-600 and later.
     reload for both timers is at T+9". The linked period of N + 7 and Figure 8 give a reload
     on T+10 (last `AUDF` write on T+9). This design uses T+10. REQ-506 criterion 7 checks only
     the fire cycles, which do not depend on this choice.
-15. Resolved by OI-030: a byte sent while force break is on is not reported by
+15. Resolved by OI-029: a byte sent while force break is on is not reported by
     `take_serial_byte` (call contract item 7).
 16. `Pokey::new` takes a sample rate of 8000 to 192000 Hz (REQ-538). The behavior for a rate
     outside this range (panic, clamp or error) is not decided.
