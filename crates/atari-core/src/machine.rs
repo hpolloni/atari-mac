@@ -902,7 +902,6 @@ mod tests {
     /// Verifies REQ-203: the dummy read of `LDA $D3F0,X` reads `$D301` and clears the PIA
     /// status (criterion 1).
     #[test]
-    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
     fn dummy_read_clears_pia_status() {
         let mut m = program_machine(&[
             0xA2, 0x11, // LDX #$11
@@ -925,7 +924,6 @@ mod tests {
 
     /// Verifies REQ-203: `INC $D301` writes `PORTB` twice (criterion 2).
     #[test]
-    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
     fn rmw_writes_portb_twice() {
         let mut m = program_machine(&[0x4C, 0x00, 0x20]); // JMP $2000
         for (addr, byte) in (0x2000_u16..).zip([0xEE, 0x01, 0xD3, 0x4C, 0x03, 0x20]) {
@@ -1381,7 +1379,6 @@ mod tests {
     /// Verifies REQ-216: after power-on, the CPU runs the reset sequence and fetches the
     /// opcode at the reset vector (criterion 1).
     #[test]
-    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
     fn power_on_starts_at_reset_vector() {
         let mut os = os_rom();
         os[0x3FFC] = 0x34;
@@ -1446,7 +1443,6 @@ mod tests {
 
     /// Verifies REQ-217: the Reset button starts the reset sequence (criterion 1).
     #[test]
-    #[ignore = "needs the WP-1 CPU; the lead enables it after the merge"]
     fn reset_button_runs_reset_sequence() {
         let mut m = program_machine(&[0x4C, 0x00, 0x20]); // JMP $2000
         for addr in 0x2000..0x2010 {

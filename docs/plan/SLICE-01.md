@@ -42,7 +42,7 @@ Each teammate works in its own git worktree (see `CLAUDE.md`). Each package must
 | Package | Status | Owner | Contents | Checked by |
 | --- | --- | --- | --- | --- |
 | WP-0 Interfaces | Done | Teammate | The workspace, the decided interfaces as stubs that compile, the `atari-harness` crate with its helpers, the traceability check | `tests/harness_self_test.rs`, `tests/traceability.rs` |
-| WP-1 CPU | In progress | Teammate | `crates/atari-core/src/cpu.rs` and submodules, from [cpu.md](../design/cpu.md) | `tests/cpu_functional.rs`, `tests/cpu_single_step.rs`, CPU unit tests |
+| WP-1 CPU | Done | Teammate | `crates/atari-core/src/cpu.rs` and submodules, from [cpu.md](../design/cpu.md) | `tests/cpu_functional.rs`, `tests/cpu_single_step.rs`, CPU unit tests |
 | WP-2 Video | In progress | Teammate | `antic.rs`, `gtia.rs`, `palette.rs`, from [antic.md](../design/antic.md) and [gtia.md](../design/gtia.md) | ANTIC and GTIA unit tests |
 | WP-3 Keyboard | Done | Teammate | `pokey.rs` (keyboard, IRQ) and `keyboard.rs`, from [pokey.md](../design/pokey.md) | POKEY and keyboard unit tests |
 | WP-4 Frontend | In progress | Teammate | `src/` of the root crate: window, key map, headless mode, from [architecture.md](../design/architecture.md). macOS only: it also changes the Linux CI jobs to `--workspace --exclude atari-mac` and adds a macOS clippy step for the frontend. | `src/keymap.rs` unit tests, `tests/cli.rs` |
