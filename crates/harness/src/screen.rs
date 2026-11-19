@@ -46,10 +46,11 @@ pub fn screen_text(machine: &Machine) -> Vec<String> {
         .collect()
 }
 
-/// `true` if a row of the screen, with trailing spaces removed, equals `text`.
+/// `true` if a row of the screen, with leading and trailing spaces removed, equals `text`.
+///
+/// The OS screen editor starts each line at the left margin (`LMARGN`, 2 after power-on), so
+/// the text of a row starts after the margin spaces.
 #[must_use]
 pub fn has_row(machine: &Machine, text: &str) -> bool {
-    screen_text(machine)
-        .iter()
-        .any(|row| row.trim_end() == text)
+    screen_text(machine).iter().any(|row| row.trim() == text)
 }

@@ -1442,6 +1442,48 @@ fn nmi_hijacks_brk_as_first_handler_instruction() {
     );
 }
 
+/// Runs cycles up to `last` and returns the cycles whose tick set `irq_sequence_started`.
+fn irq_start_signals(d: &mut Driver, last: u32) -> Vec<u32> {
+    let mut signals = Vec::new();
+    while d.cycle < last {
+        if d.cycle().is_some() && d.cpu.irq_sequence_started() {
+            signals.push(d.cycle);
+        }
+    }
+    signals
+}
+
+/// Verifies REQ-335: the CPU signals the first cycle of each IRQ and `BRK` sequence, but not
+/// of an NMI sequence, and not in a stalled tick.
+#[test]
+fn irq_sequence_start_signal() {
+    // IRQ: the signal is in the first cycle of the sequence.
+    let mut irq = Driver::new();
+    irq.regs().p = 0x20;
+    irq.irq = span(1, 3);
+    let signals = irq_start_signals(&mut irq, 20);
+    assert_eq!(signals, irq.irq_starts(), "IRQ sequence");
+    assert_eq!(signals.len(), 1, "one IRQ sequence");
+    // BRK: the signal is in the opcode fetch.
+    let mut brk = Driver::with_code(&[0x00, 0x00]);
+    let signals = irq_start_signals(&mut brk, 10);
+    assert_eq!(signals, [1], "BRK opcode fetch");
+    assert_eq!(brk.irq_starts(), [1], "BRK sequence");
+    // NMI: no signal.
+    let mut nmi = Driver::new();
+    nmi.nmi = span(1, 100);
+    assert!(irq_start_signals(&mut nmi, 20).is_empty(), "NMI sequence");
+    assert_eq!(nmi.nmi_starts().len(), 1, "one NMI sequence");
+    // RDY low in the opcode fetch of BRK: the stalled ticks give no signal.
+    let mut stalled = Driver::with_code(&[0x00, 0x00]);
+    stalled.rdy_low = span(1, 4);
+    assert_eq!(
+        irq_start_signals(&mut stalled, 12),
+        [5],
+        "BRK opcode fetch after RDY low"
+    );
+}
+
 // ----------------------------------------------------------------------------------------
 // Reset and power-on (REQ-124, REQ-128)
 // ----------------------------------------------------------------------------------------

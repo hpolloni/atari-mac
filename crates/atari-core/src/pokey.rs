@@ -3,12 +3,14 @@
 //! Design: `docs/design/pokey.md`. Requirements: REQ-500 to REQ-541.
 //!
 //! SLICE-01 implements the register map (REQ-500), the power-on state (REQ-501), `IRQEN`
-//! and `IRQST` (REQ-515, REQ-517), the keyboard scan with SHIFT, CONTROL and BREAK
-//! (REQ-518 to REQ-522) and the unlinked timers that the IRQ logic needs. Audio, the linked
-//! timers, the noise generators, the serial port and the pot scan come in later slices. Their
-//! registers are stored, and their inputs and outputs keep the idle levels.
+//! and `IRQST` (REQ-515 to REQ-517), the keyboard scan with SHIFT, CONTROL and BREAK
+//! (REQ-518 to REQ-522), the unlinked and linked timers (REQ-504, REQ-505) and the serial
+//! output (REQ-525) that the OS SIO code needs to send its command frames. Audio, the noise
+//! generators, the serial input and the pot scan come in later slices. Their registers are
+//! stored, and their inputs and outputs keep the idle levels.
 
 mod kbscan;
+mod serial;
 mod timers;
 
 use std::collections::VecDeque;
@@ -16,6 +18,7 @@ use std::collections::VecDeque;
 use crate::keyboard::{CONTROL, SHIFT};
 use crate::timing::{CYCLES_PER_LINE, VideoStandard};
 use kbscan::{KeyboardScan, ScanInput};
+use serial::{OutputClock, SerialOut};
 use timers::Timers;
 
 /// `IRQST`/`IRQEN` bit 0: timer 1.
@@ -26,6 +29,8 @@ const IRQ_TIMER2: u8 = 0x02;
 const IRQ_TIMER4: u8 = 0x04;
 /// `IRQST`/`IRQEN` bit 3: serial output complete (not latched).
 const IRQ_SERIAL_DONE: u8 = 0x08;
+/// `IRQST`/`IRQEN` bit 4: serial output needed.
+const IRQ_SERIAL_NEEDED: u8 = 0x10;
 /// `IRQST`/`IRQEN` bit 6: keyboard.
 const IRQ_KEY: u8 = 0x40;
 /// `IRQST`/`IRQEN` bit 7: BREAK key.
@@ -42,9 +47,17 @@ const SKCTL_DEBOUNCE: u8 = 0x01;
 const SKCTL_KEY_SCAN: u8 = 0x02;
 /// `SKCTL` bits 0-1: both 0 = initialization mode (HRM 5.2).
 const SKCTL_INIT_MASK: u8 = 0x03;
+/// `SKCTL` bits 4-6: the serial clock mode (HRM Table 10).
+const SKCTL_CLOCK_MODE: u8 = 0x70;
+/// `SKCTL` bit 7: force break.
+const SKCTL_FORCE_BREAK: u8 = 0x80;
 
 /// `AUDCTL` bit 0: the slow timers count on the 15 kHz clock.
 const AUDCTL_15KHZ: u8 = 0x01;
+/// `AUDCTL` bit 3: timers 3 and 4 are linked.
+const AUDCTL_LINK34: u8 = 0x08;
+/// `AUDCTL` bit 4: timers 1 and 2 are linked.
+const AUDCTL_LINK12: u8 = 0x10;
 /// `AUDCTL` bit 5: timer 3 counts on the 1.79 MHz clock.
 const AUDCTL_FAST3: u8 = 0x20;
 /// `AUDCTL` bit 6: timer 1 counts on the 1.79 MHz clock.
@@ -125,6 +138,8 @@ pub struct Pokey {
     exit_cycle: u64,
     /// The timer counters.
     timers: Timers,
+    /// The timers that fired on the last tick (bit n = timer n + 1).
+    fired: u8,
     /// The 17-bit polynomial counter (bits 16-0). It stays 0 until the noise generators
     /// are implemented.
     poly17: u32,
@@ -138,14 +153,14 @@ pub struct Pokey {
     typed_mods: u8,
     /// The keyboard scan.
     scan: KeyboardScan,
-    /// Bits of the output frame that are not complete (0 = idle).
-    out_bits: u8,
-    /// SIO DATA OUT from the shift register.
-    out_level: bool,
+    /// The serial output shift register and its clock.
+    serial: SerialOut,
     /// SIO DATA IN.
     in_level: bool,
     /// Sent bytes for the SIO model.
     sent: VecDeque<SerialByte>,
+    /// The console speaker level.
+    speaker: bool,
 }
 
 impl Pokey {
@@ -169,6 +184,7 @@ impl Pokey {
             cycle: 0,
             exit_cycle: 0,
             timers: Timers::new(),
+            fired: 0,
             poly17: 0,
             pot: [0; 8],
             allpot: 0,
@@ -180,10 +196,10 @@ impl Pokey {
             },
             typed_mods: 0,
             scan: KeyboardScan::new(),
-            out_bits: 0,
-            out_level: true,
+            serial: SerialOut::new(),
             in_level: true,
             sent: VecDeque::new(),
+            speaker: false,
         }
     }
 
@@ -203,7 +219,12 @@ impl Pokey {
             self.irqen_hist[2],
         ];
         let clocked = self.timer_clocks();
-        let fired = self.timers.tick(now, clocked, self.audf);
+        let linked = [
+            self.audctl & AUDCTL_LINK12 != 0,
+            self.audctl & AUDCTL_LINK34 != 0,
+        ];
+        let fired = self.timers.tick(now, clocked, linked, self.audf);
+        self.fired = fired;
         // HRM 5.7: timers 1, 2 and 4 have an IRQ; timer 3 has none.
         if fired & 0b0001 != 0 {
             self.latch(IRQ_TIMER1);
@@ -214,6 +235,7 @@ impl Pokey {
         if fired & 0b1000 != 0 {
             self.latch(IRQ_TIMER4);
         }
+        self.serial_tick();
         self.keyboard_tick();
     }
 
@@ -240,7 +262,7 @@ impl Pokey {
             }
             0x0D => self.serin,
             0x0E => {
-                let busy = if self.out_bits != 0 {
+                let busy = if self.serial.busy() {
                     IRQ_SERIAL_DONE
                 } else {
                     0
@@ -271,9 +293,10 @@ impl Pokey {
                 self.irqen = value;
                 self.irqst |= !value & !IRQ_SERIAL_DONE;
             }
+            0x0D => self.serial.write(value),
             0x0F => self.write_skctl(value),
-            // `$B` (`POTGO`) and `$D` (`SEROUT`) start the pot scan and the serial output,
-            // which are not in SLICE-01. `$C` has no write register.
+            // `$B` (`POTGO`) starts the pot scan, which is not in SLICE-01. `$C` has no write
+            // register.
             _ => {}
         }
     }
@@ -282,7 +305,7 @@ impl Pokey {
     #[must_use]
     pub const fn irq(&self) -> bool {
         (!self.irqst & !IRQ_SERIAL_DONE) != 0
-            || (self.irqen & IRQ_SERIAL_DONE != 0 && self.out_bits == 0)
+            || (self.irqen & IRQ_SERIAL_DONE != 0 && !self.serial.busy())
     }
 
     /// The number of `tick` calls since power-on.
@@ -351,7 +374,7 @@ impl Pokey {
     /// The SIO DATA OUT level. `true` = high (mark).
     #[must_use]
     pub const fn serial_out(&self) -> bool {
-        self.out_level
+        self.skctl & SKCTL_FORCE_BREAK == 0 && self.serial.level()
     }
 
     /// Removes and returns the oldest byte that was sent completely. The FIFO holds
@@ -361,13 +384,17 @@ impl Pokey {
         self.sent.pop_front()
     }
 
-    /// The level of the GTIA console speaker line (`true` = high).
-    #[expect(
-        clippy::unused_self,
-        clippy::needless_pass_by_ref_mut,
-        reason = "audio is not in SLICE-01; the interface of pokey.md is kept"
-    )]
-    pub const fn set_speaker(&mut self, _high: bool) {}
+    /// The level of the GTIA console speaker line (`true` = high). Audio is not in SLICE-01,
+    /// so POKEY only stores the level.
+    pub const fn set_speaker(&mut self, high: bool) {
+        self.speaker = high;
+    }
+
+    /// Test accessor: the console speaker level from `set_speaker`.
+    #[cfg(test)]
+    pub(crate) const fn test_speaker(&self) -> bool {
+        self.speaker
+    }
 
     /// Moves all samples made since the last call to the end of `out`.
     #[expect(
@@ -399,6 +426,12 @@ impl Pokey {
             self.exit_cycle = self.cycle;
         }
         self.skctl = value;
+        if value & SKCTL_CLOCK_MODE == 0 {
+            self.serial.reset_clock();
+        }
+        if self.init_mode() {
+            self.serial.stop();
+        }
         if value & SKCTL_KEY_SCAN == 0 {
             self.scan.disable();
         }
@@ -430,6 +463,39 @@ impl Pokey {
             self.audctl & AUDCTL_FAST3 != 0 || slow,
             slow,
         ]
+    }
+
+    /// The serial output for this cycle (HRM 5.6), after the timer fires of the cycle.
+    fn serial_tick(&mut self) {
+        let fired = self.fired;
+        if self.init_mode() {
+            self.serial.stop();
+            return;
+        }
+        let force_break = self.skctl & SKCTL_FORCE_BREAK != 0;
+        self.serial.note_break(force_break);
+        let edge = match OutputClock::from_skctl(self.skctl) {
+            OutputClock::Timer4 => fired & 0b1000 != 0,
+            OutputClock::Timer2 => fired & 0b0010 != 0,
+            OutputClock::External => false,
+        };
+        if !edge {
+            return;
+        }
+        let event = self.serial.toggle(self.cycle, force_break);
+        if let Some(frame) = event.sent {
+            if self.sent.len() == SERIAL_FIFO {
+                let _lost = self.sent.pop_front();
+            }
+            self.sent.push_back(SerialByte {
+                value: frame.value,
+                start_cycle: frame.start_cycle,
+                end_cycle: self.cycle,
+            });
+        }
+        if event.loaded {
+            self.latch(IRQ_SERIAL_NEEDED);
+        }
     }
 
     /// The keyboard scan for this cycle (HRM 5.8).
@@ -486,10 +552,19 @@ impl Pokey {
     const fn test_counters(&self) -> [u8; 4] {
         self.timers.counters()
     }
+
+    /// Test accessor: the timers that fired on the last tick (bit n = timer n + 1). It also
+    /// shows the fires of disabled IRQs.
+    #[cfg(test)]
+    const fn test_fired(&self) -> u8 {
+        self.fired
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use core::iter;
+
     use super::{Pokey, WriteRegs};
     use crate::keyboard::{self, KEYS};
     use crate::timing::VideoStandard;
@@ -1471,5 +1546,409 @@ mod tests {
             );
             run(&mut p, 10 * LINE);
         }
+    }
+
+    // ------------------------------------------------------------------------------------
+    // Linked timers (REQ-505) and serial output (REQ-502, REQ-516, REQ-525)
+    // ------------------------------------------------------------------------------------
+
+    /// `AUDF3`.
+    const AUDF3: u8 = 0x04;
+    /// `AUDC3`.
+    const AUDC3: u8 = 0x05;
+    /// `AUDF4`.
+    const AUDF4: u8 = 0x06;
+    /// `SEROUT` (write).
+    const SEROUT: u8 = 0x0D;
+    /// `IRQST` bit 3: serial output complete.
+    const IRQ_DONE: u8 = 0x08;
+    /// `IRQST` bit 4: serial output needed.
+    const IRQ_NEEDED: u8 = 0x10;
+    /// One bit on SIO DATA OUT with timers 3 and 4 linked at `$0028` (2 x 47 cycles).
+    const BIT: u64 = 94;
+    /// One frame of 10 bits.
+    const FRAME: u64 = 10 * BIT;
+
+    /// A POKEY with `SKCTL` = `skctl`, `AUDCTL` = `audctl` and `AUDF1-4` = `audf`, after
+    /// 2000 cycles.
+    fn timer_pokey(skctl: u8, audctl: u8, audf: [u8; 4]) -> Pokey {
+        let mut p = new_pokey();
+        p.tick();
+        p.write(SKCTL, skctl);
+        p.write(AUDCTL, audctl);
+        for (reg, value) in [AUDF1, AUDF2, AUDF3, AUDF4].into_iter().zip(audf) {
+            p.write(reg, value);
+        }
+        run(&mut p, 2000);
+        p
+    }
+
+    /// The fires of the next `cycles` cycles as `(timer 1-4, cycle)`.
+    fn fire_log(p: &mut Pokey, cycles: u64) -> Vec<(u8, u64)> {
+        let mut log = Vec::new();
+        for _ in 0..cycles {
+            p.tick();
+            for timer in 0..4 {
+                if p.test_fired() & (1 << timer) != 0 {
+                    log.push((timer + 1, p.cycle()));
+                }
+            }
+        }
+        log
+    }
+
+    /// The cycles of the fires of `timer` in `log`.
+    fn fires_of(log: &[(u8, u64)], timer: u8) -> Vec<u64> {
+        log.iter()
+            .filter(|(t, _)| *t == timer)
+            .map(|(_, cycle)| *cycle)
+            .collect()
+    }
+
+    /// The distances between consecutive cycles.
+    fn spacing(cycles: &[u64]) -> Vec<u64> {
+        cycles.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+
+    /// Checks that `timer` fires more than `count` times, `period` cycles apart.
+    fn check_period(p: &mut Pokey, timer: u8, period: u64, count: u64) {
+        let log = fire_log(p, period * (count + 2));
+        let fires = fires_of(&log, timer);
+        assert!(
+            fires.len() as u64 > count,
+            "timer {timer}: {} fires",
+            fires.len()
+        );
+        assert!(
+            spacing(&fires).iter().all(|d| *d == period),
+            "timer {timer} period {period}: {:?}",
+            spacing(&fires)
+        );
+    }
+
+    /// The setup of REQ-525: `SKCTL` = `$23`, timers 3 and 4 linked at `$0028`, and
+    /// `IRQEN` = `irqen`, at least 200 cycles before the first `SEROUT` write.
+    fn serial_pokey(irqen: u8) -> Pokey {
+        let mut p = timer_pokey(0x23, 0x28, [0, 0, 0x28, 0]);
+        p.write(IRQEN, irqen);
+        run(&mut p, 300);
+        p
+    }
+
+    /// Writes `values` to `SEROUT` on the next cycle X and runs to the load L (the first
+    /// cycle on which `IRQST` bit 3 reads 1). Returns `(X, L)`.
+    fn send(p: &mut Pokey, values: &[u8]) -> (u64, u64) {
+        p.tick();
+        let x = p.cycle();
+        for value in values {
+            p.write(SEROUT, *value);
+        }
+        let l = run_until(p, 2 * BIT, |p| irqst(p) & IRQ_DONE != 0).expect("no load");
+        (x, l)
+    }
+
+    /// Runs up to and including cycle `last`.
+    fn run_to(p: &mut Pokey, last: u64) {
+        let cycles = last - p.cycle();
+        run(p, cycles);
+    }
+
+    /// Runs up to and including cycle `last` and checks `ok` after each tick.
+    fn run_checking_to(p: &mut Pokey, last: u64, what: &str, ok: impl Fn(&Pokey) -> bool) {
+        let cycles = last - p.cycle();
+        run_checking(p, cycles, what, ok);
+    }
+
+    /// SIO DATA OUT on the next `cycles` cycles.
+    fn levels(p: &mut Pokey, cycles: u64) -> Vec<bool> {
+        (0..cycles)
+            .map(|_| {
+                p.tick();
+                p.serial_out()
+            })
+            .collect()
+    }
+
+    /// The levels of the frame of `value` from cycle L+1 to cycle L+940, one entry per cycle.
+    fn frame_levels(value: u8) -> Vec<bool> {
+        let bits = (0..10).map(|bit| match bit {
+            0 => false,
+            9 => true,
+            n => (value >> (n - 1)) & 1 != 0,
+        });
+        let mut levels: Vec<bool> = bits
+            .flat_map(|level| iter::repeat_n(level, 94))
+            .skip(1)
+            .collect();
+        levels.push(true);
+        levels
+    }
+
+    /// Verifies REQ-505: timers 3 and 4 linked at 1.79 MHz with `$0028` fire every
+    /// 47 cycles.
+    #[test]
+    fn linked_fast_period() {
+        let mut p = timer_pokey(0x03, 0x28, [0, 0, 0x28, 0x00]);
+        check_period(&mut p, 4, 47, 20);
+    }
+
+    /// Verifies REQ-505: `AUDF3` = `$CC`, `AUDF4` = `$05` gives 1491 cycles.
+    #[test]
+    fn linked_period_05cc() {
+        let mut p = timer_pokey(0x03, 0x28, [0, 0, 0xCC, 0x05]);
+        check_period(&mut p, 4, 1491, 4);
+    }
+
+    /// Verifies REQ-505: linked timers on the 64 kHz and 15 kHz clocks.
+    #[test]
+    fn linked_slow_periods() {
+        let mut p = timer_pokey(0x03, 0x10, [0x00, 0x01, 0, 0]);
+        check_period(&mut p, 2, 257 * 28, 3);
+        let mut p = timer_pokey(0x03, 0x09, [0, 0, 0x00, 0x01]);
+        check_period(&mut p, 4, 257 * LINE, 2);
+    }
+
+    /// Verifies REQ-505: the low timer fires `AUDF2` + 1 times in each period of the high
+    /// timer.
+    #[test]
+    fn linked_low_timer_fires_hi_plus_one() {
+        let mut p = timer_pokey(0x03, 0x50, [0x40, 0x01, 0, 0]);
+        let log = fire_log(&mut p, 5000);
+        let high = fires_of(&log, 2);
+        assert!(high.len() >= 3, "timer 2 fires: {high:?}");
+        for pair in high.windows(2) {
+            let low = fires_of(&log, 1)
+                .into_iter()
+                .filter(|c| (pair[0]..pair[1]).contains(c))
+                .count();
+            assert_eq!(low, 2, "timer 1 fires between {pair:?}");
+        }
+    }
+
+    /// Verifies REQ-505: with `AUDF4` = 1, timer 3 fires 2 times in each period of timer 4,
+    /// and each fire of timer 4 is 3 cycles after the second fire of timer 3.
+    #[test]
+    fn linked_high_fires_3_after_low() {
+        let mut p = timer_pokey(0x03, 0x28, [0, 0, 0x28, 0x01]);
+        let log = fire_log(&mut p, 2000);
+        let low = fires_of(&log, 3);
+        let high = fires_of(&log, 4);
+        assert!(high.len() >= 3, "timer 4 fires: {high:?}");
+        for pair in high.windows(2) {
+            let in_period: Vec<u64> = low
+                .iter()
+                .copied()
+                .filter(|c| pair[0] < *c && *c < pair[1])
+                .collect();
+            assert_eq!(in_period.len(), 2, "timer 3 fires between {pair:?}");
+            assert_eq!(in_period[1] + 3, pair[1], "timer 4 after timer 3");
+        }
+    }
+
+    /// Verifies REQ-505: `AUDC3` does not change the linked period.
+    #[test]
+    fn linked_period_ignores_audc() {
+        for audc in [0x00, 0x0F, 0x1F, 0x8F, 0xAF] {
+            let mut p = timer_pokey(0x03, 0x28, [0, 0, 0x28, 0x00]);
+            p.write(AUDC3, audc);
+            check_period(&mut p, 4, 47, 10);
+        }
+    }
+
+    /// Verifies REQ-525: the load is within one bit time of the `SEROUT` write, and it
+    /// latches `IRQST` bit 4 and sets bit 3.
+    #[test]
+    fn serial_output_load_and_ready_irq() {
+        let mut p = serial_pokey(0x10);
+        assert_eq!(irqst(&p) & (IRQ_DONE | IRQ_NEEDED), IRQ_NEEDED, "idle");
+        let (x, l) = send(&mut p, &[0x4F]);
+        assert!(x < l && l <= x + BIT, "load on {l}, write on {x}");
+        assert_eq!(irqst(&p) & IRQ_NEEDED, 0, "IRQST bit 4 on L");
+        assert_eq!(irqst(&p) & IRQ_DONE, IRQ_DONE, "IRQST bit 3 on L");
+        assert!(p.irq(), "IRQ line");
+    }
+
+    /// Verifies REQ-525: `$4F` goes out as 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, each for 94 cycles.
+    #[test]
+    fn serial_output_frame_4f() {
+        let mut p = serial_pokey(0x10);
+        p.tick();
+        p.write(SEROUT, 0x4F);
+        // Before the load, the output is idle (1).
+        for _ in 0..2 * BIT {
+            p.tick();
+            if irqst(&p) & IRQ_DONE != 0 {
+                break;
+            }
+            assert!(p.serial_out(), "1 before the load, cycle {}", p.cycle());
+        }
+        let l = p.cycle();
+        assert_eq!(irqst(&p) & IRQ_DONE, IRQ_DONE, "load");
+        assert!(!p.serial_out(), "start bit on L = {l}");
+        assert_eq!(
+            levels(&mut p, FRAME),
+            frame_levels(0x4F),
+            "frame from L = {l}"
+        );
+        assert!(
+            levels(&mut p, 1000).iter().all(|level| *level),
+            "idle after the frame"
+        );
+    }
+
+    /// Verifies REQ-525: a byte written during a frame follows it without a gap.
+    #[test]
+    fn serial_output_back_to_back() {
+        let mut p = serial_pokey(0x10);
+        let (_, l) = send(&mut p, &[0x4F]);
+        clear_irq(&mut p, 0x10, IRQ_NEEDED);
+        run(&mut p, 100);
+        p.write(SEROUT, 0x55);
+        run_to(&mut p, l + FRAME - 1);
+        assert!(p.serial_out(), "stop bit of $4F on L+939");
+        assert_ne!(irqst(&p) & IRQ_NEEDED, 0, "IRQST bit 4 cleared");
+        p.tick();
+        assert_eq!(p.cycle(), l + FRAME, "cycle L+940");
+        assert!(!p.serial_out(), "start bit of $55 on L+940");
+        assert_eq!(irqst(&p) & IRQ_NEEDED, 0, "IRQST bit 4 on L+940");
+    }
+
+    /// Verifies REQ-525: a second `SEROUT` write before the load replaces the first.
+    #[test]
+    fn serout_overwrite_before_load() {
+        let mut p = serial_pokey(0x10);
+        let _load = send(&mut p, &[0x4F, 0x55]);
+        assert_eq!(levels(&mut p, FRAME), frame_levels(0x55), "frame of $55");
+        assert_eq!(
+            p.take_serial_byte().map(|byte| byte.value),
+            Some(0x55),
+            "sent byte"
+        );
+        assert_eq!(p.take_serial_byte(), None, "only one byte");
+    }
+
+    /// Verifies REQ-525: without a new `SEROUT` write, the end of a frame latches no IRQ.
+    #[test]
+    fn no_ready_irq_at_end() {
+        let mut p = serial_pokey(0x10);
+        let (_, l) = send(&mut p, &[0x4F]);
+        clear_irq(&mut p, 0x10, IRQ_NEEDED);
+        run_checking_to(&mut p, l + 2000, "IRQST bit 4 reads 1", |p| {
+            irqst(p) & IRQ_NEEDED != 0
+        });
+    }
+
+    /// Verifies REQ-525: `take_serial_byte` gives the byte after its stop bit, with the
+    /// cycles of the frame.
+    #[test]
+    fn serial_byte_reported_with_cycle() {
+        let mut p = serial_pokey(0x10);
+        let (_, l) = send(&mut p, &[0x4F]);
+        while p.cycle() < l + FRAME - 1 {
+            assert_eq!(p.take_serial_byte(), None, "cycle {}", p.cycle());
+            p.tick();
+        }
+        assert_eq!(p.take_serial_byte(), None, "cycle L+939");
+        p.tick();
+        assert_eq!(
+            p.take_serial_byte(),
+            Some(super::SerialByte {
+                value: 0x4F,
+                start_cycle: l,
+                end_cycle: l + FRAME,
+            }),
+            "on L+940"
+        );
+        assert_eq!(p.take_serial_byte(), None, "then none");
+    }
+
+    /// Verifies REQ-516: after power-on, `IRQST` bit 3 reads 0 and the IRQ line is off.
+    #[test]
+    fn serial_complete_idle_no_irq() {
+        let p = new_pokey();
+        assert_eq!(irqst(&p) & IRQ_DONE, 0, "IRQST bit 3");
+        assert!(!p.irq(), "IRQ line");
+    }
+
+    /// Verifies REQ-516: with the output idle, `IRQEN` bit 3 asserts the IRQ at once.
+    #[test]
+    fn serial_complete_irq_when_enabled() {
+        let mut p = serial_pokey(0x00);
+        p.tick();
+        p.write(IRQEN, IRQ_DONE);
+        run_checking(&mut p, 100, "IRQ with the output idle", |p| {
+            p.irq() && irqst(p) & IRQ_DONE == 0
+        });
+    }
+
+    /// Verifies REQ-516: `IRQST` bit 3 reads 1 while the shift register sends, also over two
+    /// frames.
+    #[test]
+    fn serial_complete_reads_1_while_shifting() {
+        for frames in [1, 2] {
+            let mut p = serial_pokey(0x10);
+            let (_, l) = send(&mut p, &[0x4F]);
+            if frames == 2 {
+                run(&mut p, 10);
+                p.write(SEROUT, 0x55);
+            }
+            run_checking_to(&mut p, l + frames * FRAME - 1, "bit 3 = 1", |p| {
+                irqst(p) & IRQ_DONE != 0
+            });
+            p.tick();
+            assert_eq!(irqst(&p) & IRQ_DONE, 0, "bit 3 = 0 after {frames} frames");
+        }
+    }
+
+    /// Verifies REQ-516: `IRQEN` writes do not change `IRQST` bit 3.
+    #[test]
+    fn irqen_does_not_clear_bit_3() {
+        let mut p = serial_pokey(0x10);
+        for value in [0x00, 0xF7] {
+            p.write(IRQEN, value);
+            assert_eq!(irqst(&p) & IRQ_DONE, 0, "idle, IRQEN = {value:02X}");
+        }
+        p.write(IRQEN, 0x10);
+        run(&mut p, 10);
+        let _load = send(&mut p, &[0x4F]);
+        for value in [0x00, 0xF7] {
+            p.write(IRQEN, value);
+            assert_eq!(
+                irqst(&p) & IRQ_DONE,
+                IRQ_DONE,
+                "shifting, IRQEN = {value:02X}"
+            );
+        }
+    }
+
+    /// Verifies REQ-516: with `IRQEN` = `$08`, the IRQ line is off while the frame shifts
+    /// and on from its end.
+    #[test]
+    fn serial_complete_after_last_stop_bit() {
+        let mut p = serial_pokey(IRQ_DONE);
+        let (_, l) = send(&mut p, &[0x4F]);
+        assert!(!p.irq(), "IRQ off on L");
+        run_checking_to(&mut p, l + FRAME - 1, "IRQ off while shifting", |p| {
+            !p.irq()
+        });
+        run_checking(&mut p, 100, "IRQ on from L+940", Pokey::irq);
+    }
+
+    /// Verifies REQ-502: initialization mode drops the frame and the pending `SEROUT`, and
+    /// keeps SIO DATA OUT.
+    #[test]
+    fn init_mode_flushes_serout() {
+        let mut p = serial_pokey(0x10);
+        let _load = send(&mut p, &[0x4F]);
+        p.write(SEROUT, 0x55);
+        run(&mut p, 200);
+        let level = p.serial_out();
+        p.write(SKCTL, 0x00);
+        run(&mut p, 1000);
+        p.write(SKCTL, 0x23);
+        run_checking(&mut p, 5000, "no output after initialization mode", |p| {
+            p.serial_out() == level && irqst(p) & IRQ_DONE == 0
+        });
+        assert_eq!(p.take_serial_byte(), None, "no byte");
     }
 }

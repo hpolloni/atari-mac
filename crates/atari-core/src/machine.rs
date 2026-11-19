@@ -289,8 +289,9 @@ impl Bus for CpuBus<'_> {
         match page {
             0xD0 => {
                 self.gtia.write(reg, value);
-                // The console speaker signal is `CONSOL` bit 3 (REQ-438, system.md "Timing").
-                self.pokey.set_speaker(self.gtia.speaker());
+                // A `CONSOL` bit written as 1 pulls its line down, so the speaker line is high
+                // when bit 3 was written as 0 (HRM 6.11, system.md "Timing").
+                self.pokey.set_speaker(!self.gtia.speaker());
             }
             0xD2 => self.pokey.write(reg, value),
             0xD3 => {
@@ -425,6 +426,7 @@ impl Machine {
         // 4. The CPU access, if ANTIC does not halt the CPU (REQ-202).
         let mut data = self.data_bus;
         self.last_access = None;
+        let mut irq_started = false;
         if out.halt {
             // 5. A refresh cycle drives no byte: the bus keeps the last value.
             if out.dma != DmaKind::Refresh {
@@ -443,11 +445,16 @@ impl Machine {
             let _tick = self.cpu.tick(&mut bus, out.rdy);
             data = bus.data;
             self.last_access = bus.access;
+            irq_started = self.cpu.irq_sequence_started();
         }
-        // 5. The data bus value goes to ANTIC and GTIA.
+        // 5. The data bus value goes to ANTIC and GTIA. An IRQ or BRK sequence that started
+        //    in this cycle goes to ANTIC before the next tick (REQ-335).
         self.data_bus = data;
         self.antic.end_cycle(data);
         self.gtia.clock(&out, data);
+        if irq_started {
+            self.antic.irq_sequence_started();
+        }
         // 6. The PIA, then the serial output. With no SIO bus in SLICE-01, the bytes that
         //    POKEY sent are dropped.
         self.pia.tick();
@@ -559,6 +566,17 @@ impl Machine {
         self.pokey.set_shift(down);
     }
 
+    /// Presses (`down`) or releases one key of the matrix. `code` is a 6-bit key code; bits 6
+    /// and 7 are ignored.
+    pub const fn set_key(&mut self, code: u8, down: bool) {
+        self.pokey.set_key(code, down);
+    }
+
+    /// Sets the state of the CONTROL key alone.
+    pub const fn set_control(&mut self, down: bool) {
+        self.pokey.set_control(down);
+    }
+
     /// Sets the state of the BREAK key.
     pub const fn set_break(&mut self, down: bool) {
         self.pokey.set_break(down);
@@ -590,6 +608,8 @@ impl Machine {
 
 #[cfg(test)]
 mod tests {
+    use core::iter;
+
     use super::{BusAccess, ConfigError, CpuBus, JoystickState, Machine, MachineConfig};
     use crate::antic::DmaMemory as _;
     use crate::cpu::Bus as _;
@@ -1678,7 +1698,108 @@ mod tests {
         m.set_shift(true);
         m.set_break(false);
         m.key_up();
+        let mut expected = m.pokey.clone();
+        expected.set_key(0x3F, true);
+        expected.set_control(true);
+        m.set_key(0x3F, true);
+        m.set_control(true);
+        assert_eq!(m.pokey, expected, "set_key and set_control reach POKEY");
         m.cpu_mut().registers_mut().a = 0x12;
         assert_eq!(m.cpu().registers().a, 0x12, "CPU registers");
+    }
+
+    /// Verifies REQ-438: the speaker line is high when `CONSOL` bit 3 was written as 0, and
+    /// low when it was written as 1 (HRM 6.11).
+    #[test]
+    fn consol_bit_3_drives_speaker_line() {
+        let mut m = machine();
+        cpu_write(&mut m, 0xD01F, 0x08);
+        assert!(!m.pokey.test_speaker(), "bit 3 = 1 pulls the line down");
+        cpu_write(&mut m, 0xD01F, 0x00);
+        assert!(m.pokey.test_speaker(), "bit 3 = 0 leaves the line high");
+    }
+
+    /// The scan line and cycle of the `BRK` opcode fetch, and the reads of the NMI vector
+    /// and of the IRQ vector up to the end of frame 0, for a program that waits for scan line
+    /// 246, runs `nops` `NOP` instructions (and one `BIT $80` if `odd`) and then a `BRK`.
+    fn brk_near_vbi(nops: usize, odd: bool) -> ((u64, u64), usize, usize) {
+        let mut code = vec![
+            0x78, // SEI
+            0xA9, 0x00, // LDA #$00
+            0x8D, 0x00, 0xD4, // STA DMACTL
+            0x8D, 0x0F, 0xD4, // STA NMIRES
+            0xA9, 0x40, // LDA #$40
+            0x8D, 0x0E, 0xD4, // STA NMIEN (VBI)
+            0xAD, 0x0B, 0xD4, // wait: LDA VCOUNT
+            0xC9, 0x7B, // CMP #123 (scan lines 246 and 247)
+            0xD0, 0xF9, // BNE wait
+            0x8D, 0x0A, 0xD4, // STA WSYNC
+            0x8D, 0x0A, 0xD4, // STA WSYNC
+        ];
+        code.extend(iter::repeat_n(0xEA, nops));
+        if odd {
+            code.extend([0x24, 0x80]); // BIT $80
+        }
+        let brk = 0xC200 + u16::try_from(code.len()).unwrap();
+        let [low, high] = (brk + 2).to_le_bytes();
+        code.extend([0x00, 0x00, 0x4C, low, high]); // BRK, JMP *
+        let mut m = program_machine(&code);
+        let frame = 29_868;
+        let mut brk_at = (0, 0);
+        let mut vectors = (0, 0);
+        while m.cycle_count() < frame {
+            let pc = m.cpu().registers().pc;
+            m.run_cycle();
+            let cycle = (m.cycle_count() - 1) % frame;
+            if pc == brk && m.cpu().registers().pc == brk + 1 {
+                brk_at = (cycle / 114, cycle % 114);
+            }
+            match m.last_access {
+                Some(BusAccess { addr: 0xFFFA, .. }) => vectors.0 += 1,
+                Some(BusAccess { addr: 0xFFFE, .. }) => vectors.1 += 1,
+                _ => {}
+            }
+        }
+        (brk_at, vectors.0, vectors.1)
+    }
+
+    /// The NMI and IRQ vector reads for a `BRK` opcode fetch on `cycle` of scan line 248.
+    fn brk_on_vbi_line(cycle: u64) -> (usize, usize) {
+        let runs: Vec<_> = (0..20)
+            .flat_map(|nops| [brk_near_vbi(nops, false), brk_near_vbi(nops, true)])
+            .collect();
+        let run = runs.iter().find(|run| run.0 == (248, cycle));
+        assert!(
+            run.is_some(),
+            "no BRK on cycle {cycle} of line 248: {runs:?}"
+        );
+        run.map_or((0, 0), |run| (run.1, run.2))
+    }
+
+    /// Verifies REQ-335: the machine tells ANTIC when the CPU starts a `BRK` sequence. A
+    /// `BRK` opcode fetch on cycle 4 of scan line 248 loses the VBI NMI; on cycle 3, the NMI
+    /// runs after the `BRK` handler.
+    #[test]
+    fn brk_on_cycle_4_loses_vbi_nmi() {
+        assert_eq!(brk_on_vbi_line(4), (0, 1), "cycle 4: no NMI vector read");
+        assert_eq!(brk_on_vbi_line(3), (1, 1), "cycle 3: NMI after the BRK");
+    }
+
+    /// Verifies REQ-113: a KIL opcode locks the CPU, but the machine keeps running: each
+    /// `run_frame` advances the cycle counter by one frame.
+    #[test]
+    fn kil_machine_keeps_running() {
+        let mut m = program_machine(&[0x02]);
+        m.run_frame();
+        assert!(
+            m.cpu().is_jammed(),
+            "KIL at the reset address locks the CPU"
+        );
+        for frame in 0..3 {
+            let start = m.cycle_count();
+            m.run_frame();
+            assert_eq!(m.cycle_count() - start, 29_868, "frame {frame}");
+            assert!(m.cpu().is_jammed(), "still locked after frame {frame}");
+        }
     }
 }
