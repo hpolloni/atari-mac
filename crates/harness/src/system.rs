@@ -9,6 +9,12 @@ use crate::{HarnessError, data};
 /// The audio sample rate of test machines.
 pub const TEST_SAMPLE_RATE: u32 = 48_000;
 
+/// The frames from power-on within which `AltirraOS` and BASIC show the prompt (REQ-005).
+///
+/// The boot takes about 195 frames: the OS makes 3 x 28 SIO attempts of 2 frames each to an
+/// empty bus before BASIC starts (HRM 9.2).
+pub const BOOT_FRAMES: u32 = 240;
+
 /// How to boot a test machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootOptions {

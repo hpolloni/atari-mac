@@ -4,7 +4,7 @@ use atari_core::gtia::ConsoleKeys;
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard};
 use atari_harness::screen::has_row;
 use atari_harness::system::{
-    BootOptions, TEST_SAMPLE_RATE, boot, hold_console_keys, run_frames, run_until,
+    BOOT_FRAMES, BootOptions, TEST_SAMPLE_RATE, boot, hold_console_keys, run_frames, run_until,
 };
 use atari_harness::{HarnessError, data};
 
@@ -81,17 +81,20 @@ fn emulation_is_deterministic() {
 }
 
 /// Verifies REQ-005 and REQ-024: the machine boots to the BASIC `READY` prompt.
+///
+/// Altirra BASIC prints the prompt as `Ready`. Before BASIC starts, the OS sends three SIO
+/// commands (the D1: status of the disk boot and two type 3 polls) to an empty bus. Each
+/// command makes 28 attempts (HRM 9.2), and each attempt waits 2 frames for the ACK, so
+/// the prompt appears after about 195 frames.
 #[test]
-#[ignore = "needs WP-1, WP-2, WP-3: REQ-005"]
 fn boots_to_basic_ready() {
     let mut machine = boot(BootOptions::default()).unwrap();
-    let frames = run_until(&mut machine, 180, |m| has_row(m, "READY"));
-    assert!(frames.is_some(), "no READY row after 180 frames");
+    let frames = run_until(&mut machine, BOOT_FRAMES, |m| has_row(m, "Ready"));
+    assert!(frames.is_some(), "no Ready row after {BOOT_FRAMES} frames");
 }
 
 /// Verifies REQ-006: OPTION held at power-on disables BASIC.
 #[test]
-#[ignore = "needs WP-1, WP-2, WP-3: REQ-006"]
 fn option_key_disables_basic() {
     let mut machine = boot(BootOptions::default()).unwrap();
     hold_console_keys(
@@ -100,7 +103,7 @@ fn option_key_disables_basic() {
             option: true,
             ..ConsoleKeys::default()
         },
-        180,
+        BOOT_FRAMES,
     );
     machine.poke_ram(0xA000, 0x5A);
     assert_eq!(machine.peek(0xA000), 0x5A, "RAM shows at $A000");
@@ -108,10 +111,9 @@ fn option_key_disables_basic() {
 
 /// Verifies REQ-006: without OPTION, BASIC is mapped at `$A000`.
 #[test]
-#[ignore = "needs WP-1, WP-2, WP-3: REQ-006"]
 fn basic_is_mapped_without_option() {
     let basic = data::basic_rom().unwrap();
     let mut machine = boot(BootOptions::default()).unwrap();
-    run_frames(&mut machine, 180);
+    run_frames(&mut machine, BOOT_FRAMES);
     assert_eq!(machine.peek(0xA000), basic[0], "BASIC byte $0000 at $A000");
 }

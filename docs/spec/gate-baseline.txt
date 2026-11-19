@@ -136,6 +136,3 @@ REQ-049 crates/harness/tests/harness_self_test.rs: `unreadable_file_gives_read_e
 
 # Added by the lead at the WP-6 merge (2026-11-19). These planned tests are not written
 # yet. They are follow-up items in docs/plan/SLICE-01.md. Remove each line with its fix.
-REQ-049 docs/design/cpu.md: REQ-113: the test plan names `kil_machine_keeps_running` in crates/atari-core/src/machine.rs, which is not a #[test] function
-REQ-049 docs/design/pokey.md: REQ-518: the test `basic_prints_sum` in crates/harness/tests/keyboard.rs has no `Verifies` comment for REQ-518
-REQ-049 docs/design/pokey.md: REQ-522: the test plan names `break_stops_basic_program` in crates/harness/tests/keyboard.rs, which is not a #[test] function

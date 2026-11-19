@@ -167,6 +167,8 @@ pub struct Cpu {
     no_poll_next: bool,
     /// Cycle count in the KIL state.
     jam_cycle: u8,
+    /// The last tick was the first cycle of an IRQ or `BRK` sequence (REQ-335).
+    irq_started: bool,
 }
 
 /// A bus that forwards each access and records whether it was a write. `tick` uses it when
@@ -241,6 +243,7 @@ impl Cpu {
             brk: false,
             no_poll_next: false,
             jam_cycle: 0,
+            irq_started: false,
         }
     }
 
@@ -263,6 +266,7 @@ impl Cpu {
     /// from before the tick and makes no interrupt poll. A write cycle runs normally
     /// (REQ-126, REQ-127, HRM 4.9).
     pub fn tick(&mut self, bus: &mut impl Bus, rdy: bool) -> Tick {
+        self.irq_started = false;
         if rdy {
             self.run_cycle(bus);
             return Tick::Ran;
@@ -328,6 +332,14 @@ impl Cpu {
     /// The registers, for change at a boundary (test harnesses, debuggers).
     pub const fn registers_mut(&mut self) -> &mut Registers {
         &mut self.regs
+    }
+
+    /// `true` if the last tick was the first cycle of an IRQ sequence or of a `BRK`
+    /// instruction (the opcode fetch). An NMI sequence and a stalled tick give `false`. The
+    /// machine gives it to ANTIC (REQ-335).
+    #[must_use]
+    pub const fn irq_sequence_started(&self) -> bool {
+        self.irq_started
     }
 
     /// `true` while a KIL opcode locks the CPU.
@@ -407,6 +419,8 @@ impl Cpu {
             self.dummy_pc(bus);
             self.mode = Mode::Interrupt;
             self.brk = false;
+            // With an NMI pending, this is an NMI sequence.
+            self.irq_started = !self.nmi_pending;
             return End::Continue;
         }
         self.opcode = self.fetch_pc(bus);
@@ -414,6 +428,7 @@ impl Cpu {
         self.mode = match op {
             Op::Brk => {
                 self.brk = true;
+                self.irq_started = true;
                 Mode::Interrupt
             }
             Op::Kil => {
