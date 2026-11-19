@@ -432,22 +432,22 @@ pub fn test_plans(spec: &Spec) -> Vec<Violation> {
 
 /// REQ-027 and REQ-049: the trace from the test plans to the code, and back.
 ///
-/// The `Verifies` comments name valid requirements and are on tests, and each test that
-/// names a requirement is in its test plan. For a `done` package, each `test` requirement
-/// has a test that runs, and each test of its test plan exists with a `Verifies` comment
-/// for it.
+/// The `Verifies` comments name valid requirements and are on tests, each test that names a
+/// requirement is in its test plan, and an ignored test is a planned stub of a package that
+/// is not `done`. Each `test` requirement has a test, ignored or not, and each test of a
+/// test plan exists with a `Verifies` comment for its requirement. For a `done` package,
+/// each `test` requirement has a test that runs.
 #[must_use]
 pub fn trace(spec: &Spec) -> Vec<Violation> {
     let mut out = Vec::new();
     for test in spec.code_tests.iter().filter(|t| !t.verifies.is_empty()) {
         out.extend(trace_comment(spec, test));
     }
-    for r in spec
-        .requirements
-        .iter()
-        .filter(|r| r.active() && spec.done(r.id))
-    {
-        out.extend(trace_done(spec, r));
+    for test in spec.code_tests.iter().filter(|t| t.is_test && t.ignored) {
+        out.extend(trace_ignored(spec, test));
+    }
+    for r in spec.requirements.iter().filter(|r| r.active()) {
+        out.extend(trace_requirement(spec, r));
     }
     out
 }
@@ -489,13 +489,67 @@ fn trace_comment(spec: &Spec, test: &CodeTest) -> Vec<Violation> {
     out
 }
 
-/// The rules of REQ-027 and REQ-049 criteria 1 and 2 for a requirement of a `done` package.
-fn trace_done(spec: &Spec, r: &Requirement) -> Vec<Violation> {
+/// The slice number of an ignore reason `planned: SLICE-NN`, if the reason has exactly this
+/// form.
+fn planned_slice(reason: &str) -> Option<u16> {
+    let number = reason.strip_prefix("planned: SLICE-")?;
+    if number.len() != 2 || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
+/// REQ-027 criterion 5 for one ignored test: the reason is `planned: SLICE-NN`, the slice
+/// exists and plans each requirement of the test, and no package of these requirements is
+/// `done`.
+fn trace_ignored(spec: &Spec, test: &CodeTest) -> Vec<Violation> {
+    let at = Some(test.line);
+    let name = &test.function;
+    let reason = test.ignore_reason.as_deref();
+    let Some(number) = reason.and_then(planned_slice) else {
+        let message = reason.map_or_else(
+            || format!("`{name}`: the test is ignored without the reason `planned: SLICE-NN`"),
+            |reason| format!("`{name}`: the ignore reason is `{reason}`, not `planned: SLICE-NN`"),
+        );
+        return vec![Violation::new(27, &test.file, at, message)];
+    };
+    let slice_id = format!("SLICE-{number:02}");
+    if !spec.slices.iter().any(|s| s.id == number) {
+        let message = format!("`{name}`: the ignore reason names {slice_id}, which does not exist");
+        return vec![Violation::new(27, &test.file, at, message)];
+    }
+    let mut out = Vec::new();
+    for &id in &test.verifies {
+        let id_text = req(id);
+        let message = match spec.planned(id) {
+            Some((slice, _)) if slice.id != number => format!(
+                "`{name}` is planned in {slice_id}, but SLICE-{:02} plans {id_text}",
+                slice.id
+            ),
+            None => format!("`{name}` is planned in {slice_id}, but no slice plans {id_text}"),
+            Some(_) if spec.done(id) => {
+                format!("`{name}` is ignored, but the package of {id_text} is done")
+            }
+            Some(_) => continue,
+        };
+        out.push(Violation::new(27, &test.file, at, message));
+    }
+    out
+}
+
+/// The rules of REQ-027 criteria 1 and 2 and REQ-049 criteria 1 and 2 for one requirement
+/// that is not withdrawn.
+fn trace_requirement(spec: &Spec, r: &Requirement) -> Vec<Violation> {
     let id = req(r.id);
     let mut out = Vec::new();
-    if r.verification == Verification::Test && !spec.tests_of(r.id).any(|t| !t.ignored) {
-        let message = format!("{id}: the package is done, but no test that runs names {id}");
-        out.push(Violation::new(27, &r.path, None, message));
+    if r.verification == Verification::Test {
+        if spec.tests_of(r.id).next().is_none() {
+            let message = format!("{id}: no test names {id}, ignored or not");
+            out.push(Violation::new(27, &r.path, None, message));
+        } else if spec.done(r.id) && !spec.tests_of(r.id).any(|t| !t.ignored) {
+            let message = format!("{id}: the package is done, but no test that runs names {id}");
+            out.push(Violation::new(27, &r.path, None, message));
+        }
     }
     for row in spec.rows(r.id) {
         for test_ref in &row.tests {
@@ -521,9 +575,11 @@ fn trace_done(spec: &Spec, r: &Requirement) -> Vec<Violation> {
     out
 }
 
-/// REQ-050 and REQ-054: each planned requirement exists and is in at most one package, a
-/// `done` slice has only `done` packages, and `product_complete: true` needs each `must`
-/// requirement in a slice.
+/// REQ-050 and REQ-054: the slices and their packages.
+///
+/// Each requirement that is not withdrawn is in a package, each planned requirement exists
+/// and is in at most one package, a `done` slice has only `done` packages, and
+/// `product_complete: true` needs each `must` requirement in a `done` package.
 #[must_use]
 pub fn slices(spec: &Spec) -> Vec<Violation> {
     let mut out = problems(spec, &[50]);
@@ -561,14 +617,29 @@ pub fn slices(spec: &Spec) -> Vec<Violation> {
         );
         out.push(Violation::new(54, &path, None, message));
     }
+    for r in spec.requirements.iter().filter(|r| r.active()) {
+        if spec.planned(r.id).is_none() {
+            let message = format!("{} is in no slice", req(r.id));
+            out.push(Violation::new(50, &r.path, None, message));
+        }
+    }
     if spec.product_complete {
         for r in spec
             .requirements
             .iter()
-            .filter(|r| r.active() && r.priority == Priority::Must && spec.planned(r.id).is_none())
+            .filter(|r| r.active() && r.priority == Priority::Must && !spec.done(r.id))
         {
+            let place = spec.planned(r.id).map_or_else(
+                || "is in no slice".to_owned(),
+                |(slice, package)| {
+                    format!(
+                        "is in SLICE-{:02} {}, which is not done",
+                        slice.id, package.id
+                    )
+                },
+            );
             let message = format!(
-                "`product_complete` is true, but {} (`must`) is in no slice",
+                "`product_complete` is true, but {} (`must`) {place}",
                 req(r.id)
             );
             out.push(Violation::new(

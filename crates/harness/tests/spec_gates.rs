@@ -131,7 +131,7 @@ mod gates {
                 &format!(
                     "---\nid: SLICE-01\ntitle: First slice\nstatus: in-progress\npackages:\n  \
                      - id: WP-1\n    title: Work\n    status: done\n    requirements: [{one}, {two}]\n  \
-                     - id: WP-2\n    status: planned\n    requirements: []\n---\n\
+                     - id: WP-2\n    status: planned\n    requirements: [{three}]\n---\n\
                      # SLICE-01: First slice\n\nSee [the design](../design/demo.md#test-plan).\n"
                 ),
             );
@@ -156,7 +156,7 @@ mod gates {
                 "crates/demo/tests/demo.rs",
                 &format!(
                     "/// Verifies {one}.\n#[test]\nfn first_test() {{}}\n\n/// Verifies {three}.\n\
-                     #[test]\n#[ignore = \"later\"]\nfn third_test() {{}}\n"
+                     #[test]\n#[ignore = \"planned: SLICE-01\"]\nfn third_test() {{}}\n"
                 ),
             );
         }
@@ -737,20 +737,151 @@ mod gates {
                 );
             },
         );
+    }
+
+    /// Verifies REQ-027: a `test` requirement without a test, ignored or not, fails.
+    #[test]
+    fn trace_gate_requires_a_test_for_each_test_requirement() {
+        fixture_passes();
+        let three = req(3);
+        rejects(
+            trace,
+            27,
+            &format!("{three}: no test names {three}, ignored or not"),
+            |f| {
+                f.replace(
+                    "crates/demo/tests/demo.rs",
+                    &format!("/// Verifies {three}."),
+                    "/// A test.",
+                );
+            },
+        );
         let fixture = Fixture::new();
         fixture.replace(
-            "docs/plan/SLICE-01.md",
-            "status: done",
-            "status: in-progress",
+            &Fixture::req_file(3),
+            "verification: test",
+            "verification: inspection",
         );
         fixture.replace(
-            design,
-            "`demo.rs` `first_test`",
-            "`demo.rs` `first_test`, `second_test`",
+            "crates/demo/tests/demo.rs",
+            &format!("/// Verifies {three}."),
+            "/// A test.",
         );
         assert!(
+            !fixture
+                .run(trace)
+                .iter()
+                .any(|v| v.message.contains("ignored or not")),
+            "only a `test` requirement needs a test"
+        );
+    }
+
+    /// Verifies REQ-027: an ignored test needs the reason `planned: SLICE-NN` of an existing
+    /// slice that plans each of its requirements in a package that is not `done`.
+    #[test]
+    fn trace_gate_rejects_bad_ignore_reasons() {
+        fixture_passes();
+        let code = "crates/demo/tests/demo.rs";
+        let plan = "docs/plan/SLICE-01.md";
+        let three = req(3);
+        let reason = "#[ignore = \"planned: SLICE-01\"]";
+        // A slice number with one digit, built so that this file names no slice that does not
+        // exist (REQ-047).
+        let short = format!("SLICE-{}", 1);
+        let short_reason = format!("#[ignore = \"planned: {short}\"]");
+        let short_needle = format!("is `planned: {short}`, not");
+        // A slice that does not exist, built in the same way.
+        let absent = format!("SLICE-{:02}", 7);
+        let absent_reason = format!("#[ignore = \"planned: {absent}\"]");
+        let absent_needle = format!("names {absent}, which does not exist");
+        for (bad, needle) in [
+            ("#[ignore = \"later\"]", "the ignore reason is `later`, not"),
+            (short_reason.as_str(), short_needle.as_str()),
+            (
+                "#[ignore = \"planned:  SLICE-01\"]",
+                "is `planned:  SLICE-01`, not",
+            ),
+            (
+                "#[ignore = \"planned: SLICE-01 \"]",
+                "is `planned: SLICE-01 `, not",
+            ),
+            (
+                "#[ignore]",
+                "ignored without the reason `planned: SLICE-NN`",
+            ),
+            (absent_reason.as_str(), absent_needle.as_str()),
+        ] {
+            rejects(trace, 27, needle, |f| f.replace(code, reason, bad));
+        }
+        rejects(
+            trace,
+            27,
+            &format!("planned in SLICE-02, but SLICE-01 plans {three}"),
+            |f| {
+                f.write(
+                    "docs/plan/SLICE-02.md",
+                    "---\nid: SLICE-02\ntitle: Second slice\nstatus: planned\npackages:\n  \
+                     - id: WP-1\n    status: planned\n    requirements: []\n---\n\
+                     # SLICE-02: Second slice\n",
+                );
+                f.replace(code, reason, "#[ignore = \"planned: SLICE-02\"]");
+            },
+        );
+        rejects(
+            trace,
+            27,
+            &format!("planned in SLICE-01, but no slice plans {three}"),
+            |f| f.replace(plan, &format!("[{three}]"), "[]"),
+        );
+        rejects(
+            trace,
+            27,
+            &format!("`third_test` is ignored, but the package of {three} is done"),
+            |f| f.replace(plan, "status: planned", "status: done"),
+        );
+        let fixture = Fixture::new();
+        fixture.replace(plan, "status: planned", "status: in-progress");
+        assert!(
             fixture.run(trace).is_empty(),
-            "the test plan rules apply only to `done` packages"
+            "a package in progress can have planned tests"
+        );
+    }
+
+    /// Verifies REQ-049: the test plan rules apply to each package, also to a package that is
+    /// not `done`.
+    #[test]
+    fn trace_gate_checks_test_plans_of_all_packages() {
+        fixture_passes();
+        let design = "docs/design/demo.md";
+        let three = req(3);
+        rejects(
+            trace,
+            49,
+            &format!("{three}: the test plan names `fourth_test` in demo.rs, which is not"),
+            |f| {
+                f.replace(
+                    design,
+                    "`demo.rs` `third_test`",
+                    "`demo.rs` `third_test`, `fourth_test`",
+                );
+            },
+        );
+        rejects(
+            trace,
+            49,
+            &format!("{three}: the test `fourth_test` in demo.rs has no `Verifies` comment"),
+            |f| {
+                f.replace(
+                    design,
+                    "`demo.rs` `third_test`",
+                    "`demo.rs` `third_test`, `fourth_test`",
+                );
+                f.replace(
+                    "crates/demo/tests/demo.rs",
+                    "\n\n/// Verifies",
+                    "\n\n#[test]\nfn fourth_test() {}\n\n/// Verifies",
+                );
+            },
         );
     }
 
@@ -857,13 +988,38 @@ mod gates {
         let fixture = Fixture::new();
         let report = fs::read_to_string(fixture.root.join(MATRIX)).unwrap();
         assert!(
+            report.contains("## Not in a slice\n\nNone."),
+            "fixture matrix:\n{report}"
+        );
+        fixture.replace("docs/plan/SLICE-01.md", &format!("[{}]", req(3)), "[]");
+        let spec = fixture.spec();
+        let report = spec::matrix(&spec, &[], &Baseline::default());
+        assert!(
             report.contains(&format!("## Not in a slice\n\n- {}: Title of", req(3))),
             "fixture matrix:\n{report}"
         );
     }
 
-    /// Verifies REQ-050: with `product_complete: true`, a `must` requirement that no slice
-    /// plans fails.
+    /// Verifies REQ-050: a requirement that is not withdrawn and that no slice plans fails.
+    #[test]
+    fn slices_gate_rejects_unplanned_requirements() {
+        fixture_passes();
+        let plan = "docs/plan/SLICE-01.md";
+        let three = req(3);
+        rejects(slices, 50, &format!("{three} is in no slice"), |f| {
+            f.replace(plan, &format!("[{three}]"), "[]");
+        });
+        let fixture = Fixture::new();
+        fixture.replace(plan, &format!("[{three}]"), "[]");
+        fixture.replace(&Fixture::req_file(3), "status: draft", "status: withdrawn");
+        assert!(
+            fixture.run(slices).is_empty(),
+            "a withdrawn requirement needs no slice"
+        );
+    }
+
+    /// Verifies REQ-050: with `product_complete: true`, a `must` requirement that is not in a
+    /// `done` package fails.
     #[test]
     fn product_complete_needs_must_planned() {
         fixture_passes();
@@ -872,9 +1028,18 @@ mod gates {
         rejects(
             slices,
             50,
+            &format!("{three} (`must`) is in SLICE-01 WP-2, which is not done"),
+            |f| {
+                f.replace(plan, "false", "true");
+            },
+        );
+        rejects(
+            slices,
+            50,
             &format!("{three} (`must`) is in no slice"),
             |f| {
                 f.replace(plan, "false", "true");
+                f.replace("docs/plan/SLICE-01.md", &format!("[{three}]"), "[]");
             },
         );
         rejects(
@@ -890,7 +1055,7 @@ mod gates {
         fixture.replace(&Fixture::req_file(3), "priority: must", "priority: should");
         assert!(
             fixture.run(slices).is_empty(),
-            "a `should` requirement can be unplanned"
+            "a `should` requirement can be in a package that is not done"
         );
     }
 
@@ -979,7 +1144,7 @@ mod gates {
                 "| {two} | inspection | SLICE-01 WP-1 | not a test requirement |  | docs/verification/{two}.md (pass) |"
             ),
             format!(
-                "| {three} | test | not in a slice | pending | crates/demo/tests/demo.rs `third_test` (ignored) |  |"
+                "| {three} | test | SLICE-01 WP-2 | pending | crates/demo/tests/demo.rs `third_test` (ignored) |  |"
             ),
         ] {
             assert!(report.contains(&row), "row {row} in:\n{report}");
@@ -1102,7 +1267,7 @@ mod gates {
             f.replace(slice, "packages:", "work:");
         });
         rejects(slice_rules, 54, "missing key `requirements`", |f| {
-            f.replace(slice, "    requirements: []\n", "");
+            f.replace(slice, &format!("    requirements: [{}]\n", req(3)), "");
         });
         rejects(slice_rules, 54, "is not a requirement ID", |f| {
             f.replace(
@@ -1121,7 +1286,11 @@ mod gates {
         });
         let twice = format!("{one} is in more than one package: SLICE-01 WP-1, SLICE-01 WP-2");
         rejects(slice_rules, 54, &twice, |f| {
-            f.replace(slice, "requirements: []", &format!("requirements: [{one}]"));
+            f.replace(
+                slice,
+                &format!("requirements: [{}]", req(3)),
+                &format!("requirements: [{one}]"),
+            );
         });
         rejects(
             slice_rules,

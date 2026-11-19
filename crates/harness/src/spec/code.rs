@@ -54,6 +54,16 @@ struct Pending {
     is_test: bool,
     /// An `#[ignore]` attribute was seen.
     ignored: bool,
+    /// The reason of the `#[ignore = "..."]` attribute, if any.
+    ignore_reason: Option<String>,
+}
+
+/// The reason of an `#[ignore = "reason"]` attribute line, if the line has one.
+fn ignore_reason(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("#[ignore")?.trim_start();
+    let rest = rest.strip_prefix('=')?.trim_start().strip_prefix('"')?;
+    let end = rest.find('"')?;
+    rest.get(..end).map(str::to_owned)
 }
 
 /// The `#[test]` functions and the functions with a `/// Verifies` comment in `text`.
@@ -75,6 +85,7 @@ pub fn tests_in(file: &Path, text: &str) -> Vec<CodeTest> {
             pending.is_test = true;
         } else if line.starts_with("#[ignore") {
             pending.ignored = true;
+            pending.ignore_reason = ignore_reason(line);
         } else if !line.starts_with("#[") && !line.is_empty() && !line.starts_with("//") {
             let item = mem::take(&mut pending);
             let name = function_name(line);
@@ -85,6 +96,7 @@ pub fn tests_in(file: &Path, text: &str) -> Vec<CodeTest> {
                     function: name.unwrap_or_default().to_owned(),
                     is_test: item.is_test,
                     ignored: item.ignored,
+                    ignore_reason: item.ignore_reason,
                     verifies: item.verifies,
                 });
             }

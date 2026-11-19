@@ -354,6 +354,9 @@ pub struct CodeTest {
     pub is_test: bool,
     /// The function has `#[ignore]`.
     pub ignored: bool,
+    /// The reason of `#[ignore = "reason"]`, if the attribute has one. A planned test has
+    /// the reason `planned: SLICE-NN` (REQ-027).
+    pub ignore_reason: Option<String>,
     /// The requirements in its `/// Verifies` comment.
     pub verifies: Vec<u16>,
 }
