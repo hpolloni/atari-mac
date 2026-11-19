@@ -19,8 +19,6 @@ fn registers_mirror_every_16_bytes() {
     rig.write(0x0E, 0xC0);
     for (line, cycle) in [(8, 3), (100, 50), (247, 111), (248, 8), (261, 113)] {
         rig.seek_after(line, cycle);
-        rig.antic.set_light_pen(true);
-        rig.antic.set_light_pen(false);
         for addr in 0..=0xFF_u8 {
             assert_eq!(
                 rig.read(addr),
@@ -153,7 +151,6 @@ fn reset_clears_nmien_dmactl_and_dma_clock() {
 fn reset_keeps_other_state() {
     let mut rig = Rig::new(VideoStandard::Ntsc);
     rig.seek_after(64, 32);
-    rig.antic.set_light_pen(true);
     for (reg, value) in [(4, 0x05), (5, 0x03), (7, 0x30), (9, 0xE0), (1, 0x02)] {
         rig.write(reg, value);
     }
@@ -183,7 +180,11 @@ fn reset_keeps_other_state() {
         reads,
         "PENH, PENV, NMIST"
     );
-    assert_eq!(reads[0..2], [64, 32], "the light pen latched on (64, 32)");
+    assert_eq!(
+        reads[0..2],
+        [0x00, 0xFF],
+        "PENH and PENV keep their power-on values"
+    );
 }
 
 /// Verifies REQ-302: reset keeps the scan line, the cycle and `VCOUNT`.

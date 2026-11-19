@@ -161,8 +161,13 @@ const FIRST_VISIBLE: usize = 0x22;
 const LAST_VISIBLE: usize = 0xDD;
 /// The size of the per-line code array. The last fetch can place codes up to position 250.
 const PIXELS: usize = 256;
-/// `win_right` before the stop event of the scan line: the window is open on the right.
+/// `win_right` before the right edge event of the scan line: the window is open on the right.
 const OPEN: usize = usize::MAX;
+
+/// The value of `PENH` (REQ-303). The emulator has no light pen (OI-016).
+const PENH: u8 = 0x00;
+/// The value of `PENV` (REQ-303).
+const PENV: u8 = 0xFF;
 
 /// `NMIEN`/`NMIST` bit 7: display list interrupt.
 const NMI_DLI: u8 = 0x80;
@@ -223,12 +228,6 @@ pub struct Antic {
     nmien_at_7: u8,
     /// `NMIST` bits 7-5.
     nmist: u8,
-    /// Light pen horizontal latch.
-    penh: u8,
-    /// Light pen vertical latch.
-    penv: u8,
-    /// The last light pen input level.
-    light_pen_in: bool,
     /// The instruction register.
     ir: u8,
     /// Bit 5 of the last mode line (kept across vertical blank).
@@ -373,9 +372,6 @@ impl Antic {
             nmien: 0,
             nmien_at_7: 0,
             nmist: 0x60,
-            penh: 0x00,
-            penv: 0xFF,
-            light_pen_in: false,
             ir: 0,
             prev_vs: false,
             row: 0,
@@ -425,8 +421,10 @@ impl Antic {
     pub const fn read(&self, reg: u8) -> u8 {
         match reg & 0x0F {
             0x0B => self.vcount(),
-            0x0C => self.penh,
-            0x0D => self.penv,
+            // The light pen is a non-goal (OI-016): `PENH` and `PENV` keep their
+            // power-on values (REQ-301, REQ-303).
+            0x0C => PENH,
+            0x0D => PENV,
             0x0F => self.nmist | 0x1F,
             _ => 0xFF,
         }
@@ -490,15 +488,6 @@ impl Antic {
                 self.apply_char_data(deferred.cycle, name, shown, data_bus);
             }
         }
-    }
-
-    /// Sets the light pen input. `true` = asserted (REQ-342).
-    pub const fn set_light_pen(&mut self, asserted: bool) {
-        if asserted && !self.light_pen_in {
-            self.penh = low_byte(2 * self.cur_cycle);
-            self.penv = self.vcount();
-        }
-        self.light_pen_in = asserted;
     }
 
     /// The CPU started an IRQ or BRK interrupt sequence in this cycle (REQ-335).
@@ -690,10 +679,14 @@ impl Antic {
         }
     }
 
-    /// Ticks 6 and 7: the LMS or jump address (REQ-321, REQ-322, REQ-323).
+    /// Ticks 6 and 7: the LMS or jump address (REQ-321, REQ-322, REQ-323, REQ-330).
     fn fetch_address(&mut self, mem: &mut impl DmaMemory, out: &mut CycleOutput) {
         let mode = mode(self.ir);
-        if !self.dl_fetched || !(mode == 1 || (mode >= 2 && self.ir & 0x40 != 0)) {
+        let lms = mode >= 2 && self.ir & 0x40 != 0;
+        // REQ-330: a jump line that vertical scrolling extends fetches its address again
+        // on each of its later scan lines.
+        let refetch = mode == 1 && !self.first_line && self.dmactl_late & 0x20 != 0;
+        if !(self.dl_fetched && (mode == 1 || lms)) && !refetch {
             return;
         }
         let value = dma(mem, out, DmaKind::DisplayListAddress, self.dlist);
@@ -773,6 +766,11 @@ impl Antic {
         if stop_width != 0 && self.cur_cycle == stop_cycle(fetch_width(stop_width, self.ir)) + delay
         {
             self.dma_clock &= !1;
+        }
+        // The right edge of the display window comes from the displayed width without
+        // `HSCROL`. On a line without scrolling, this is the cycle of the stop event. On a
+        // scrolled line, the stop event is later than the right edge (REQ-327).
+        if stop_width != 0 && self.cur_cycle == stop_cycle(stop_width) {
             self.win_right = window(stop_width).1;
         }
     }
