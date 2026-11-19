@@ -563,6 +563,12 @@ impl Pokey {
 
 #[cfg(test)]
 mod tests {
+    mod audio;
+    mod kbscan;
+    mod pots;
+    mod serial;
+    mod timers;
+
     use core::iter;
 
     use super::{Pokey, WriteRegs};
