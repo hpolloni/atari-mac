@@ -129,9 +129,18 @@ fn planned() {
 /// Verifies REQ-002: a `MachineConfig` with `VideoStandard::default()` gives NTSC: one frame
 /// is 29,868 cycles (criterion 3).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn default_standard_is_ntsc() {
-    planned();
+    assert_eq!(VideoStandard::default(), VideoStandard::Ntsc, "default");
+    let mut machine = Machine::new(MachineConfig {
+        standard: VideoStandard::default(),
+        ..config().unwrap()
+    })
+    .unwrap();
+    assert_eq!(machine.standard(), VideoStandard::Ntsc, "machine standard");
+    machine.run_frame();
+    let start = machine.cycle_count();
+    machine.run_frame();
+    assert_eq!(machine.cycle_count() - start, 29_868, "one NTSC frame");
 }
 
 /// Verifies REQ-018: a state saved after frame 100 and restored in a new machine gives the

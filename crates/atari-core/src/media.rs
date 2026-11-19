@@ -121,6 +121,10 @@ pub struct Cartridge {
     bank: u8,
     /// `true` while the cartridge maps `$A000-$BFFF` (bank-switched kinds only).
     enabled: bool,
+    /// The number of accesses to `$D500-$D5FF`: the counting test cartridge of the machine
+    /// tests (`docs/design/system.md`, "Test plan").
+    #[cfg(test)]
+    pub(crate) control_accesses: u32,
 }
 
 /// The big-endian `u32` at `offset` of `bytes`, or 0 if `bytes` is too short.
@@ -139,6 +143,8 @@ impl Cartridge {
             rom,
             bank: 0,
             enabled: true,
+            #[cfg(test)]
+            control_accesses: 0,
         }
     }
 
@@ -238,6 +244,8 @@ impl Cartridge {
     /// The bank-switched kinds select the bank on a read and on a write, and ignore the data of a
     /// write (HRM 8.2, REQ-608).
     pub const fn access_control(&mut self, addr: u16, _value: Option<u8>) -> Option<u8> {
+        #[cfg(test)]
+        self.count_control_access();
         let lo = addr.to_le_bytes()[0];
         match self.kind {
             CartKind::MaxFlash1Mbit if lo < 0x20 => {
@@ -251,6 +259,12 @@ impl Cartridge {
             _ => {}
         }
         None
+    }
+
+    /// Counts one access to `$D500-$D5FF` (the counting test cartridge).
+    #[cfg(test)]
+    const fn count_control_access(&mut self) {
+        self.control_accesses += 1;
     }
 
     /// `true` while the cartridge maps `$8000-$9FFF`.

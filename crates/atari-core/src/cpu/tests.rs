@@ -1698,18 +1698,36 @@ fn rdy_low_does_not_stop_write() {
     );
 }
 
-/// Verifies REQ-126 (criterion 4): the registers do not change during a stop.
+/// Verifies REQ-126 (criterion 4): `A`, `X`, `Y`, `S`, `P` and `PC` do not change during
+/// the repeated reads of criteria 1 (`NOP`), 2 (`INC $D40A`) and 3 (`STA $0600`).
 #[test]
 fn rdy_low_keeps_registers() {
-    let mut d = Driver::with_code(&[0xEE, 0x0A, 0xD4]); // INC $D40A
-    d.rdy_low = span(6, 21);
-    d.run_to(6);
-    let regs = d.r();
-    for c in 7..=21 {
-        assert_eq!(d.cycle(), Some(Tick::Stalled), "cycle {c}");
-        assert_eq!(d.r(), regs, "registers in cycle {c}");
+    // (code, first and last cycle with RDY low, the last cycle before the repeated reads).
+    // The instruction starts in cycle 1. A write cycle with RDY low runs.
+    let cases: [(&[u8], u32, u32, u32); 3] = [
+        (&[0xEA], 1, 10, 0),             // NOP: C = 1, RDY low in C to C+9
+        (&[0xEE, 0x0A, 0xD4], 6, 21, 6), // INC $D40A: C = 1, RDY low in C+5 to C+20
+        (&[0x8D, 0x00, 0x06], 4, 13, 4), // STA $0600: the write in C = 4, RDY low in C to C+9
+    ];
+    for (code, low, last, before) in cases {
+        let mut d = Driver::with_code(code);
+        d.regs().a = 0x5A;
+        d.regs().x = 0x12;
+        d.regs().y = 0x34;
+        d.rdy_low = span(low, last);
+        d.run_to(before);
+        let regs = d.r();
+        for c in before + 1..=last {
+            assert_eq!(d.cycle(), Some(Tick::Stalled), "{code:02X?}: cycle {c}");
+            assert_eq!(d.r(), regs, "{code:02X?}: registers in cycle {c}");
+        }
+        assert_eq!(
+            d.cycle(),
+            Some(Tick::Ran),
+            "{code:02X?}: cycle {}",
+            last + 1
+        );
     }
-    assert_eq!(d.cycle(), Some(Tick::Ran), "cycle 22");
 }
 
 /// Verifies REQ-127 (criterion 1): halted cycles extend the recognition delay.

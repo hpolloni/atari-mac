@@ -23,6 +23,7 @@ name = "atari-harness"
 version = "0.1.0"
 dependencies = [
  "atari-core",
+ "png",
  "serde",
  "serde_json",
  "yaml-rust2",

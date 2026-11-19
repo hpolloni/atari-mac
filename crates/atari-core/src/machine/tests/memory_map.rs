@@ -1,6 +1,8 @@
 //! Planned tests of the memory map, the bank switch and the DMA view of the map
 //! (`docs/design/system.md`, "Test plan").
 
+use super::{Machine, cart_16k, config, cpu_write, machine, machine_with, os_rom, set_portb};
+use crate::antic::DmaMemory as _;
 use crate::planned::planned;
 
 /// Verifies REQ-209: with `PORTB` pin 7 = 1, a CPU write and then a CPU read of each
@@ -46,25 +48,40 @@ fn ddrb_switch_next_cpu_access() {
 /// Verifies REQ-213: with `PORTB` pins = `$FF`, an ANTIC DMA read of `$E000` gives OS image
 /// byte `$2000` (criterion 1).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn dma_reads_os_rom() {
-    planned();
+    let mut os = os_rom();
+    os[0x2000] = 0x5A;
+    let mut m = Machine::new(config(os, None)).unwrap();
+    set_portb(&mut m, 0xFF);
+    m.poke_ram(0xE000, 0xAA);
+    assert_eq!(m.mem.dma_read(0xE000), 0x5A, "OS image byte $2000");
 }
 
 /// Verifies REQ-213: with `PORTB` pins = `$FE` and RAM at `$E000` = `$AA`, an ANTIC DMA read
 /// of `$E000` gives `$AA` (criterion 2).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn dma_reads_ram_under_os() {
-    planned();
+    let mut m = machine();
+    set_portb(&mut m, 0xFE);
+    m.poke_ram(0xE000, 0xAA);
+    assert_eq!(m.mem.dma_read(0xE000), 0xAA, "RAM under the OS ROM");
 }
 
 /// Verifies REQ-213: an ANTIC DMA read of `$D300` leaves `PACTL` bit 7 = 1, and a counting
 /// test cartridge counts exactly one access for one DMA read of `$D500` (criterion 4).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn dma_read_no_side_effects() {
-    planned();
+    let mut m = machine_with(Some(cart_16k()));
+    cpu_write(&mut m, 0xD302, 0x3C); // PACTL
+    m.pia.set_ca1(false); // an active (negative) edge on CA1 sets PACTL bit 7
+    assert_eq!(m.pia.peek(2), 0xBC, "PACTL bit 7 = 1 before");
+    assert_eq!(m.mem.dma_read(0xD300), 0xFF, "DMA read of $D300");
+    assert_eq!(m.pia.peek(2), 0xBC, "PACTL bit 7 = 1 after");
+
+    let count = |m: &Machine| m.mem.cart.as_ref().unwrap().control_accesses;
+    assert_eq!(count(&m), 0, "no access before");
+    let _value: u8 = m.mem.dma_read(0xD500);
+    assert_eq!(count(&m), 1, "one access for one DMA read of $D500");
 }
 
 /// Verifies REQ-214: with no cartridge, a CPU read of each address in `$D500-$D5FF` gives

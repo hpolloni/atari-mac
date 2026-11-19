@@ -762,8 +762,8 @@ mod tests {
     }
 
     /// A machine whose program sets a display list of mode 2 lines at `$3000` and `DMACTL` =
-    /// `$22`, and then runs `end` (3 bytes at `$C20F`).
-    fn dma_program(end: [u8; 3]) -> Machine {
+    /// `$22`, and then runs `end` (from `$C20F`).
+    fn dma_program(end: &[u8]) -> Machine {
         let mut code = vec![
             0xA9, 0x00, // LDA #$00
             0x8D, 0x02, 0xD4, // STA DLISTL
@@ -772,7 +772,7 @@ mod tests {
             0xA9, 0x22, // LDA #$22
             0x8D, 0x00, 0xD4, // STA DMACTL
         ];
-        code.extend(end);
+        code.extend_from_slice(end);
         let mut m = program_machine(&code);
         let mut list = vec![0x70, 0x70, 0x70, 0x42, 0x00, 0x40];
         list.extend([0x02; 23]);
@@ -863,7 +863,7 @@ mod tests {
     /// refresh (criterion 1).
     #[test]
     fn dma_cycles_halt_cpu() {
-        let mut m = dma_program([0x4C, 0x0F, 0xC2]); // JMP $C20F
+        let mut m = dma_program(&[0x4C, 0x0F, 0xC2]); // JMP $C20F
         m.run_frame();
         m.run_frame();
         let log = log_frame(&mut m);
@@ -883,7 +883,7 @@ mod tests {
     /// refresh, also while RDY is low (criterion 2).
     #[test]
     fn free_cycles_run_cpu() {
-        let mut m = dma_program([0x4C, 0x0F, 0xC2]); // JMP $C20F
+        let mut m = dma_program(&[0x4C, 0x0F, 0xC2]); // JMP $C20F
         m.run_frame();
         let log = log_frame(&mut m);
         assert_eq!(log.len(), 29_868, "one frame");
@@ -900,7 +900,7 @@ mod tests {
     /// (criterion 3).
     #[test]
     fn antic_never_writes() {
-        let mut m = dma_program([0x02, 0xEA, 0xEA]); // KIL
+        let mut m = dma_program(&[0x02, 0xEA, 0xEA]); // KIL
         m.run_frame();
         let before = m.mem.ram.clone();
         for _ in 0..10 {
@@ -1428,18 +1428,23 @@ mod tests {
         assert_eq!(m.mem.dma_read(0xE000), 0xAA, "RAM after the write");
     }
 
-    /// Verifies REQ-213: ANTIC DMA reads use the CPU memory map.
+    /// Verifies REQ-213: for `PORTB` pins `$FF`, `$FE`, `$FD`, `$7F` and `$7E`, with no
+    /// cartridge, an 8 KB cartridge and a 16 KB cartridge (RD4 and RD5), an ANTIC DMA read of
+    /// each address in `$0000-$CFFF` and `$D800-$FFFF` gives the CPU read value (criterion
+    /// 3).
     #[test]
     fn dma_map_equals_cpu_map() {
         for cart in [None, Some(cart_8k()), Some(cart_16k())] {
             let mut m = machine_with(cart);
-            for portb in [0xFF, 0xFE, 0xFD, 0x7F, 0x7C] {
+            // RAM with a pattern, so that RAM and ROM bytes differ.
+            for addr in 0..=0xFFFF_u16 {
+                m.poke_ram(addr, addr.to_le_bytes()[0] ^ 0x5A);
+            }
+            for portb in [0xFF, 0xFE, 0xFD, 0x7F, 0x7E] {
                 set_portb(&mut m, portb);
-                let addrs = (0x0000..=0xFFFF_u16)
-                    .step_by(0x40)
-                    .filter(|addr| !(0xD000..=0xD7FF).contains(addr));
+                let addrs = (0x0000..=0xFFFF_u16).filter(|addr| !(0xD000..=0xD7FF).contains(addr));
                 for addr in addrs {
-                    let cpu = m.peek(addr);
+                    let cpu = cpu_read(&mut m, addr);
                     assert_eq!(
                         m.mem.dma_read(addr),
                         cpu,
