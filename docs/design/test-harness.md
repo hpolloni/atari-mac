@@ -110,12 +110,28 @@ so that a case takes no more time than its size.
 ```rust
 pub fn frame_to_rgb(machine: &Machine) -> Vec<u8>;
 pub fn save_png(path: &Path, rgb: &[u8]) -> Result<(), HarnessError>;
+pub fn load_png(path: &Path) -> Result<(u32, u32, Vec<u8>), HarnessError>;
+pub struct GoldenPaths { pub reference_dir: PathBuf, pub failure_dir: PathBuf, pub update: bool }
+pub fn compare_rgb(name: &str, rgb: &[u8], paths: &GoldenPaths) -> Result<(), HarnessError>;
 pub fn compare_golden(name: &str, machine: &Machine) -> Result<(), HarnessError>;
 ```
 
-`compare_golden` compares the frame with `crates/harness/golden/<name>.png`. On a
-difference, it writes the actual frame and a difference image to `target/golden-failures/`.
-With `UPDATE_GOLDEN=1`, it writes the reference file instead (REQ-026).
+`frame_to_rgb` converts the 384 x 240 frame buffer with `palette::rgb` of the machine
+standard. `compare_golden` compares the frame with `crates/harness/golden/<name>.png`. A frame
+passes only when every pixel is equal. On a difference, it writes the actual frame and a
+difference image to `target/golden-failures/<name>-actual.png` and `<name>-diff.png`, and
+returns `HarnessError::GoldenMismatch`. In the difference image, a differing pixel is red and
+an equal pixel is the actual pixel at a quarter of its brightness. A missing reference file
+gives `HarnessError::Missing` with the update command. With `UPDATE_GOLDEN=1`, it writes the
+reference file instead and passes (REQ-026).
+
+`compare_golden` is `compare_rgb` with `GoldenPaths::from_env()` (the repository directories
+and the `UPDATE_GOLDEN` variable). The tests of the comparison itself call `compare_rgb` with
+temporary directories, so that they never change the reference files.
+
+The reference files come from this emulator (`UPDATE_GOLDEN=1 cargo test -p atari-harness
+--test golden`). The user reviews each new or changed reference image; an evidence record in
+`docs/verification/` keeps the review.
 
 ## Test suites
 
@@ -162,7 +178,7 @@ withdrawn. It writes the matrix to `target/traceability.md`. A work package sets
 | REQ-023 | `cpu_single_step.rs` `single_step_bus_cycles`. The other single-step tests in that file also use the runner, but they verify CPU requirements (`docs/design/cpu.md`). |
 | REQ-024 | `tests/harness_self_test.rs` `screen_text_has_24_rows_of_40`, `internal_to_ascii_values` |
 | REQ-025 | `tests/keyboard.rs` `basic_prints_sum`, `type_text_rejects_unknown_character` |
-| REQ-026 | `tests/golden.rs` `boot_screen_matches_golden`, `difference_writes_failure_images`, `update_mode_writes_reference` |
+| REQ-026 | `tests/golden.rs` `boot_screen_matches_golden` (the BASIC `Ready` screen in NTSC and in PAL), `golden_paths_and_reference_files`, `difference_writes_failure_images`, `wrong_size_or_missing_reference_fails`, `update_mode_writes_reference`, `frame_to_rgb_uses_palette` |
 | REQ-027 | `tests/traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests` |
 
 ## Open issues
