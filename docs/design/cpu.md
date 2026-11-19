@@ -99,7 +99,8 @@ impl Cpu {
     pub fn tick(&mut self, bus: &mut impl Bus, rdy: bool) -> Tick;
 
     /// Sets the level of the NMI input (`true` = asserted). The CPU detects the edge.
-    pub fn set_nmi(&mut self, asserted: bool);
+    /// Ends machine cycle `c`: latches the NMI edge and makes the poll of cycle `c` (OI-017).
+    pub fn end_cycle(&mut self, nmi_level: bool);
 
     /// Sets the level of the IRQ input (`true` = asserted).
     pub fn set_irq(&mut self, asserted: bool);
@@ -114,10 +115,6 @@ impl Cpu {
     pub const fn registers(&self) -> &Registers;
     pub const fn registers_mut(&mut self) -> &mut Registers;
     pub const fn is_jammed(&self) -> bool;
-    /// `true` if the last tick was the first cycle of an IRQ sequence or the opcode fetch
-    /// of a `BRK`. `false` for an NMI sequence and for a stalled tick. The machine uses it
-    /// to call `Antic::irq_sequence_started` (REQ-335). Added at the WP-5 merge.
-    pub const fn irq_sequence_started(&self) -> bool;
 }
 ```
 
@@ -126,10 +123,14 @@ impl Cpu {
 The machine calls the CPU in this order in each machine cycle `c` (see
 [system.md](system.md), "Timing"):
 
-1. `set_nmi` and `set_irq` with the line levels for cycle `c`. "The line is asserted in cycle
-   N" in the requirements means that the machine passes `true` before the tick of cycle N.
+1. `set_irq` with the IRQ line level for cycle `c`. "The IRQ line is asserted in cycle N"
+   in the requirements means that the machine passes `true` before the tick of cycle N.
 2. `tick(bus, rdy)` if ANTIC does not use the bus in cycle `c`. If ANTIC uses the bus, the
    machine does not call `tick` (REQ-125).
+3. `end_cycle(nmi_level)` in every cycle, also in a halted cycle. "The NMI line is asserted in
+   cycle N" means that the machine passes `true` to `end_cycle` of cycle N. The NMI edge
+   latch, the copy to `nmi_pending` and the interrupt poll of cycle `c` occur in
+   `end_cycle`, after the bus access (OI-017, HRM 3.4 Figure 2).
 
 `registers_mut` is permitted only at a boundary. The SingleStepTests harness uses it to load
 the initial state. It then calls `tick` exactly once for each entry of the `cycles` list.
@@ -145,8 +146,8 @@ the initial state. It then calls `tick` exactly once for each entry of the `cycl
 | `addr` | `u16` | 0 | Effective address under construction. |
 | `base_hi` | `u8` | 0 | High byte of the base address, for page cross and `SHA`/`SHX`/`SHY`/`SHS`. |
 | `data` | `u8` | 0 | Operand or RMW value. |
-| `nmi_level` | `bool` | false | Last level from `set_nmi`. |
-| `nmi_edge` | `bool` | false | Edge latched by `set_nmi`, not yet sampled. |
+| `nmi_level` | `bool` | false | Last level from `end_cycle`. |
+| `nmi_edge` | `bool` | false | Edge latched by `end_cycle`, not yet sampled. |
 | `nmi_pending` | `bool` | false | Edge sampled in a tick, not yet serviced. |
 | `irq_level` | `bool` | false | Level from `set_irq`. |
 | `poll` | `bool` | false | Result of the interrupt poll of this instruction. |
@@ -233,12 +234,12 @@ the state. `step` returns `Step::Jammed` after one tick.
 
 The CPU uses two stages for NMI:
 
-1. `set_nmi(true)` after `set_nmi(false)` sets `nmi_edge`. This also occurs in a halted
+1. `end_cycle(true)` after `end_cycle(false)` sets `nmi_edge`. This also occurs in a halted
    cycle, so no edge is lost (REQ-127).
-2. At the end of each tick that runs (`Tick::Ran`), the CPU copies `nmi_edge` to
+2. In `end_cycle` of a cycle whose tick ran (`Tick::Ran`), the CPU copies `nmi_edge` to
    `nmi_pending` and clears `nmi_edge`.
 
-The CPU computes the interrupt request at the end of each tick that runs:
+The CPU computes the interrupt request in `end_cycle` of each cycle whose tick ran:
 `req = nmi_pending || (irq_level && !I)`. `I` is the value after the bus access of that
 tick. A tick with `Tick::Stalled` and a halted cycle make no poll (REQ-127).
 
@@ -322,7 +323,8 @@ the cycle counter and the scan line position.
 
 | Event | Cycle |
 | --- | --- |
-| Line set by `set_nmi`/`set_irq` | Before the tick of cycle N |
+| IRQ line set by `set_irq` | Before the tick of cycle N |
+| NMI level passed to `end_cycle` | After the tick (or the halted cycle) N |
 | Poll result for an instruction | End of the second-to-last cycle of the instruction |
 | First cycle of an interrupt sequence | First boundary at or after N+2 (unhalted cycles) |
 | Vector selection in a sequence | Cycle 5 of the sequence |

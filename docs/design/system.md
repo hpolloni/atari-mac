@@ -334,12 +334,15 @@ One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
 2. `pokey.set_serial_in(sio.data_in_level(c))`, then `pokey.tick()`. POKEY runs before the
    CPU access, so a POKEY register access in cycle `c` sees the events of cycle `c`
    (`pokey.md`, call contract).
-3. `cpu.set_nmi(out.nmi)` and `cpu.set_irq(pokey.irq() || pia.irq())`. The POKEY level is
-   the level of cycle `c`. The PIA level is the level from the end of cycle `c - 1`.
+3. `cpu.set_irq(pokey.irq() || pia.irq())`. The POKEY level is the level of cycle `c`. The
+   PIA level is the level from the end of cycle `c - 1`.
 4. If `out.halt` is false: `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
    `portb_pins`. A PIA write updates `portb_pins` at the end of the access. A GTIA write
    also calls `pokey.set_speaker(!gtia.speaker())`: a `CONSOL` bit written as 1 pulls its
    line down (HRM 6.11), so the speaker line is high when bit 3 was written as 0.
+4a. `cpu.end_cycle(antic.nmi_level())`, also when `out.halt` is true. ANTIC computes the NMI
+   level of cycle `c` after the CPU access, so a `NMIEN` write in cycle `c` is included
+   (OI-017). The CPU latches the NMI edge and makes its interrupt poll for cycle `c` here.
 5. The machine finds the data bus value of the cycle (`antic.md`, "Call order", step 3),
    then calls `antic.end_cycle(data_bus)` and `gtia.clock(&out, data_bus)`.
 6. `pia.tick()`. Then each byte from `pokey.take_serial_byte()` goes to `sio.host_byte`. If

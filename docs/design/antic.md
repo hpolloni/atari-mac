@@ -107,8 +107,8 @@ impl Antic {
     /// Ends the machine cycle. `data_bus` is the value on the data bus in this cycle.
     pub fn end_cycle(&mut self, data_bus: u8);
 
-    /// The CPU started an IRQ or BRK interrupt sequence in this cycle (REQ-335).
-    pub fn irq_sequence_started(&mut self);
+    /// The NMI level of the current cycle, after the CPU access of the cycle (OI-017).
+    pub fn nmi_level(&self) -> bool;
 
     /// The scan line of the next `tick`, 0..lines_per_frame.
     pub const fn scanline(&self) -> u32;
@@ -140,7 +140,7 @@ The machine calls ANTIC exactly once per machine cycle, in this order. `L` is th
    - Else the floating bus value (a system decision, REQ-200 to REQ-299).
 4. `antic.end_cycle(data_bus);`
 5. `gtia.clock(&out, data_bus);` (see "Interface with GTIA").
-6. If the CPU started an IRQ or BRK sequence in this cycle, the machine calls `antic.irq_sequence_started()` before the next `tick`.
+6. After the CPU access, the machine passes `antic.nmi_level()` to `cpu.end_cycle` (`system.md`, step 4a).
 
 ### Register write timing
 
@@ -167,7 +167,7 @@ The machine must make these changes to the draft code in `machine.rs`:
 2. During a RDY wait, the machine repeats the CPU read on the bus in each cycle. This matters only for read-sensitive addresses (HRM 4.9, Bus activity during WSYNC). This is Could behavior.
 3. `Machine::reset_key` calls `antic.reset()`. On the XL/XE, the RESET key also resets ANTIC (HRM 4.1).
 4. `Machine::cold_reset` calls `antic.reset()`. It does not set the scan line and cycle to 0. `Antic::new` sets them to 0 (REQ-303).
-5. The NMI edge in `out.nmi` goes to the CPU in the same cycle. The CPU starts the NMI sequence at the first instruction boundary after that cycle (REQ-334).
+5. After the CPU access of cycle c, the machine passes `antic.nmi_level()` to the CPU as the NMI level of cycle c (OI-017). `out.nmi` has the same value as the level of the previous `tick`, for tests and tracing only.
 
 ### Interface with GTIA
 
@@ -230,7 +230,7 @@ All state is in `struct Antic`. Sizes are the sizes in hardware. The Rust type c
 | `refresh_row` | 8 bits | 0 | Kept | Refresh row counter |
 | `wsync_start`, `wsync_end` | u64 each | 0 | Kept | RDY-low window, in `total_cycles` |
 | `dli_this_line` | 1 bit | 0 | Kept | Result of the DLI check on cycle 5 |
-| `nmi_edge_at` | cycle | none | Cleared | Cycle where `out.nmi` is set |
+| `nmien_prev` | 2 bits | 0 | Cleared | `NMIEN` bits 6-7 as written by the previous cycles, for `en_by(6)` and `en_by(7)` |
 | `nmi_lost` | 1 bit | 0 | Kept | IRQ started on cycle 4 of this line (REQ-335) |
 | `virtual_pending` | 1 bit + kind | none | Kept | A virtual fetch waits for `end_cycle` |
 
@@ -402,12 +402,14 @@ In each cycle, at most one DMA cycle occurs, with this priority:
 ### NMIs (REQ-331 to REQ-335)
 
 - In `tick` for cycle 7: if `dli_this_line`, ANTIC sets `NMIST` bit 7 and clears bit 6. On scan line 248, ANTIC sets bit 6 and clears bit 7 (REQ-331).
-- In `tick` for cycle 8: ANTIC makes an NMI request if the matching `NMIEN` bit is set. This uses writes up to cycle 7.
-- In `tick` for cycle 9: if the `NMIEN` bit is still set (writes up to cycle 8), ANTIC sets `out.nmi`. If the `NMIEN` bit was set by a write on cycle 7, ANTIC sets `out.nmi` in `tick` for cycle 10 instead (REQ-334).
-- A write to `NMIRES` clears `nmist`. It does not cancel a request (REQ-334).
-- If `irq_sequence_started` occurs on cycle 4, ANTIC does not set `out.nmi` on that scan line. `NMIST` still changes (REQ-335).
+- The NMI level of cycle c is computed after the CPU access of cycle c (OI-017). R is true if the scan line has a DLI (`dli_this_line`) or is scan line 248 (VBI). `en_by(k)` is the matching `NMIEN` bit as written by cycle k, and `en_now` includes a write in cycle c:
+  - `nmi(8) = R && en_by(6) && en_now`
+  - `nmi(9) = R && en_by(7) && en_now`
+  - false on all other cycles.
+- A write to `NMIRES` clears `nmist`. It does not change the level (REQ-334).
+- The lost NMI of REQ-335 is the CPU rule of REQ-122. ANTIC has no separate mechanism.
 
-The CPU contract: an `out.nmi` in cycle `t` lets the CPU start the 7-cycle NMI sequence at the first instruction boundary at or after cycle `t + 1`. This gives the earliest start on cycle 10 (HRM 4.8) and cycle 11 for an enable on cycle 7. The CPU design must agree.
+The CPU contract: the CPU samples the NMI level at the end of each cycle (`cpu.md`, call order). A level that is first true in cycle 8 gives the earliest sequence on cycle 10, and an enable on cycle 7 gives the earliest sequence on cycle 11 (HRM 4.8, HRM 3.4 Figure 2).
 
 ### WSYNC (REQ-336, REQ-337)
 
@@ -450,8 +452,8 @@ Events in one scan line. "Tick N" is the `tick` call for cycle N. A write "by cy
 | 6 | DLI check (VSCROL writes by cycle 5) | REQ-329, REQ-332 |
 | 6, 7 | LMS or jump address fetch | REQ-321, REQ-323 |
 | 7 | `NMIST` bit set (DLI or VBI) | REQ-331, REQ-334 |
-| 8 | NMI request (NMIEN writes by cycle 7) | REQ-334 |
-| 9 | Wide start event (`+ hscrol >> 1`). `out.nmi` (10 if NMIEN was set on cycle 7). | REQ-309, REQ-334 |
+| 8 | NMI level (enable by cycle 6, not disabled by cycle 8) | REQ-334 |
+| 9 | Wide start event (`+ hscrol >> 1`). NMI level (enable by cycle 7). | REQ-309, REQ-334 |
 | 10 / 12 | Wide: first name / bitmap fetch | REQ-309 |
 | 17 | Normal start event | REQ-309 |
 | 18 / 20 | Normal: first name / bitmap fetch | REQ-309 |
@@ -525,17 +527,17 @@ Machine unit tests are in `crates/atari-core/src/machine.rs`. They are necessary
 | REQ-332 | `antic.rs` `dli_on_last_line_of_mode_line` (1), `dli_masked_by_nmien` (2), `dli_on_blank_line` (3), `dli_on_shortened_line` (4), `dli_on_jump` (5) |
 | REQ-333 | `antic.rs` `vbi_on_line_248` (1), `vbi_masked_by_nmien` (2); `crates/harness/tests/antic_nmi.rs` `os_vbi_increments_rtclok` (3) |
 | REQ-334 | `antic.rs` `nmist_visible_from_cycle_7` (1), `nmien_enable_on_7_delays_nmi` (3), `nmien_enable_on_8_too_late` (4), `nmien_disable_on_8_prevents` (5), `nmires_does_not_cancel` (6); `crates/harness/tests/antic_nmi.rs` `nmi_sequence_start_cycles` (2, 3); `crates/harness/tests/antic_cpu.rs` `nmi_start_cycles_with_real_cpu` (joint ANTIC and CPU test, OI-017) |
-| REQ-335 | `antic.rs` `irq_on_cycle_4_loses_nmi` (3); `crates/harness/tests/antic_nmi.rs` `brk_on_cycle_4_skips_vbi_handler` (1), `brk_on_cycle_3_or_5_keeps_vbi_handler` (2); `cpu/tests.rs` `irq_sequence_start_signal`; `machine.rs` `brk_on_cycle_4_loses_vbi_nmi` |
+| REQ-335 | `crates/harness/tests/antic_nmi.rs` `brk_on_cycle_4_skips_vbi_handler` (1), `brk_on_cycle_3_or_5_keeps_vbi_handler` (2); `machine.rs` `brk_on_cycle_4_loses_vbi_nmi` |
 | REQ-336 | `antic.rs` `wsync_rdy_window` (5), `halt_on_cycles_105_106_setups` (supports 3, 4); `crates/harness/tests/antic_wsync.rs` `wsync_next_instruction_on_104` (1), `wsync_blocked_next_cycle_starts_on_105` (2), `wsync_delayed_by_playfield_105` (3), `wsync_delayed_by_refresh_105` (4), `wsync_delayed_by_refresh_106` (4) |
 | REQ-337 | `antic.rs` `wsync_write_on_104_waits_next_line` (supports 1), `wsync_windows_join` (supports 2, 3); `crates/harness/tests/antic_wsync.rs` `wsync_write_on_104_next_line` (1), `inc_wsync_ignores_dma` (2), `inc_wsync_on_103_104` (3), `wsync_write_on_113` (4) |
 | REQ-338 | `antic.rs` `vcount_changes_on_cycle_111` (1), `vcount_line_7_reads_04` (2), `vcount_7c_for_13_cycles` (3), `vcount_end_of_frame_anomaly_ntsc`, `vcount_end_of_frame_anomaly_pal` (4), `vcount_range` (5) |
 | REQ-339 | `antic.rs` `missile_dma_on_cycle_0` (1), `player_dma_forces_missile_dma` (2), `player_dma_cycles_2_to_5` (3), `no_pm_dma_in_vblank` (4), `pm_dma_disable_two_cycles_ahead` (5), `pm_dma_enable_two_cycles_ahead` (6), `pm_dma_data_on_bus` (7) |
 | REQ-340 | `antic.rs` `pm_address_two_line` (1), `pm_address_one_line` (2), `pm_two_line_repeats` (3), `pmbase_bit2_latent` (4) |
-| REQ-341 | `antic.rs` `refresh_cycles_on_blank_line` (1), `refresh_in_mode_2_first_line` (2), `refresh_narrow_mode_2_two_cycles` (3), `refresh_no_memory_read` (4) |
+| REQ-341 | `antic.rs` `refresh_cycles_on_blank_line` (1), `refresh_in_mode_2_first_line` (2), `refresh_narrow_mode_2_two_cycles` (3), `refresh_no_memory_read` (4), `refresh_chart_cases` (5) |
 | REQ-343 | `antic.rs` `line_buffer_never_cleared` (1), `line_buffer_partial_load_keeps_tail` (2), `line_buffer_replay_without_dma` (3), `line_buffer_reinterpreted_by_mode` (4), `line_buffer_follows_left_border` (5) |
-| REQ-344 | `antic.rs` `width_change_narrow_to_normal_gives_144` (1), `late_start_ignored` (2), `early_start_after_deadline_no_playfield` (3), `early_stop_extends_to_wide` (4), `playfield_off_mid_line_counts_on` (5), `playfield_off_before_start_no_change` (6), `hscrol_bit0_mid_line` (7), `invert_state_kept_while_dma_off` (8, after the decision in REQ-344 Notes) |
+| REQ-344 | `antic.rs` `width_change_narrow_to_normal_gives_144` (1), `late_start_ignored` (2), `early_start_after_deadline_no_playfield` (3), `early_stop_extends_to_wide` (4), `playfield_off_mid_line_counts_on` (5), `playfield_off_before_start_no_change` (6), `hscrol_bit0_mid_line` (7) |
 | REQ-345 | `antic.rs` `abnormal_dma_hscrol_0_to_4_mode_8` (1), `overlap_uses_address_and` (2), `blank_line_clears_dma_clock` (3), `mode_8_after_scrolled_mode_2_bug` (4), `narrow_width_no_mode_8_bug` (5), `line_buffer_counter_63_states` (6) |
-| REQ-346 | `antic.rs` `hires_ir_at_248_opens_border` (1), `hires_bug_corrupts_vsync_code` (1), `hires_bug_pal_vsync` (2), `jvb_at_248_no_bug` (3), `hires_bug_ends_when_playfield_off` (4), `hires_ir_with_playfield_off_no_bug` (5) |
+| REQ-346 | `antic.rs` `hires_ir_at_248_opens_border` (1), `hires_bug_corrupts_vsync_code` (1), `hires_bug_pal_vsync` (2), `jvb_at_248_no_bug` (3), `hires_bug_ends_when_playfield_off` (4), `hires_ir_with_playfield_off_no_bug` (5), `hires_bug_region_follows_width` (6) |
 | REQ-347 | `antic.rs` `virtual_fetch_loads_data_bus` (1), `virtual_fetch_with_refresh_uses_data_bus` (3); `machine.rs` `virtual_fetch_during_wsync_reads_cpu_byte` (2) |
 
 The numbers in parentheses are the acceptance criteria that the test checks.
@@ -604,14 +606,14 @@ These tests are removed, because no acceptance criterion needs them: `crates/har
 3. **PAL vertical sync lines.** HRM 4.6 says 275-278, HRM 6.2 says 275-277. This design uses 275-277.
 4. **VSCROL end deadline.** HRM 4.7 says cycle 108, HRM 14.6 says cycle 109. This design uses 108.
 5. **Playfield DMA on cycle 105.** HRM 4.9 and 4.14 allow cycle 105. HRM 4.12 says cycles 105-111 and 0 are suppressed for abnormal DMA. This design allows real DMA up to cycle 105. Abnormal DMA is suppressed on cycles 105-111 and 0 (OI-018, decided).
-6. **NMI contract with the CPU.** This design sets `out.nmi` on cycle 9 (or 10). The CPU then starts the sequence at the first instruction boundary at or after the next cycle. The CPU design (REQ-100 to REQ-199) must accept this contract, including the IRQ takeover on cycles 5-9.
+6. **NMI contract with the CPU.** Resolved by OI-017: the CPU samples the NMI level after its bus access, and the level includes `NMIEN` writes of the same cycle.
 7. **DMA reads of I/O addresses.** The HRM does not say what ANTIC DMA reads from `$D000-$D7FF`. The draft `DmaMemory` returns `$FF`. The system design must decide.
 8. **Floating bus value.** The data bus value on refresh cycles and undriven cycles is a system decision (HRM 2.3). XL and some XE machines have pull-ups; others float.
 9. **Abnormal DMA details.** The ring model is from HRM 4.12. The behavior of bits outside the ring after a mode change, and the shift clock in mode 8, need tests against Altirra.
 10. **Character data fetch after the end of the line.** With a wide fetch and large `HSCROL`, a name on cycle 111 has its data request on cycle 114. This design drops requests that fall past cycle 113. The HRM does not describe this case.
 11. **Refresh drop rule.** The HRM does not say which request ANTIC drops when two refresh requests are blocked. This design keeps the waiting request.
 12. **PENH phase.** `PENH = 2 × cycle` is a project decision.
-13. **Hi-res bug region.** HRM 6.2 says that ANTIC sets AN2 in the "active region" of the vertical blank scan lines. It does not give the first and last position. This design uses `$22-$DD`. REQ-346 checks only position `$80`.
-14. **Name and invert state while playfield DMA is off.** HRM 4.4 says that ANTIC uses the names in the line buffer and the last invert/blink state. HRM 4.11 says that the line buffer loads the data bus value at each fetch while DMA is off. A decision is necessary before REQ-344 criterion 8 can have exact values.
+13. **Hi-res bug region.** Resolved by OI-015: the playfield positions of the current width (REQ-346 criterion 6).
+14. **Name and invert state while playfield DMA is off.** Resolved by OI-014 for the line buffer. The codes of the removed REQ-344 criterion 8 need a comparison with Altirra.
 15. **DMA clock bit order.** REQ-345 criterion 1 uses the bit order of the HRM 4.12 table. `debug_state` must give the DMA clock in that bit order. The mapping from the ring model to that bit order is not yet defined.
-16. **Derived DMA cycles.** Some criteria use cycles that follow from the HRM start cycles, rates and the refresh rule, but that the text copy of the HRM does not state (for example refresh on cycle 98 on the first scan line of a normal mode 2 line, REQ-341). They must be checked against Altirra test results.
+16. **Derived DMA cycles.** Resolved by OI-006: the HRM 4.14 charts confirm the derived cycles.
