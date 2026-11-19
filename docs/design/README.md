@@ -14,6 +14,7 @@ it covers.
 | [gtia.md](gtia.md) | GTIA and palette | REQ-400 to REQ-499 |
 | [pokey.md](pokey.md) | POKEY | REQ-500 to REQ-599 |
 | [media.md](media.md) | Cartridges, executables, SIO, disk drives | REQ-600 to REQ-699 |
+| [spec-gates.md](spec-gates.md) | Specification gates and traceability | REQ-027, REQ-043 to REQ-055 |
 
 ## Template
 
