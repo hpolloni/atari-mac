@@ -322,4 +322,55 @@ mod system {
         assert_eq!(pixel(&m, row, 0x34), [0x94; 2], "byte 1 is $00: code %100");
         assert_eq!(pixel(&m, row - 1, 0x30), [0x02; 2], "the blank line above");
     }
+
+    /// Fails the test: the test is a planned stub that a package replaces with the real test
+    /// (`docs/design/spec-gates.md`, "Planned test stubs").
+    fn planned() {
+        panic!("planned test: a package replaces this stub with the real test");
+    }
+
+    /// Verifies REQ-407: with `COLBK` = `$02`, `COLPF0-3` = `$14`, `$26`, `$38`, `$4A`,
+    /// `PRIOR` = `$00`, `HSCROL` = 0 and an ANTIC mode E line at normal width with first byte
+    /// `$1B`, HPOS `$30`, `$31`, `$32`, `$33` show `$02`, `$14`, `$26`, `$38` (criterion 2).
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn mode_e_colors() {
+        planned();
+    }
+
+    /// Verifies REQ-414: with one-line P/M DMA in `DMACTL`, `GRACTL` = `$03` and player 0 data
+    /// in memory that is `$80` for even scanlines and `$40` for odd scanlines, each even row
+    /// shows `COLPM0` at HPOS `$80` only and each odd row at HPOS `$81` only (criterion 6).
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn pm_dma_one_line_resolution() {
+        planned();
+    }
+
+    /// Verifies REQ-428: ANTIC mode F and mode E lines with `PRIOR` = `$40`: a mode F first
+    /// byte `$1F` shows `$01` at HPOS `$30-$31` and `$0F` at HPOS `$32-$33`, and a mode E line
+    /// of `$FF` bytes shows `$0A` at HPOS `$30-$CF` (criteria 1 and 2).
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn gtia_mode_pixels_from_antic() {
+        planned();
+    }
+
+    /// Verifies REQ-434: a 6502 program writes `$46` to `COLBK` (old value `$02`) on machine
+    /// cycle 30 of a scanline, and HPOS `$3A` of that row shows `$02` and HPOS `$3B` shows
+    /// `$46` (criterion 7, on the full machine).
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn mid_line_colbk_change() {
+        planned();
+    }
+
+    /// Verifies REQ-438: after boot to the BASIC prompt with all POKEY channels silent, the
+    /// audio samples of the 3 frames in which `type_text("A")` presses the key contain at
+    /// least two different values (criterion 3).
+    #[test]
+    #[ignore = "planned: SLICE-03"]
+    fn key_click_makes_audio() {
+        planned();
+    }
 }

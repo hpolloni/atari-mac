@@ -19,6 +19,8 @@ pub mod cli;
 pub mod error;
 pub mod frontend;
 pub mod keymap;
+#[cfg(test)]
+mod planned;
 pub mod window;
 
 use std::ffi::OsString;

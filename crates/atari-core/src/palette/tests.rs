@@ -1,6 +1,7 @@
 //! Palette unit tests (`docs/design/gtia.md`, "Test plan").
 
 use super::{PAL_ANGLES, PaletteParams, build, rgb, table, unclamped};
+use crate::planned::planned;
 use crate::timing::VideoStandard;
 
 /// The R, G and B bytes of a color.
@@ -138,4 +139,48 @@ fn pal_hue_1_equals_hue_15() {
             "luminance {lum}"
         );
     }
+}
+
+/// Verifies REQ-411: `artifact_ntsc_row` on row A (`$0E`, `$00`, ...) and on row B (`$00`,
+/// `$0E`, ...) gives mean colors (columns 16-367) with `max(R, G, B) - min(R, G, B)` of 32 or
+/// more, and the two mean colors differ by 32 or more in at least one channel (criteria 2 and
+/// 3).
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn artifact_alternating_rows_are_colored() {
+    planned();
+}
+
+/// Verifies REQ-411: the luma `0.299 R + 0.587 G + 0.114 B` of the mean color of row A and of
+/// row B after `artifact_ntsc_row` is 119 ± 34 (criterion 4).
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn artifact_luma_is_average() {
+    planned();
+}
+
+/// Verifies REQ-411: `artifact_ntsc_row` on a row of 384 bytes `$94` gives
+/// `rgb(NTSC, $94)` in columns 16-367, with a tolerance of 2 for each channel (criterion 5).
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn artifact_solid_row_unchanged() {
+    planned();
+}
+
+/// Verifies REQ-412: `pal_blend_row` gives `Y2 + ((RGB1 - Y1) + (RGB2 - Y2)) / 2` for each
+/// channel of each pixel of rows 1-239, clamped to 0-1 and converted with `round(255 x
+/// value)` (criterion 2).
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn pal_blend_formula() {
+    planned();
+}
+
+/// Verifies REQ-412: `pal_blend_row` gives (167, 116, 159) for `$08` above `$48` and for `$48`
+/// above `$08`, and (154, 133, 103) for `$48` above `$C8`, with a tolerance of 1 for each
+/// channel (criteria 3-5).
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn pal_blend_reference_rows() {
+    planned();
 }

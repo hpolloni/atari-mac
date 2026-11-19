@@ -293,6 +293,7 @@ mod tests {
     use super::{Flow, Frontend, Pacer, load_machine, render, window_size, window_title};
     use crate::cli::Options;
     use crate::error::FrontendError;
+    use crate::planned::planned;
 
     fn machine() -> Machine {
         Machine::new(MachineConfig {
@@ -514,5 +515,14 @@ mod tests {
         let late = now + period * 10;
         assert_eq!(pacer.wait(late), Duration::ZERO, "late frame");
         assert_eq!(pacer.wait(late), period, "pacing restarted");
+    }
+
+    /// Verifies REQ-411, REQ-412: converts a frame with the default frontend settings and
+    /// compares each pixel with `palette::rgb` (REQ-411 and REQ-412 criterion 1: the display
+    /// filters are off by default).
+    #[test]
+    #[ignore = "planned: SLICE-02"]
+    fn display_filters_off_by_default() {
+        planned();
     }
 }
