@@ -287,7 +287,7 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 
 | Requirement | Test |
 | --- | --- |
-| REQ-400 | `crates/harness/tests/gtia.rs` `registers_mirror_at_d020_d0ff` |
+| REQ-400 | `crates/harness/tests/gtia.rs` `registers_mirror_at_d020_d0ff`; `gtia.rs` `registers_mirror_every_32_bytes` (unit test of the `reg & 0x1F` decode) |
 | REQ-401 | `gtia.rs` `reads_use_read_registers`, `writes_use_write_registers`, `unused_read_bits_are_zero`, `unassigned_reads_return_0f`, `reads_have_no_side_effects` |
 | REQ-402 | `gtia.rs` `power_on_state_is_zero`, `power_on_trigger_latches_clear`; `crates/harness/tests/gtia.rs` `reset_key_keeps_gtia_state` |
 | REQ-403 | `gtia.rs` `pal_register_ntsc_0f_pal_01` |

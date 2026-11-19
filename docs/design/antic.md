@@ -506,7 +506,7 @@ Machine unit tests are in `crates/atari-core/src/machine.rs`. They are necessary
 | REQ-307 | `antic.rs` `hires_mode_sends_pair_codes` (1), `hires_zero_pair_is_100` (2), `lores_background_is_000` (3), `border_is_background` (4), `mode_4_bit7_selects_pf3` (5) |
 | REQ-308 | `antic.rs` `narrow_playfield_at_40_to_bf` (1), `normal_playfield_at_30_to_cf` (2), `wide_playfield_clipped_at_22_to_2b` (3), `playfield_off_shows_background` (4) |
 | REQ-309 | `antic.rs` `dma_cycles_mode_e_normal` (1), `dma_cycles_mode_2_normal_first_line` (2), `dma_cycles_mode_2_later_lines` (3), `dma_cycles_mode_8_narrow` (4), `dma_cycles_all_modes_and_widths` (5), `memscan_counts_fetches` (6) |
-| REQ-310 | `antic.rs` `dma_cycles_set_halt` (1), `dmactl_zero_halts_only_refresh` (3), `blank_line_halt_map` (4); `crates/harness/tests/antic_dma.rs` `cpu_write_waits_for_dma` (2) |
+| REQ-310 | `antic.rs` `dma_cycles_set_halt` (1), `dmactl_zero_halts_only_refresh` (3), `blank_line_halt_map` (4); `crates/harness/tests/antic_dma.rs` `cpu_write_waits_for_dma` (2); `antic.rs` `dma_cycles_all_modes_and_widths` |
 | REQ-311 | `antic.rs` `fetch_on_cycle_106_is_virtual` (1), `wide_mode_e_advances_48` (2), `virtual_fetch_loads_data_bus` (3), `fetch_on_cycle_105_halts` (4) |
 | REQ-312 | `antic.rs` `display_list_of_24_mode_2_lines` (1), `mode_heights_match_table` (2), `mapped_mode_fetches_first_line_only` (3), `mode_5_fetches_font_every_line` (4), `mode_a_uses_line_buffer` (5), `row_counter_0_to_h_minus_1` (6) |
 | REQ-313 | `antic.rs` `mode_2_3_font_bit_order` (1), `mode_2_forty_characters` (2), `mode_2_font_address` (3), `mode_3_lower_rows_blank` (4), `mode_3_descender_rows` (5), `mode_3_blank_rows_inverted` (6) |
@@ -519,7 +519,7 @@ Machine unit tests are in `crates/atari-core/src/machine.rs`. They are necessary
 | REQ-320 | `antic.rs` `blank_line_counts_1_to_8` (1), `blank_line_has_no_playfield_dma` (2), `blank_line_ignores_lms_and_scroll_bits` (3), `blank_line_dli` (4), `blank_line_ends_scroll_region` (5) |
 | REQ-321 | `antic.rs` `jump_loads_dlist` (1), `jump_shows_one_blank_line` (2), `jump_ignores_scroll_bits` (3), `jump_crosses_1k` (4), `jump_dli` (5) |
 | REQ-322 | `antic.rs` `jvb_stops_fetch_until_vblank` (1), `jvb_loads_address_on_first_line` (2), `jvb_restarts_on_line_8` (3), `jvb_dlist_write_replaces_address` (4), `jvb_with_dli_fires_every_line` (5), `jvb_after_240_lines_alternates_frames` (6) |
-| REQ-323 | `antic.rs` `lms_loads_memscan` (1), `no_lms_continues_memscan` (2), `lms_adds_no_blank_line` (3), `lms_address_on_cycles_6_7` (4) |
+| REQ-323 | `antic.rs` `lms_loads_memscan` (1), `no_lms_continues_memscan` (2), `lms_adds_no_blank_line` (3), `lms_address_on_cycles_6_7` (4); `antic.rs` `address_fetch_on_cycles_6_7` |
 | REQ-324 | `antic.rs` `dlist_wraps_in_1k_block` (1), `dlist_wraps_inside_lms` (2), `jump_crosses_1k` (3) |
 | REQ-325 | `antic.rs` `memscan_wraps_in_4k_block` (1, 2), `lms_loads_16_bits` (3) |
 | REQ-326 | `antic.rs` `dl_dma_off_keeps_address` (1), `dl_dma_off_repeats_ir` (2), `dl_dma_off_repeated_dli` (3), `dl_dma_off_after_jvb_is_blank` (4), `dl_dma_enable_on_113_works` (5), `dl_dma_enable_on_0_too_late` (6) |
