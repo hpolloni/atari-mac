@@ -5,6 +5,6 @@
 /lcov.info
 .DS_Store
 /roms/*.rom
-/test-data/
+/test-data
 /reference/
 /.claude/worktrees/
