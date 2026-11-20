@@ -34,18 +34,18 @@ These items are out of scope. A requirement must not depend on them.
 
 ## ID ranges
 
-| Range | Area | `area` value | Main source |
+| Range of `REQ-NNN` | Area | `area` value | Main source |
 | --- | --- | --- | --- |
-| REQ-001 to REQ-019 | Product and frontend | `product`, `frontend` | This project |
-| REQ-020 to REQ-039 | Test harness | `test-harness` | This project |
-| REQ-040 to number 079 | Quality | `quality` | This project |
-| REQ-080 to REQ-099 | Product and frontend (continued, since 2026-11-19) | `product`, `frontend` | This project |
-| REQ-100 to REQ-199 | CPU (6502C) | `cpu` | HRM chapter 3 |
-| REQ-200 to REQ-299 | System: clocks, memory map, bank switching, reset, PIA | `system` | HRM chapter 2 |
-| REQ-300 to REQ-399 | ANTIC | `antic` | HRM chapter 4 |
-| REQ-400 to REQ-499 | GTIA, color palette, joystick and paddle inputs | `gtia` | HRM chapters 6, 7.1, 7.2 |
-| REQ-500 to REQ-599 | POKEY: audio, timers, keyboard, interrupts, serial port | `pokey` | HRM chapter 5 |
-| REQ-600 to REQ-699 | Media: cartridges, executables, SIO bus, disk drives | `media` | HRM chapters 8.1, 9.1, 10 |
+| 001 to 019 | Product and frontend | `product`, `frontend` | This project |
+| 020 to 039 | Test harness | `test-harness` | This project |
+| 040 to 079 | Quality | `quality` | This project |
+| 080 to 099 | Product and frontend (continued, since 2026-11-19) | `product`, `frontend` | This project |
+| 100 to 199 | CPU (6502C) | `cpu` | HRM chapter 3 |
+| 200 to 299 | System: clocks, memory map, bank switching, reset, PIA | `system` | HRM chapter 2 |
+| 300 to 399 | ANTIC | `antic` | HRM chapter 4 |
+| 400 to 499 | GTIA, color palette, joystick and paddle inputs | `gtia` | HRM chapters 6, 7.1, 7.2 |
+| 500 to 599 | POKEY: audio, timers, keyboard, interrupts, serial port | `pokey` | HRM chapter 5 |
+| 600 to 699 | Media: cartridges, executables, SIO bus, disk drives | `media` | HRM chapters 8.1, 9.1, 10 |
 
 ## Priority
 

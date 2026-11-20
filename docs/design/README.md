@@ -4,16 +4,16 @@ This directory holds the design documents. A design document tells how the emula
 satisfies the requirements in `docs/spec/`. Each design document lists the requirements that
 it covers.
 
-| Document | Area | Requirements |
+| Document | Area | Range of `REQ-NNN` |
 | --- | --- | --- |
-| [architecture.md](architecture.md) | Crates, modules, data flow, scheduling | REQ-001 to REQ-099 |
-| [test-harness.md](test-harness.md) | Test harness and test data | REQ-001 to REQ-099 |
-| [cpu.md](cpu.md) | CPU | REQ-100 to REQ-199 |
-| [system.md](system.md) | Memory map, bank switching, reset, PIA | REQ-200 to REQ-299 |
-| [antic.md](antic.md) | ANTIC | REQ-300 to REQ-399 |
-| [gtia.md](gtia.md) | GTIA and palette | REQ-400 to REQ-499 |
-| [pokey.md](pokey.md) | POKEY | REQ-500 to REQ-599 |
-| [media.md](media.md) | Cartridges, executables, SIO, disk drives | REQ-600 to REQ-699 |
+| [architecture.md](architecture.md) | Crates, modules, data flow, scheduling | 001 to 099 |
+| [test-harness.md](test-harness.md) | Test harness and test data | 001 to 099 |
+| [cpu.md](cpu.md) | CPU | 100 to 199 |
+| [system.md](system.md) | Memory map, bank switching, reset, PIA | 200 to 299 |
+| [antic.md](antic.md) | ANTIC | 300 to 399 |
+| [gtia.md](gtia.md) | GTIA and palette | 400 to 499 |
+| [pokey.md](pokey.md) | POKEY | 500 to 599 |
+| [media.md](media.md) | Cartridges, executables, SIO, disk drives | 600 to 699 |
 | [spec-gates.md](spec-gates.md) | Specification gates and traceability | REQ-027, REQ-043 to REQ-055 |
 
 ## Template

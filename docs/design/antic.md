@@ -138,7 +138,7 @@ The machine calls ANTIC exactly once per machine cycle, in this order. `L` is th
 3. The machine finds the data bus value:
    - `out.dma_data`, if `out.halt` and `out.dma != DmaKind::Refresh`.
    - Else the byte of the CPU bus cycle, if there was one.
-   - Else the floating bus value (a system decision, REQ-200 to REQ-299).
+   - Else the floating bus value (a system decision, area `system`).
 4. `antic.end_cycle(data_bus);`
 5. `gtia.clock(&out, data_bus);` (see "Interface with GTIA").
 6. After the CPU access, the machine passes `antic.nmi_level()` to `cpu.end_cycle` (`system.md`, step 4a).

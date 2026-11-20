@@ -182,12 +182,11 @@ withdrawn. It writes the matrix to `target/traceability.md`. A work package sets
 | Requirement | Test |
 | --- | --- |
 | REQ-020 | `tests/harness_self_test.rs` `fetch_urls_are_pinned`, `fetch_rejects_bad_checksum` (runs the script on a temporary copy with a wrong checksum); CI runs the script |
-| REQ-021 | `tests/harness_self_test.rs` `missing_file_names_fetch_command`; inspection of the test files for early returns |
-| REQ-023 | `cpu_single_step.rs` `single_step_bus_cycles`. The other single-step tests in that file also use the runner, but they verify CPU requirements (`docs/design/cpu.md`). |
-| REQ-024 | `tests/harness_self_test.rs` `screen_text_has_24_rows_of_40`, `internal_to_ascii_values` |
-| REQ-025 | `tests/keyboard.rs` `basic_prints_sum`, `type_text_rejects_unknown_character` |
+| REQ-021 | `tests/harness_self_test.rs` `missing_file_names_fetch_command`; inspection of the test files for early returns; `harness_self_test.rs` `load_cases_errors`, `unreadable_file_gives_read_error` |
+| REQ-023 | `cpu_single_step.rs` `single_step_bus_cycles`. The other single-step tests in that file also use the runner, but they verify CPU requirements (`docs/design/cpu.md`).; `harness_self_test.rs` `failure_summary_lists_failed_opcodes`, `flat_bus_default_is_empty`, `flat_bus_logs_accesses`, `load_cases_errors`, `load_cases_reads_nop_file`, `opcode_lists_are_consistent`, `run_case_fails_impossible_case`, `run_case_passes_and_clears_memory`, `run_case_reports_memory_difference`, `run_case_reports_register_difference`, `run_opcodes_reports_nop_file` |
+| REQ-024 | `tests/harness_self_test.rs` `screen_text_has_24_rows_of_40`, `internal_to_ascii_values`; `harness_self_test.rs` `boot_program_uses_options`, `harness_error_messages`, `hold_console_keys_releases_keys`, `run_frames_counts_frames`, `run_until_counts_frames`, `test_os_rom_layout`; `boot.rs` `boots_to_basic_ready` |
+| REQ-025 | `tests/keyboard.rs` `basic_prints_sum`, `type_text_rejects_unknown_character`; `harness_self_test.rs` `harness_error_messages`, `type_text_checks_all_characters_first`, `type_text_presses_return` |
 | REQ-026 | `tests/golden.rs` `boot_screen_matches_golden` (the BASIC `Ready` screen in NTSC and in PAL), `golden_paths_and_reference_files`, `difference_writes_failure_images`, `wrong_size_or_missing_reference_fails`, `update_mode_writes_reference`, `frame_to_rgb_uses_palette`, `golden_antic_modes_ntsc`, `golden_antic_modes_pal`, `golden_fine_scroll`, `golden_players_missiles`, `golden_gtia_modes` (SLICE-02 test screens), `golden_pong_scene` (two paddles and a ball) |
-| REQ-027 | `tests/traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests` |
 
 ## Open issues
 

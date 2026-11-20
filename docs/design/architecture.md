@@ -175,8 +175,13 @@ file error.
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_turbo_until_typed` (7, frontend unit test), `bas_typed_listing_equals_file` (9), `bas_pong_typing_frames` (10) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
-| REQ-007, REQ-011 | Demonstration: the commands in the acceptance criteria |
+| REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md` |
+| REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md` |
 | REQ-008 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-008.md` |
+| REQ-001 | Inspection: a review of the repository against the acceptance criteria; evidence `docs/verification/REQ-001.md` |
+| REQ-015 | Inspection: a review of the repository against the acceptance criteria; evidence `docs/verification/REQ-015.md` |
+| REQ-040 | Inspection: a review of the repository against the acceptance criteria; evidence `docs/verification/REQ-040.md` |
+| REQ-041 | Inspection: a review of the repository against the acceptance criteria; evidence `docs/verification/REQ-041.md` |
 | REQ-009 | `src/keymap.rs` unit tests `every_table_entry_maps`, `every_atari_key_has_a_host_key` |
 | REQ-010 | `src/keymap.rs` unit test `joystick_keys` |
 | REQ-017 | `src/keymap.rs` unit test `control_keys` |

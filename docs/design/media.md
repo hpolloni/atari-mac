@@ -212,7 +212,7 @@ impl SioBus {
     pub fn next_device_byte_start(&self) -> Option<u64>;
     /// The scheduled device bytes as `(value, start, bit_cycles)`, for tests.
     pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)>;
-    /// A complete transaction at once, for fast SIO (REQ-623).
+    /// A complete transaction at once, for the SIOV shortcut (REQ-623).
     pub fn transact(&mut self, request: &SioRequest<'_>) -> SioOutcome;
     /// Bus state to idle (cold reset). The inserted image does not change.
     pub fn reset(&mut self);
@@ -278,9 +278,9 @@ Call contract for the machine:
 4. `SioBus` never reads the cycle counter by itself. All times come from the `now` and `start`
    arguments, so the core stays deterministic (REQ-014).
 
-### Fast SIO
+### SIOV shortcut
 
-The machine owns the fast SIO hook, because it needs the CPU registers and memory.
+The machine owns the SIOV shortcut hook, because it needs the CPU registers and memory.
 
 ```rust
 impl Machine {
@@ -291,7 +291,7 @@ impl Machine {
 At each instruction boundary (before the opcode fetch cycle), the machine checks these
 conditions:
 
-1. Fast SIO is on.
+1. The SIOV shortcut is on.
 2. `regs.pc == 0xE459` (SIOV).
 3. `PORTB` bit 0 = 1 (OS ROM enabled).
 
@@ -688,11 +688,8 @@ the test code writes (usually `$A5` at `$0600`), with the frame limit of the req
 
 | Requirement | Test |
 | --- | --- |
-| REQ-600 | `crates/harness/tests/media.rs` `req600_std8k_maps_left_window` (criteria 1, 2), `req600_std16k_maps_both_windows` (3, 4) |
-| REQ-210 | `crates/harness/tests/media.rs` `cart_over_basic_over_ram` (1, 2, 4), `disabled_cart_shows_basic_or_ram` (2, 4, with REQ-608); also the `system.md` tests |
-| REQ-206 | `crates/harness/tests/media.rs` `write_to_cart_rom_ignored` (3, 5), `disabled_cart_write_goes_to_ram` (6, with REQ-608); also the `system.md` tests |
-| REQ-232 | `crates/harness/tests/media.rs` `trig3_follows_rd5` (1, 2, 4, 7), `trig3_follows_bank_switch` (3, 8, with REQ-608); also the `system.md` tests |
-| REQ-604 | `media.rs` `req604_raw_sizes` (1, 2), `req604_raw_bad_sizes` (3) |
+| REQ-600 | `crates/harness/tests/media.rs` `req600_std8k_maps_left_window` (criteria 1, 2), `req600_std16k_maps_both_windows` (3, 4); `media.rs` `standard_mapping` |
+| REQ-604 | `media.rs` `req604_raw_sizes` (1, 2), `req604_raw_bad_sizes` (3); `media.rs` `raw_sizes_select_kind` |
 | REQ-605 | `media.rs` `req605_car_type1` (1), `req605_car_type2` (2), `req605_car_unused_bytes_ignored` (3). The reads use `Cartridge::read`. |
 | REQ-606 | `media.rs` `req606_car_errors` (1-5), `req606_car_error_order` (6) |
 | REQ-607 | `crates/harness/tests/media.rs` `req607_bank_kept_on_reset_key` (1, 2), `req607_cold_reset_bank0` (3, 4). The test calls `Machine::press_reset` or `Machine::power_on` and then `peek` with no `Machine::run_cycle` between. |
@@ -700,7 +697,7 @@ the test code writes (usually `$A5` at `$0600`), with the frame limit of the req
 | REQ-609 | `crates/harness/tests/media.rs` `req609_dummy_read_switches_bank` (1), `req609_antic_dma_switches_bank` (2: the test code writes the display list to `$0600`, `DLISTL`/`DLISTH` and `DMACTL`, and the test runs 2 frames) |
 | REQ-610 | `media.rs` `req610_parse_segments` (1-6) |
 | REQ-611 | `media.rs` `req611_xex_signature_errors` (1-3), `req611_xex_no_segment` (4-6), `req611_xex_defects_keep_segments` (7-9) |
-| REQ-612 | `crates/harness/tests/media.rs` `req612_xex_loads_segments` (1-3), `req612_xex_file_order` (4), each with fast SIO off and on (5); `media.rs` `req612_boot_image_records` (the records and the geometry of `Xex::boot_image`) |
+| REQ-612 | `crates/harness/tests/media.rs` `req612_xex_loads_segments` (1-3), `req612_xex_file_order` (4), each with the SIOV shortcut off and on (5); `media.rs` `req612_boot_image_records` (the records and the geometry of `Xex::boot_image`) |
 | REQ-613 | `crates/harness/tests/media.rs` `req613_initad_called_per_segment` (1, 2); `media.rs` `req613_init_records` (an Init record after segments C and E only) |
 | REQ-614 | `crates/harness/tests/media.rs` `req614_runad` (1, 3), `req614_run_first_segment` (2, 3); `media.rs` `req614_run_records` (Run indirect or Run direct `$2000`) |
 | REQ-615 | `media.rs` `req615_status_frame_reply` (1), `req615_frame_needs_command_line` (2), `req615_frame_restart` (3), `req615_baud_tolerance` (4, 5) |
@@ -751,7 +748,7 @@ The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model i
 6. The values of `ACK_DELAY`, `DATA_ACK_DELAY`, `OP_BASE_US` and the format time are project
    decisions. Measurements of a real 1050 can replace them.
 7. To verify: CAR type numbers 41 and 42, and the power-on bank of the Atarimax 8Mbit types.
-8. To verify: the fast SIO return state (Y, N flag, `DSTATS`) and the status codes for both OS
+8. To verify: the SIOV shortcut return state (Y, N flag, `DSTATS`) and the status codes for both OS
    ROMs, and the bus ID formula `DDEVIC + DUNIT - 1`.
 9. To verify: when a real 1050 clears status byte 0 bits 0-3, and whether it sets bit 2 for a
    write-protect error.

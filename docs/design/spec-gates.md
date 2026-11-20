@@ -215,7 +215,7 @@ frontmatter. The converter is not committed. The migration commit must show that
 | REQ-047 | `spec_gates.rs` `references_gate_passes_on_repository`, `references_gate_rejects_bad_files` |
 | REQ-048 | `spec_gates.rs` `test_plans_gate_passes_on_repository`, `test_plans_gate_rejects_bad_files` |
 | REQ-027, REQ-049 | `spec_gates.rs` `trace_gate_passes_on_repository`, `trace_gate_rejects_bad_files` |
-| REQ-027 | `spec_gates.rs` `trace_gate_requires_a_test_for_each_test_requirement`, `trace_gate_rejects_bad_ignore_reasons` (the planned test stubs) |
+| REQ-027 | `spec_gates.rs` `trace_gate_requires_a_test_for_each_test_requirement`, `trace_gate_rejects_bad_ignore_reasons` (the planned test stubs); `traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests` |
 | REQ-049 | `spec_gates.rs` `trace_gate_matches_submodule_files`, `trace_gate_rejects_other_modules`, `trace_gate_matches_paths_exactly` (the module rule for file names), `trace_gate_checks_test_plans_of_all_packages` |
 | REQ-050 | `spec_gates.rs` `unplanned_requirements_are_reported`, `slices_gate_rejects_unplanned_requirements`, `product_complete_needs_must_planned` |
 | REQ-051 | `spec_gates.rs` `evidence_gate_passes_on_repository`, `evidence_gate_rejects_bad_files` |

@@ -337,7 +337,7 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-434 | `gtia.rs` `write_delays_table_18`, `write_delay_base_other_cycle`; `crates/harness/tests/gtia.rs` `mid_line_colbk_change` |
 | REQ-435 | `gtia.rs` `trigger_reads`; `crates/harness/tests/gtia.rs` `trig2_always_inactive`, `trig3_follows_cartridge` |
 | REQ-436 | `gtia.rs` `trigger_latch_holds_until_cleared`, `trigger_latch_all_triggers` |
-| REQ-437 | `gtia.rs` `consol_keys_and_outputs` |
+| REQ-437 | `gtia.rs` `consol_keys_and_outputs`; `machine.rs` `console_keys_reach_gtia`; `harness_self_test.rs` `hold_console_keys_releases_keys` |
 | REQ-438 | `gtia.rs` `speaker_follows_consol_bit_3`; `crates/harness/tests/gtia.rs` `key_click_makes_audio`; `machine.rs` `consol_bit_3_drives_speaker_line` |
 | REQ-439 | `crates/harness/tests/joystick.rs` `joystick_directions_on_porta` |
 | REQ-440 | `crates/harness/tests/joystick.rs` `joystick_buttons_on_trig0_trig1` |

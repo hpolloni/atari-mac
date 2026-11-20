@@ -354,12 +354,12 @@ call `tick` if the script halts cycle `c`. A `TestBus` records each access as
 | --- | --- |
 | REQ-100 | `crates/harness/tests/cpu_single_step.rs` `single_step_documented_opcodes`; `cpu/tests.rs` unit tests `address_calculation_keeps_flags`, `bit_sets_n_v_z` |
 | REQ-101 | `cpu_single_step.rs` `single_step_bus_cycles`; `cpu/tests.rs` unit tests `implied_dummy_read`, `one_access_per_tick` |
-| REQ-102 | `cpu/tests.rs` unit tests `abs_x_read_page_cross_dummy_read`, `abs_y_and_ind_y_read_page_cross_dummy_read`, `abs_x_read_no_page_cross`, `ind_y_pointer_ff_no_extra_cycle`, `zero_page_index_no_extra_cycle` |
-| REQ-103 | `cpu/tests.rs` unit tests `indexed_store_dummy_read_page_cross` (abs,X and abs,Y), `indexed_store_dummy_read_same_page`, `ind_y_store_six_cycles` (with and without page crossing) |
+| REQ-102 | `cpu/tests.rs` unit tests `abs_x_read_page_cross_dummy_read`, `abs_y_and_ind_y_read_page_cross_dummy_read`, `abs_x_read_no_page_cross`, `ind_y_pointer_ff_no_extra_cycle`, `zero_page_index_no_extra_cycle`; `cpu_single_step.rs` `single_step_bus_cycles` |
+| REQ-103 | `cpu/tests.rs` unit tests `indexed_store_dummy_read_page_cross` (abs,X and abs,Y), `indexed_store_dummy_read_same_page`, `ind_y_store_six_cycles` (with and without page crossing); `cpu_single_step.rs` `single_step_bus_cycles` |
 | REQ-104 | `cpu/tests.rs` unit test `rmw_writes_old_value_then_new_value`; `cpu_single_step.rs` `single_step_bus_cycles` |
-| REQ-105 | `cpu/tests.rs` unit tests `zero_page_x_wraps`, `zero_page_y_wraps`, `ind_x_pointer_wraps`, `ind_y_pointer_wraps_at_ff`, `jmp_indirect_page_bug` |
+| REQ-105 | `cpu/tests.rs` unit tests `zero_page_x_wraps`, `zero_page_y_wraps`, `ind_x_pointer_wraps`, `ind_y_pointer_wraps_at_ff`, `jmp_indirect_page_bug`; `cpu_single_step.rs` `single_step_bus_cycles` |
 | REQ-106 | `cpu/tests.rs` unit tests `branch_page_cross_from_next_instruction`, `branch_same_page_three_cycles`, `branch_not_taken_two_cycles`; `cpu_single_step.rs` `single_step_bus_cycles` |
-| REQ-107 | `cpu/tests.rs` unit tests `php_pushes_bits_4_and_5`, `irq_pushes_b_clear`, `nmi_pushes_b_clear`, `brk_pushes_b_set` |
+| REQ-107 | `cpu/tests.rs` unit tests `php_pushes_bits_4_and_5`, `irq_pushes_b_clear`, `nmi_pushes_b_clear`, `brk_pushes_b_set`; `cpu_single_step.rs` `single_step_documented_opcodes` |
 | REQ-108 | `cpu/tests.rs` unit tests `decimal_adc_0f_0f`, `decimal_adc_99_01_flags`, `decimal_adc_ff_01_zero`, `decimal_sbc_borrow`, `decimal_sbc_no_borrow`, `decimal_no_extra_cycle`; `cpu_single_step.rs` `single_step_decimal` |
 | REQ-109 | `cpu/tests.rs` unit tests `decimal_flag_ignored_by_compare_and_increment`, `interrupt_keeps_decimal_flag`, `reset_keeps_decimal_flag`; `cpu_single_step.rs` `single_step_decimal_undocumented` (the `ISB`, `RRA` and `ARR` files) |
 | REQ-110 | `crates/harness/tests/cpu_functional.rs` `klaus_dormann_functional_test` |

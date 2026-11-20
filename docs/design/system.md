@@ -372,11 +372,11 @@ count its accesses. "PORTB pins = `$xx`" in the requirements means that the test
 | REQ-203 | `machine.rs` unit tests `dummy_read_clears_pia_status`, `rmw_writes_portb_twice`, `dummy_read_reaches_cartridge_control`, `rdy_reads_reach_cartridge_control`; `machine.rs` unit test `bus_reads_have_side_effects` |
 | REQ-204 | `machine.rs` unit tests `all_ram_visible_with_roms_off`, `low_ram_always_visible` |
 | REQ-205 | `machine.rs` unit tests `io_area_cannot_be_disabled`, `io_write_does_not_change_ram`, `io_pages_reach_chips` |
-| REQ-206 | `machine.rs` unit tests `write_to_os_rom_ignored`, `write_to_basic_ignored`, `write_to_cartridge_rom_ignored`, `write_to_self_test_ignored` |
+| REQ-206 | `machine.rs` unit tests `write_to_os_rom_ignored`, `write_to_basic_ignored`, `write_to_cartridge_rom_ignored`, `write_to_self_test_ignored`; `crates/harness/tests/media.rs` `write_to_cart_rom_ignored` (3, 5), `disabled_cart_write_goes_to_ram` (6, with REQ-608) |
 | REQ-207 | `machine.rs` unit tests `os_rom_mapping`, `os_rom_hidden_under_io`, `os_rom_disabled_shows_ram`, `os_rom_size_checked` |
 | REQ-208 | `machine.rs` unit tests `basic_enabled_by_bit_1_low`, `basic_disabled_shows_ram`, `no_basic_image_shows_ram` |
 | REQ-209 | `machine.rs` unit tests `self_test_rom_mapping`, `self_test_needs_os_rom`, `self_test_disabled_by_bit_7` |
-| REQ-210 | `machine.rs` unit tests `cartridge_before_basic`, `basic_after_cartridge_disabled`, `cartridge_rd4_before_ram` |
+| REQ-210 | `machine.rs` unit tests `cartridge_before_basic`, `basic_after_cartridge_disabled`, `cartridge_rd4_before_ram`; `crates/harness/tests/media.rs` `cart_over_basic_over_ram` (1, 2, 4), `disabled_cart_shows_basic_or_ram` (2, 4, with REQ-608) |
 | REQ-211 | `machine.rs` unit tests `reset_memory_map`, `portb_output_selects_map`, `portb_inputs_pulled_up`, `ddrb_write_changes_map`, `mixed_inputs_and_outputs_select_map` |
 | REQ-212 | `machine.rs` unit tests `bank_switch_next_cpu_access`, `ddrb_switch_next_cpu_access`, `bank_switch_next_dma_access` |
 | REQ-213 | `machine.rs` unit tests `dma_reads_os_rom`, `dma_reads_ram_under_os`, `dma_map_equals_cpu_map`, `dma_read_no_side_effects` |
@@ -398,7 +398,7 @@ count its accesses. "PORTB pins = `$xx`" in the requirements means that the test
 | REQ-229 | `pia.rs` unit tests `irq_from_ca1`, `irq_from_cb2`, `irq_released_after_read`, `no_irq_when_disabled`; `machine.rs` unit test `irq_line_is_pia_or_pokey`; `machine.rs` unit test `irq_line_with_pokey` |
 | REQ-230 | `pia.rs` unit tests `reset_clears_all_registers`, `reset_selects_ddr`, `reset_clears_output_registers`, `reset_no_irq` |
 | REQ-231 | `pia.rs` unit tests `spurious_ca2_positive_edge_mode`, `spurious_ca2_with_irq`, `spurious_cb2_after_rise`, `no_spurious_cb2_without_low` |
-| REQ-232 | `machine.rs` unit tests `trig3_zero_without_cartridge`, `trig3_one_with_cartridge`, `trig3_follows_cartridge_bank_switch`, `trig3_ignores_basic`, `trig2_reads_one`, `trig3_after_power_on_and_reset` |
+| REQ-232 | `machine.rs` unit tests `trig3_zero_without_cartridge`, `trig3_one_with_cartridge`, `trig3_follows_cartridge_bank_switch`, `trig3_ignores_basic`, `trig2_reads_one`, `trig3_after_power_on_and_reset`; `crates/harness/tests/media.rs` `trig3_follows_rd5` (1, 2, 4, 7), `trig3_follows_bank_switch` (3, 8, with REQ-608) |
 
 New tests in this plan, one line each:
 
