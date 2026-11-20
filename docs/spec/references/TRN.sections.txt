@@ -41,15 +41,15 @@ OS-2/Interrupt-Processing	Interrupt Processing
 OS-2/Initialization	Initialization
 OS-2/Floating-Point-Arithmetic-Package	Floating Point Arithmetic Package
 # missing: OS-3	CONFIGURATIONS
-OS-3/Program-Environments	Program Environments
+# missing: OS-3/Program-Environments	Program Environments
 # missing: OS-3/RAM-Expansion	RAM Expansion
 # missing: OS-3/Peripheral-Devices	Peripheral Devices
 # missing: OS-4	SYSTEM MEMORY UTILIZATION
 # missing: OS-4/RAM-Region	RAM Region
-OS-4/Cartridges-A-and-B	Cartridges A and B
+# missing: OS-4/Cartridges-A-and-B	Cartridges A and B
 # missing: OS-4/Mapped-I-O	Mapped I/O
-OS-4/Resident-OS-and-Floating-Point-Package-ROM	Resident OS and Floating Point Package ROM
-OS-4/Central-Data-Base-Description	Central Data Base Description
+# missing: OS-4/Resident-OS-and-Floating-Point-Package-ROM	Resident OS and Floating Point Package ROM
+# missing: OS-4/Central-Data-Base-Description	Central Data Base Description
 # missing: OS-4/Memory-Dynamics	Memory Dynamics
 OS-5	I/O SUBSYSTEM
 OS-5/Central-I-O-Utility	Central I/O Utility
