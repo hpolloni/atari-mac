@@ -11,6 +11,18 @@ date. The requirement states are those of the traceability matrix: `tested` has 
 runs, and `pending` has only planned test stubs.
 
 <!-- BEGIN GENERATED: status -->
+
+| Slice | Title | Status | tested | pending | missing | not a test requirement |
+| --- | --- | --- | --- | --- | --- | --- |
+| [SLICE-01](docs/plan/SLICE-01.md) | Boot to BASIC and type a command | done | 99 | 0 | 0 | 1 |
+| [SLICE-02](docs/plan/SLICE-02.md) | Graphics modes and player/missile graphics | in-progress | 59 | 0 | 0 | 0 |
+| [SLICE-03](docs/plan/SLICE-03.md) | Sound | planned | 2 | 15 | 0 | 2 |
+| [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | planned | 12 | 16 | 0 | 0 |
+| [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 4 | 32 | 0 | 0 |
+| [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | planned | 23 | 2 | 0 | 4 |
+
+All 271 requirements: 199 tested, 65 pending, 0 missing, 7 not a test requirement. Open items with the status `open`: 19.
+
 <!-- END GENERATED: status -->
 
 Not implemented yet: sound, executable files, disk drives and save states.
@@ -115,7 +127,7 @@ make check
 | Gate | Tool | Command |
 | --- | --- | --- |
 | Rust formatting | rustfmt | `cargo fmt --all --check` |
-| TOML formatting and lint | taplo | `taplo fmt --check`, `taplo lint` |
+| TOML formatting and lint | taplo | `make toml-check` (`taplo fmt` in check mode, and `taplo lint`) |
 | Spelling | typos | `typos` |
 | Specification gates and traceability (`docs/design/spec-gates.md`) | `atari_harness::spec` | `make spec-check` |
 | Lints (rustc and clippy `all`, `pedantic`, `nursery`, `cargo`, selected `restriction`) | clippy | `cargo clippy --all-targets --all-features` |

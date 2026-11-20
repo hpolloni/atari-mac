@@ -1,6 +1,6 @@
 //! Writes the generated specification files (`docs/design/spec-gates.md`):
-//! `docs/spec/requirements/INDEX.md`, `docs/spec/open-items/README.md` and
-//! `target/traceability.md`.
+//! `docs/spec/requirements/INDEX.md`, `docs/spec/open-items/README.md`, the status block of
+//! `README.md` (REQ-056) and `target/traceability.md`.
 //!
 //! Usage: `cargo run -p atari-harness --bin spec-index`.
 

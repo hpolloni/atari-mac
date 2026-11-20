@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     CodeTest, ItemStatus, OPEN_ITEM_INDEX, Outcome, Priority, REQUIREMENT_INDEX, Requirement,
-    Section, SliceStatus, Spec, Verification, Violation, report, text,
+    Section, SliceStatus, Spec, Verification, Violation, readme, report, text,
 };
 
 /// The frontmatter problems of `rules` that [`super::load()`] found.
@@ -334,7 +334,8 @@ impl Refs<'_> {
     }
 }
 
-/// REQ-047: the references to requirements, open items, slices and files resolve.
+/// REQ-047, REQ-056: the references to requirements, open items, slices and files resolve,
+/// also in `README.md`.
 ///
 /// Each `REQ-NNN`, `OI-NNN` and `SLICE-NN` in `docs/` and in `.rs` files names an existing
 /// file, a withdrawn requirement is named only where permitted, and each relative markdown
@@ -737,7 +738,8 @@ pub fn open_items(spec: &Spec, root: &Path) -> Vec<Violation> {
     out
 }
 
-/// REQ-053: the generated indexes are up to date.
+/// REQ-053, REQ-056: the generated indexes are up to date, and `README.md` has exactly one
+/// status block, which is up to date.
 #[must_use]
 pub fn indexes(spec: &Spec, root: &Path) -> Vec<Violation> {
     let mut out = Vec::new();
@@ -752,5 +754,6 @@ pub fn indexes(spec: &Spec, root: &Path) -> Vec<Violation> {
             out.push(Violation::new(53, Path::new(path), None, message));
         }
     }
+    out.extend(readme::block(spec));
     out
 }
