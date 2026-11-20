@@ -3,7 +3,7 @@
 ## Scope
 
 This document gives the crate structure, the data flow between the chips, the scheduling
-model and the frontend. It covers REQ-001 to REQ-019 and REQ-040 to REQ-042. The chip
+model and the frontend. It covers REQ-001 to REQ-019, REQ-040 to REQ-042 and REQ-080. The chip
 designs are in the other documents in this directory.
 
 ## Crates
@@ -28,7 +28,8 @@ files, the clock of the host, the window and the audio device (REQ-014).
 | `gtia` | GTIA, frame buffer | [gtia.md](gtia.md) |
 | `palette` | Color byte to RGB | [gtia.md](gtia.md) |
 | `pokey` | POKEY | [pokey.md](pokey.md) |
-| `keyboard` | `KBCODE` values and the ASCII table | [pokey.md](pokey.md) |
+| `keyboard` | `KBCODE` values, the ASCII table and the key timing of typed text | [pokey.md](pokey.md) |
+| `screen` | The text of the OS text screen in memory (REQ-024) | [test-harness.md](test-harness.md) |
 | `media` | Cartridges, executables, disk images, SIO devices | [media.md](media.md) |
 | `timing` | Clock and frame constants | This document |
 
@@ -128,6 +129,32 @@ status 2) that names the flag and the standard. `--pal` sets `Options::standard`
 (REQ-002 criterion 4); without it the machine is NTSC. With `--frames`, the run time line also
 names the video standard and the cycles of the last frame, for example
 `50 frames in 0.120 s (PAL, last frame 35568 cycles)`.
+
+### BASIC program from a text file (REQ-080)
+
+`--bas <file>` sets `Options::bas`, and `--no-run` sets `Options::no_run` (a usage error
+without `--bas`). `atari_mac::start` creates the frontend: it first reads and checks the
+whole file with `bas::load`, and only then creates the machine. So a file that cannot be read
+or is not UTF-8 (`FrontendError::Read`), or a file with a character without a key
+(`FrontendError::BasCharacter`: file, line number from 1, the character), gives exit status 2
+before the machine starts. `bas::load` splits the text with
+`str::lines` (LF or CR LF, the last newline is optional), skips each line that is empty or
+has only spaces, and converts each character with `keyboard::ascii_to_kbcode`. Each line
+ends with RETURN; then `RUN` and RETURN follow, unless `--no-run`.
+
+`bas::Typist` types the key codes one frame at a time, so the window loop never blocks. The
+frontend calls `Typist::before_frame` before each frame, in `Frontend::step` (window) and in
+`Frontend::run_frames` (headless). The phases:
+
+| Phase | Before each frame |
+| --- | --- |
+| `WaitReady(n)` | If a screen row is `Ready` (`screen::has_row`), go to `Typing` at key 0 in the same frame. Else, after 600 frames, stop with `FrontendError::BasicNotStarted` (exit status 1). |
+| `Typing { index, tick }` | At tick 0, `key_down(code)`; at tick `KEY_DOWN_FRAMES`, `key_up`. After `KEY_DOWN_FRAMES + KEY_UP_FRAMES` ticks, go to the next key, or to `Done`. |
+| `Done` | The frontend drops the typist. |
+
+The key timing is the timing of the harness `type_text` (3 frames down, 3 frames up). While
+the typist is active, `Frontend::step` ignores the host keys except quit (Command + Escape),
+and pause has no effect. With `--bas`, the window title names the program file.
 
 ## Error handling
 

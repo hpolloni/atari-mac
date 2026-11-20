@@ -20,9 +20,9 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | planned | 12 | 16 | 0 | 0 |
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 4 | 32 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | planned | 23 | 2 | 0 | 4 |
-| [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | in-progress | 0 | 0 | 1 | 0 |
+| [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | in-progress | 1 | 0 | 0 | 0 |
 
-All 272 requirements: 199 tested, 65 pending, 1 missing, 7 not a test requirement. Open items with the status `open`: 19.
+All 272 requirements: 200 tested, 65 pending, 0 missing, 7 not a test requirement. Open items with the status `open`: 19.
 
 <!-- END GENERATED: status -->
 
@@ -49,6 +49,7 @@ The full list of non-goals is in [docs/spec/README.md](docs/spec/README.md).
 make roms                 # downloads the ROMs and the hardware manual (one time)
 cargo run --release       # opens the window: NTSC, BASIC enabled
 cargo run --release -- --pal --scale 3
+cargo run --release -- --bas examples/pong.bas
 ```
 
 | Option | Meaning |
@@ -59,6 +60,8 @@ cargo run --release -- --pal --scale 3
 | `--scale <n>` | Window scale, 1 to 8 (default: 2) |
 | `--artifacting` | NTSC artifacting filter: false colors for hi-res pixel patterns |
 | `--pal-blending` | PAL chroma blending filter (needs `--pal`) |
+| `--bas <file>` | Type the BASIC program in a text file at the `Ready` prompt, then `RUN` it |
+| `--no-run` | With `--bas`: type the program, but do not `RUN` it |
 | `--headless`, `--frames <n>`, `--screenshot <file>` | Run without a window for `n` frames, and save the last frame as a PNG file |
 
 Keys: F1 inverse, F2 START, F3 SELECT, F4 OPTION, F5 RESET, F6 HELP, F7 BREAK, F9 pause,

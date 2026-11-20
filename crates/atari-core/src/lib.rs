@@ -25,6 +25,7 @@
 //! | [`keyboard`] | Atari keyboard codes (`KBCODE`) |
 //! | [`pia`] | 6520 PIA: joystick ports and the 65XE memory control (`PORTB`) |
 //! | [`media`] | Cartridge and executable file formats |
+//! | [`screen`] | The text of the OS text screen in memory (REQ-024) |
 //! | [`machine`] | Memory map, bus scheduling, interrupts: ties all chips together |
 //! | [`timing`] | Clock and frame timing constants |
 
@@ -39,6 +40,7 @@ pub mod pia;
 #[cfg(test)]
 mod planned;
 pub mod pokey;
+pub mod screen;
 pub mod timing;
 
 pub use machine::{ConfigError, JoystickState, Machine, MachineConfig};

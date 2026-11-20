@@ -2,15 +2,11 @@
 
 use atari_core::Machine;
 use atari_core::keyboard::ascii_to_kbcode;
+// The key timing is in the core, so that the frontend types with the same timing (REQ-080).
+pub use atari_core::keyboard::{KEY_DOWN_FRAMES, KEY_UP_FRAMES};
 
 use crate::HarnessError;
 use crate::system::run_frames;
-
-/// Frames that a key is held down.
-pub const KEY_DOWN_FRAMES: u32 = 3;
-
-/// Frames between two keys.
-pub const KEY_UP_FRAMES: u32 = 3;
 
 /// Types `text` on the emulated keyboard. For each character, the key is held for
 /// [`KEY_DOWN_FRAMES`] frames, then released for [`KEY_UP_FRAMES`] frames.

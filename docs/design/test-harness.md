@@ -68,7 +68,13 @@ with this ROM and runs the power-on reset. The tests then use `run_until`, `peek
 ```rust
 pub fn screen_text(machine: &Machine) -> Vec<String>;
 pub fn internal_to_ascii(code: u8) -> char;
+pub fn has_row(machine: &Machine, text: &str) -> bool;
 ```
+
+The functions and the constants `ROWS`, `COLUMNS` and `SAVMSC` are in the core module
+`atari_core::screen`, because the frontend also needs `has_row` to wait for the BASIC
+`Ready` prompt (REQ-080). The harness module `screen` re-exports them, so the harness API
+does not change.
 
 `has_row` compares a row after it removes leading and trailing spaces, because the OS text
 screen has a left margin of 2 columns. `screen_text` reads the screen address from `SAVMSC` (`$58-$59`) and decodes 24 rows of 40
@@ -84,8 +90,9 @@ video chips are complete.
 pub fn type_text(machine: &mut Machine, text: &str) -> Result<(), HarnessError>;
 ```
 
-For each character, `type_text` presses the key for 3 frames and releases it for 3 frames.
-It uses `keyboard::ascii_to_kbcode`. A character without a key gives
+For each character, `type_text` presses the key for 3 frames and releases it for 3 frames
+(`KEY_DOWN_FRAMES` and `KEY_UP_FRAMES`, which are in the core module `keyboard` and which
+`input` re-exports). It uses `keyboard::ascii_to_kbcode`. A character without a key gives
 `HarnessError::NoKey`.
 
 ### Module `single_step`

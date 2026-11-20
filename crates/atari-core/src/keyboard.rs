@@ -5,6 +5,13 @@
 //!
 //! Design: `docs/design/pokey.md`, "Module keyboard". Requirements: REQ-523, REQ-524.
 
+/// Frames that a typed key is held down: the key timing of the harness `type_text`
+/// (REQ-025) and of the frontend `--bas` typing (REQ-080).
+pub const KEY_DOWN_FRAMES: u32 = 3;
+
+/// Frames between two typed keys (the key is up), as [`KEY_DOWN_FRAMES`].
+pub const KEY_UP_FRAMES: u32 = 3;
+
 /// The `KBCODE` bit for the SHIFT key.
 pub const SHIFT: u8 = 0x40;
 

@@ -14,6 +14,7 @@ use atari_core::media::Cartridge;
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
 use minifb::Key;
 
+use crate::bas::{NotReady, READY_TIMEOUT_FRAMES, Typist};
 use crate::cli::Options;
 use crate::error::FrontendError;
 use crate::keymap::InputState;
@@ -186,7 +187,8 @@ pub enum Flow {
     Quit,
 }
 
-/// The machine with the frontend state: the input of the last frame and the pause flag.
+/// The machine with the frontend state: the input of the last frame, the pause flag and the
+/// typing of a BASIC program (`--bas`, REQ-080).
 #[derive(Debug)]
 pub struct Frontend {
     /// The emulated machine.
@@ -199,6 +201,8 @@ pub struct Frontend {
     frames_run: u64,
     /// The number of machine cycles of the last frame that ran.
     last_frame_cycles: u64,
+    /// The typing of the BASIC program, until all keys are typed.
+    typist: Option<Typist>,
 }
 
 impl Frontend {
@@ -211,7 +215,22 @@ impl Frontend {
             paused: false,
             frames_run: 0,
             last_frame_cycles: 0,
+            typist: None,
         }
+    }
+
+    /// Types `typist`'s keys before the frames that come next (REQ-080). While it types,
+    /// the host keys other than quit have no effect.
+    #[must_use]
+    pub fn with_typist(mut self, typist: Typist) -> Self {
+        self.typist = Some(typist);
+        self
+    }
+
+    /// The typing of the BASIC program, while it is not done.
+    #[must_use]
+    pub const fn typist(&self) -> Option<&Typist> {
+        self.typist.as_ref()
     }
 
     /// The machine.
@@ -244,34 +263,58 @@ impl Frontend {
         self.last_frame_cycles
     }
 
-    /// Runs one frame and counts it.
-    fn run_frame(&mut self) {
+    /// Runs one frame and counts it. Before the frame, the typist presses or releases a key.
+    fn run_frame(&mut self) -> Result<(), FrontendError> {
+        if let Some(typist) = &mut self.typist {
+            typist.before_frame(&mut self.machine).map_err(|NotReady| {
+                FrontendError::BasicNotStarted {
+                    frames: READY_TIMEOUT_FRAMES,
+                }
+            })?;
+            if typist.done() {
+                self.typist = None;
+            }
+        }
         let start = self.machine.cycle_count();
         self.machine.run_frame();
         self.last_frame_cycles = self.machine.cycle_count() - start;
         self.frames_run += 1;
+        Ok(())
     }
 
     /// One host frame: sends the host keys that are down to the machine, then runs one
-    /// frame unless the emulation is paused.
-    pub fn step(&mut self, keys: &[Key]) -> Flow {
+    /// frame unless the emulation is paused. While a BASIC program is typed, only quit
+    /// has an effect, and the frame always runs.
+    ///
+    /// # Errors
+    ///
+    /// [`FrontendError::BasicNotStarted`] when the typist does not see the `Ready` prompt.
+    pub fn step(&mut self, keys: &[Key]) -> Result<Flow, FrontendError> {
         let input = InputState::from_keys(keys, &self.input);
         if input.quit {
-            return Flow::Quit;
+            return Ok(Flow::Quit);
+        }
+        if self.typist.is_some() {
+            return self.run_frame().map(|()| Flow::Continue);
         }
         self.apply(&input);
         self.input = input;
         if !self.paused {
-            self.run_frame();
+            self.run_frame()?;
         }
-        Flow::Continue
+        Ok(Flow::Continue)
     }
 
     /// Runs `frames` frames without input (headless mode, REQ-013).
-    pub fn run_frames(&mut self, frames: u64) {
+    ///
+    /// # Errors
+    ///
+    /// [`FrontendError::BasicNotStarted`] when the typist does not see the `Ready` prompt.
+    pub fn run_frames(&mut self, frames: u64) -> Result<(), FrontendError> {
         for _ in 0..frames {
-            self.run_frame();
+            self.run_frame()?;
         }
+        Ok(())
     }
 
     /// Sends the changes from the last input to `input` to the machine.
@@ -353,13 +396,14 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-    use atari_core::{Machine, MachineConfig, VideoStandard, palette};
+    use atari_core::{Machine, MachineConfig, VideoStandard, keyboard, palette};
     use minifb::Key;
 
     use super::{
         DisplayFilters, Flow, Frontend, Pacer, convert_row, load_machine, render, window_size,
         window_title,
     };
+    use crate::bas::{READY_TIMEOUT_FRAMES, Typist};
     use crate::cli::Options;
     use crate::error::FrontendError;
 
@@ -383,7 +427,7 @@ mod tests {
     }
 
     fn step(frontend: &mut Frontend, keys: &[Key]) {
-        assert_eq!(frontend.step(keys), Flow::Continue, "{keys:?}");
+        assert_eq!(frontend.step(keys).unwrap(), Flow::Continue, "{keys:?}");
     }
 
     #[test]
@@ -487,16 +531,16 @@ mod tests {
     #[test]
     fn step_runs_one_frame_and_quits() {
         let mut frontend = Frontend::new(machine());
-        assert_eq!(frontend.step(&[]), Flow::Continue, "no keys");
+        assert_eq!(frontend.step(&[]).unwrap(), Flow::Continue, "no keys");
         assert_eq!(frontend.machine().frame_count(), 1, "one frame");
         assert_eq!(frontend.frames_run(), 1, "one frame run");
         assert_eq!(
-            frontend.step(&[Key::LeftSuper, Key::Escape]),
+            frontend.step(&[Key::LeftSuper, Key::Escape]).unwrap(),
             Flow::Quit,
             "Command + Escape"
         );
         assert_eq!(frontend.machine().frame_count(), 1, "no frame after quit");
-        frontend.run_frames(3);
+        frontend.run_frames(3).unwrap();
         assert_eq!(frontend.machine().frame_count(), 4, "headless frames");
         assert_eq!(frontend.frames_run(), 4, "all frames counted");
         assert_eq!(
@@ -536,6 +580,39 @@ mod tests {
             frontend.machine().peek_ram(0x1234),
             0x99,
             "a held F10 resets only once"
+        );
+    }
+
+    /// While a program is typed, the host keys except quit have no effect, and a machine
+    /// without the `Ready` prompt stops the frontend after the timeout (REQ-080).
+    #[test]
+    fn typing_ignores_host_keys_until_ready_timeout() {
+        let mut frontend = Frontend::new(machine()).with_typist(Typist::new(vec![keyboard::A]));
+        assert!(frontend.typist().is_some(), "typing");
+        step(&mut frontend, &[Key::F9]);
+        assert!(!frontend.paused(), "F9 does not pause while typing");
+        assert_eq!(frontend.frames_run(), 1, "one frame");
+        frontend
+            .run_frames(u64::from(READY_TIMEOUT_FRAMES) - 1)
+            .unwrap();
+        assert!(
+            matches!(
+                frontend.step(&[]),
+                Err(FrontendError::BasicNotStarted { frames: 600 })
+            ),
+            "timeout in step"
+        );
+        assert!(
+            matches!(
+                frontend.run_frames(1),
+                Err(FrontendError::BasicNotStarted { .. })
+            ),
+            "timeout in run_frames"
+        );
+        assert_eq!(
+            frontend.step(&[Key::LeftSuper, Key::Escape]).unwrap(),
+            Flow::Quit,
+            "quit while typing"
         );
     }
 

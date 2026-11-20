@@ -46,6 +46,21 @@ pub enum FrontendError {
         /// The cause.
         source: png::EncodingError,
     },
+    /// The BASIC program file has a character without an Atari key (REQ-080 criterion 4).
+    BasCharacter {
+        /// The program file.
+        path: PathBuf,
+        /// The line number, from 1.
+        line: usize,
+        /// The character.
+        character: char,
+    },
+    /// The BASIC `Ready` prompt did not show, so the program cannot be typed (REQ-080
+    /// criterion 6).
+    BasicNotStarted {
+        /// The frames that the frontend waited.
+        frames: u32,
+    },
     /// The window cannot be opened or updated.
     Window(minifb::Error),
     /// Standard output cannot be written.
@@ -62,8 +77,9 @@ impl FrontendError {
             | Self::Read { .. }
             | Self::Rom { .. }
             | Self::Media { .. }
-            | Self::Screenshot { .. } => 2,
-            Self::Window(_) | Self::Output(_) => 1,
+            | Self::Screenshot { .. }
+            | Self::BasCharacter { .. } => 2,
+            Self::BasicNotStarted { .. } | Self::Window(_) | Self::Output(_) => 1,
         }
     }
 }
@@ -77,6 +93,20 @@ impl fmt::Display for FrontendError {
             Self::Rom { path, error } => write!(f, "{}: {error}", path.display()),
             Self::Media { path, error } => write!(f, "{}: {error}", path.display()),
             Self::Screenshot { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::BasCharacter {
+                path,
+                line,
+                character,
+            } => write!(
+                f,
+                "{}: line {line}: the character '{}' has no key on the Atari keyboard",
+                path.display(),
+                character.escape_debug()
+            ),
+            Self::BasicNotStarted { frames } => write!(
+                f,
+                "BASIC did not start: no Ready prompt after {frames} frames, so the program was not typed"
+            ),
             Self::Window(error) => write!(f, "window: {error}"),
             Self::Output(error) => write!(f, "standard output: {error}"),
         }
@@ -86,7 +116,10 @@ impl fmt::Display for FrontendError {
 impl Error for FrontendError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Usage(_) | Self::Unsupported(_) => None,
+            Self::Usage(_)
+            | Self::Unsupported(_)
+            | Self::BasCharacter { .. }
+            | Self::BasicNotStarted { .. } => None,
             Self::Read { source, .. } | Self::Output(source) => Some(source),
             Self::Rom { error, .. } => Some(error),
             Self::Media { error, .. } => Some(error),
@@ -154,6 +187,20 @@ mod tests {
                 2,
             ),
             (
+                FrontendError::BasCharacter {
+                    path: PathBuf::from("p.bas"),
+                    line: 3,
+                    character: '{',
+                },
+                "p.bas: line 3: the character '{' has no key on the Atari keyboard",
+                2,
+            ),
+            (
+                FrontendError::BasicNotStarted { frames: 600 },
+                "BASIC did not start: no Ready prompt after 600 frames",
+                1,
+            ),
+            (
                 FrontendError::Window(minifb::Error::WindowCreate("no".to_owned())),
                 "window: ",
                 1,
@@ -172,7 +219,10 @@ mod tests {
             assert_eq!(error.exit_code(), code, "exit code of {error}");
             let has_source = !matches!(
                 error,
-                FrontendError::Usage(_) | FrontendError::Unsupported(_)
+                FrontendError::Usage(_)
+                    | FrontendError::Unsupported(_)
+                    | FrontendError::BasCharacter { .. }
+                    | FrontendError::BasicNotStarted { .. }
             );
             assert_eq!(error.source().is_some(), has_source, "source of {error}");
         }

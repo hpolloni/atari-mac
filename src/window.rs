@@ -19,7 +19,8 @@ use crate::frontend::{DisplayFilters, Flow, Frontend, Pacer, render, window_size
 ///
 /// # Errors
 ///
-/// [`FrontendError::Window`] when the window cannot be opened or updated.
+/// [`FrontendError::Window`] when the window cannot be opened or updated, and the errors of
+/// [`Frontend::step`].
 pub fn run(
     frontend: &mut Frontend,
     title: &str,
@@ -49,7 +50,7 @@ pub fn run(
     let mut pacer = Pacer::new(standard, start);
     while window.is_open()
         && frames.is_none_or(|n| frontend.frames_run() < n)
-        && frontend.step(&window.get_keys()) == Flow::Continue
+        && frontend.step(&window.get_keys())? == Flow::Continue
     {
         render(
             frontend.machine().frame(),

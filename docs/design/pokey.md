@@ -117,7 +117,13 @@ pub const A: u8 = 0x3F;
 pub const KEYS: [(u8, &str); 54];
 /// Converts one ASCII character to a `KBCODE` value (REQ-524).
 pub const fn ascii_to_kbcode(c: char) -> Option<u8>;
+/// The key timing of typed text: frames down, then frames up (REQ-025, REQ-080).
+pub const KEY_DOWN_FRAMES: u32 = 3;
+pub const KEY_UP_FRAMES: u32 = 3;
 ```
+
+The harness `type_text` (REQ-025) and the frontend `--bas` typing (REQ-080) both use
+`ascii_to_kbcode` and the key timing constants, so there is one table and one timing.
 
 ### Call contract with the machine
 

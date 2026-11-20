@@ -33,6 +33,8 @@ Options:
   --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes
   --xex <file>         Executable (not supported yet)
   --disk <file>        ATR disk image (not supported yet)
+  --bas <file>         Type a BASIC program from a text file at Ready, then RUN it
+  --no-run             With --bas: type the program, but do not RUN it
   --pal                PAL machine (default: NTSC)
   --scale <n>          Window scale, 1 to 8 (default: 2)
   --frames <n>         Run n frames, then print the elapsed time and exit
@@ -66,6 +68,10 @@ pub struct Options {
     pub standard: VideoStandard,
     /// The optional display filters (REQ-019).
     pub filters: DisplayFilters,
+    /// The BASIC program text file to type (`--bas`, REQ-080).
+    pub bas: Option<PathBuf>,
+    /// Type the program, but do not type `RUN` (`--no-run`, REQ-080).
+    pub no_run: bool,
 }
 
 impl Default for Options {
@@ -80,6 +86,8 @@ impl Default for Options {
             scale: DEFAULT_SCALE,
             standard: VideoStandard::Ntsc,
             filters: DisplayFilters::default(),
+            bas: None,
+            no_run: false,
         }
     }
 }
@@ -143,6 +151,8 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--screenshot" => options.screenshot = Some(value(&mut args, "--screenshot")?.into()),
             "--artifacting" => options.filters.artifacting = true,
             "--pal-blending" => options.filters.pal_blending = true,
+            "--bas" => options.bas = Some(value(&mut args, "--bas")?.into()),
+            "--no-run" => options.no_run = true,
             "--scale" => {
                 let scale = number(&mut args, "--scale")?;
                 if !(1..=MAX_SCALE).contains(&scale) {
@@ -162,6 +172,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
     }
     if options.headless && options.frames.is_none() {
         return Err(usage("--headless needs --frames".to_owned()));
+    }
+    if options.no_run && options.bas.is_none() {
+        return Err(usage("--no-run needs --bas".to_owned()));
     }
     check_filters(&options)?;
     Ok(Command::Run(options))
@@ -259,6 +272,9 @@ mod tests {
             "--scale",
             "3",
             "--pal",
+            "--bas",
+            "game.bas",
+            "--no-run",
         ]);
         assert_eq!(
             options,
@@ -272,6 +288,8 @@ mod tests {
                 scale: 3,
                 standard: VideoStandard::Pal,
                 filters: DisplayFilters::default(),
+                bas: Some("game.bas".into()),
+                no_run: true,
             },
             "all options"
         );
@@ -294,6 +312,8 @@ mod tests {
             (&["--scale", "9"], "--scale must be 1 to 8, not 9"),
             (&["--fast"], "unknown argument \"--fast\""),
             (&["--headless"], "--headless needs --frames"),
+            (&["--bas"], "--bas needs a value"),
+            (&["--no-run"], "--no-run needs --bas"),
         ] {
             let error = parse_err(list);
             assert!(error.starts_with(message), "{list:?}: {error}");

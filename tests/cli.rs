@@ -6,7 +6,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use atari_mac::atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
+use atari_mac::atari_core::keyboard::ascii_to_kbcode;
+use atari_mac::atari_core::screen::{has_row, screen_text};
 use atari_mac::atari_core::{Machine, MachineConfig, VideoStandard, palette};
+use atari_mac::bas::{self, Phase, Typist};
+use atari_mac::cli::Options;
+use atari_mac::frontend::Flow;
+use atari_mac::start;
 // The binary uses this dependency; this test does not.
 use minifb as _;
 
@@ -398,4 +404,300 @@ fn filter_flag_needs_matching_standard() {
             "{flags:?}: {message}"
         );
     }
+}
+
+/// Writes the BASIC program file `name` with `contents` in the directory of `test`.
+fn write_bas(test: &str, name: &str, contents: &str) -> PathBuf {
+    let path = temp_dir(test).join(name);
+    fs::write(&path, contents).expect("write the BASIC program file");
+    path
+}
+
+/// The options of an in-process run with the free ROMs and the program file `bas`.
+fn bas_options(bas: &Path, no_run: bool) -> Options {
+    Options {
+        os: OS_ROM.into(),
+        basic: BASIC_ROM.into(),
+        bas: Some(bas.to_owned()),
+        no_run,
+        ..Options::default()
+    }
+}
+
+/// The screen rows of `machine` without the margin and the trailing spaces.
+fn screen_rows(machine: &Machine) -> Vec<String> {
+    screen_text(machine)
+        .iter()
+        .map(|row| row.trim().to_owned())
+        .collect()
+}
+
+/// Runs `atari-mac --headless --frames <frames> --bas <bas> --screenshot` with `flags`, and
+/// returns the screen text rows of the last frame.
+///
+/// The binary writes only a screenshot, not the screen text. So the same run is made in
+/// process (`atari_mac::start`, `Frontend::run_frames`), the screenshot is checked to be
+/// the frame of that run, and the rows are the `screen_text` of that run. The emulation is
+/// deterministic, so both runs are the same.
+fn bas_screen(test: &str, bas: &Path, flags: &[&str], frames: u64) -> Vec<String> {
+    let png_path = temp_dir(&format!("{test}-png")).join("out.png");
+    let frames_arg = frames.to_string();
+    let mut args = vec![
+        "--headless",
+        "--frames",
+        &frames_arg,
+        "--bas",
+        bas.to_str().expect("UTF-8 path"),
+        "--screenshot",
+        png_path.to_str().expect("UTF-8 path"),
+    ];
+    args.extend(flags);
+    let output = run(&args);
+    assert!(output.status.success(), "{args:?}: {}", stderr(&output));
+
+    let mut frontend = start(&bas_options(bas, flags.contains(&"--no-run"))).expect("start");
+    frontend.run_frames(frames).expect("run");
+    let decoder = png::Decoder::new(BufReader::new(File::open(&png_path).expect("PNG file")));
+    let mut reader = decoder.read_info().expect("PNG header");
+    let mut pixels = vec![0; reader.output_buffer_size().expect("PNG size")];
+    let info = reader.next_frame(&mut pixels).expect("PNG data");
+    assert_eq!((info.width, info.height), (384, 240), "PNG size in pixels");
+    let expected: Vec<u8> = frontend
+        .machine()
+        .frame()
+        .iter()
+        .flat_map(|&color| {
+            let [_, r, g, b] = palette::rgb(VideoStandard::Ntsc, color).to_be_bytes();
+            [r, g, b]
+        })
+        .collect();
+    assert!(pixels == expected, "the screenshot is the in-process frame");
+    screen_rows(frontend.machine())
+}
+
+/// The index of the first row from row `from` that equals `text`.
+fn row_after(rows: &[String], from: usize, text: &str) -> Option<usize> {
+    rows.iter()
+        .enumerate()
+        .skip(from)
+        .find(|(_, row)| *row == text)
+        .map(|(index, _)| index)
+}
+
+/// The frames that run before the typist presses the first key (at the `Ready` prompt).
+fn frames_to_first_key(bas: &Path) -> u64 {
+    let mut frontend = start(&bas_options(bas, false)).expect("start");
+    while matches!(
+        frontend.typist().map(Typist::phase),
+        Some(Phase::WaitReady(_))
+    ) {
+        frontend.run_frames(1).expect("run");
+    }
+    frontend.frames_run() - 1
+}
+
+/// Verifies REQ-080: with a file with `10 PRINT 2+2`, `--headless --frames 600 --bas`
+/// ends with the rows `RUN`, `4` and `Ready` in this order (criterion 1).
+#[test]
+fn bas_runs_program() {
+    let bas = write_bas("bas_runs_program", "sum.bas", "10 PRINT 2+2\n");
+    let rows = bas_screen("bas_runs_program", &bas, &[], 600);
+    let run_row = row_after(&rows, 0, "RUN");
+    let four = run_row.and_then(|index| row_after(&rows, index + 1, "4"));
+    let ready = four.and_then(|index| row_after(&rows, index + 1, "Ready"));
+    assert!(ready.is_some(), "RUN, 4, Ready in {rows:#?}");
+    assert!(rows.iter().any(|row| row == "10 PRINT 2+2"), "{rows:#?}");
+}
+
+/// Verifies REQ-080: with `--no-run`, the program line and `Ready` are on the screen, and
+/// no row is `4` (criterion 2).
+#[test]
+fn bas_no_run_only_types() {
+    let bas = write_bas("bas_no_run_only_types", "sum.bas", "10 PRINT 2+2\n");
+    let rows = bas_screen("bas_no_run_only_types", &bas, &["--no-run"], 600);
+    for text in ["10 PRINT 2+2", "Ready"] {
+        assert!(rows.iter().any(|row| row == text), "{text} in {rows:#?}");
+    }
+    assert!(!rows.iter().any(|row| row == "4"), "no row 4: {rows:#?}");
+    assert!(!rows.iter().any(|row| row == "RUN"), "no RUN: {rows:#?}");
+}
+
+/// Verifies REQ-080: LF and CR LF line ends give the same key presses, empty lines and
+/// lines with only spaces are not typed, and a missing newline at the end has no effect
+/// (criterion 3). The key codes are compared, and two runs show the same screen.
+#[test]
+fn bas_line_endings() {
+    let test = "bas_line_endings";
+    let lf = write_bas(test, "lf.bas", "10 PRINT 2+2\n20 PRINT 3*3\n");
+    let crlf = lf.with_file_name("crlf.bas");
+    fs::write(&crlf, "\r\n10 PRINT 2+2\r\n   \r\n\r\n20 PRINT 3*3").expect("write");
+    let no_end = lf.with_file_name("no-end.bas");
+    fs::write(&no_end, "10 PRINT 2+2\n  \n20 PRINT 3*3").expect("write");
+    let expected: Vec<u8> = "10 PRINT 2+2\n20 PRINT 3*3\nRUN\n"
+        .chars()
+        .map(|c| ascii_to_kbcode(c).expect("key"))
+        .collect();
+    for path in [&lf, &crlf, &no_end] {
+        assert_eq!(
+            bas::load(path, true).expect("load"),
+            expected,
+            "key codes of {}",
+            path.display()
+        );
+    }
+    let lf_rows = bas_screen(test, &lf, &[], 600);
+    assert!(lf_rows.iter().any(|row| row == "9"), "{lf_rows:#?}");
+    assert_eq!(bas_screen(test, &crlf, &[], 600), lf_rows, "CR LF screen");
+}
+
+/// Verifies REQ-080: a character without an Atari key gives exit code 2 and a message with
+/// the file, the line number and the character, before the machine starts (criterion 4).
+/// The OS ROM file does not exist: the machine would fail with a message about it, so the
+/// message about the program shows that the check comes first.
+#[test]
+fn bas_rejects_unknown_character() {
+    let bas = write_bas(
+        "bas_rejects_unknown_character",
+        "brace.bas",
+        "10 PRINT 1\n20 PRINT \"{\"\n",
+    );
+    let output = run(&[
+        "--os",
+        "/nonexistent/os.rom",
+        "--headless",
+        "--frames",
+        "600",
+        "--bas",
+        bas.to_str().expect("UTF-8 path"),
+    ]);
+    assert_eq!(output.status.code(), Some(2), "exit status");
+    let message = stderr(&output);
+    assert!(
+        message.contains("brace.bas") && message.contains("line 2") && message.contains("'{'"),
+        "{message}"
+    );
+    assert!(
+        !message.contains("os.rom"),
+        "the machine did not start: {message}"
+    );
+    assert!(output.stdout.is_empty(), "no frames ran");
+}
+
+/// Verifies REQ-080: a file that does not exist, or that cannot be read (a directory),
+/// gives exit code 2 and a message that names the file (criterion 5).
+#[test]
+fn bas_missing_file() {
+    let dir = temp_dir("bas_missing_file");
+    let missing = dir.join("missing.bas");
+    let directory = dir.join("dir.bas");
+    fs::create_dir_all(&directory).expect("create the directory");
+    for path in [&missing, &directory] {
+        let name = path.to_str().expect("UTF-8 path");
+        let output = run(&["--headless", "--frames", "1", "--bas", name]);
+        assert_eq!(output.status.code(), Some(2), "{name}");
+        let message = stderr(&output);
+        assert!(message.contains(name), "{message}");
+    }
+}
+
+/// Verifies REQ-080: the typing starts only after the `Ready` prompt is on the screen, and
+/// without `Ready` the emulator stops after 600 frames with exit code 1 and a message that
+/// BASIC did not start (criterion 6). The first part runs the frontend frame by frame and
+/// reads the POKEY key bit (`SKSTAT` bit 2 is 0 while a key is down). For the second part,
+/// a BASIC ROM of zero bytes never shows `Ready`.
+#[test]
+fn bas_waits_for_ready() {
+    let bas = write_bas("bas_waits_for_ready", "sum.bas", "10 PRINT 2+2\n");
+    let mut frontend = start(&bas_options(&bas, false)).expect("start");
+    let mut typing = false;
+    for _ in 0..600 {
+        let ready_before = has_row(frontend.machine(), "Ready");
+        frontend.run_frames(1).expect("run");
+        if frontend.machine().peek(0xD20F) & 0x04 == 0 {
+            assert!(ready_before, "a key is down before Ready");
+            typing = true;
+            break;
+        }
+        assert!(!ready_before, "the typing starts at once after Ready");
+    }
+    assert!(typing, "the typing started");
+
+    let zero = temp_dir("bas_waits_for_ready-rom").join("zero.rom");
+    fs::write(&zero, [0_u8; 0x2000]).expect("write the ROM");
+    let output = run(&[
+        "--basic",
+        zero.to_str().expect("UTF-8 path"),
+        "--headless",
+        "--frames",
+        "2000",
+        "--bas",
+        bas.to_str().expect("UTF-8 path"),
+    ]);
+    assert_eq!(output.status.code(), Some(1), "exit status");
+    let message = stderr(&output);
+    assert!(
+        message.contains("BASIC did not start") && message.contains("600 frames"),
+        "{message}"
+    );
+}
+
+/// Verifies REQ-080: the frontend keeps showing frames while it types (criterion 7).
+///
+/// A test cannot open the window, so this test checks the two parts that the window uses.
+/// First, `Frontend::step`, which the window calls once per host frame before it shows the
+/// frame, runs exactly one frame per call while the program is typed, and the screen
+/// between two calls shows a growing part of the program line. Second, a headless run that
+/// stops in the middle of the typing (a small `--frames`) gives a screenshot of a part of
+/// the line.
+#[test]
+fn bas_window_shows_typing() {
+    let test = "bas_window_shows_typing";
+    let line = "10 PRINT 2+2";
+    let bas = write_bas(test, "two.bas", "10 PRINT 2+2\n20 PRINT 3*3\n");
+    let mut frontend = start(&bas_options(&bas, false)).expect("start");
+    let mut parts: Vec<String> = Vec::new();
+    while frontend.typist().is_some() {
+        let frames = frontend.frames_run();
+        assert_eq!(frontend.step(&[]).expect("step"), Flow::Continue, "step");
+        assert_eq!(frontend.frames_run(), frames + 1, "one frame per step");
+        let rows = screen_rows(frontend.machine());
+        if let Some(part) = rows
+            .iter()
+            .find(|row| row.len() > 2 && line.starts_with(row.as_str()))
+            && parts.last() != Some(part)
+        {
+            parts.push(part.clone());
+        }
+    }
+    assert!(
+        parts.len() >= 8 && parts.last().map(String::as_str) == Some(line),
+        "the line grows while it is typed: {parts:?}"
+    );
+
+    let frames = frames_to_first_key(&bas) + 6 * 7;
+    let rows = bas_screen(test, &bas, &[], frames);
+    assert!(
+        rows.iter()
+            .any(|row| row.len() > 2 && row.len() < line.len() && line.starts_with(row.as_str())),
+        "a part of the line after {frames} frames: {rows:#?}"
+    );
+}
+
+/// Verifies REQ-080: `--help` lists `--bas <file>` and `--no-run`, and `--no-run` without
+/// `--bas` gives exit code 2 (criterion 8).
+#[test]
+fn bas_help_and_no_run_alone() {
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help");
+    let usage = String::from_utf8_lossy(&output.stdout);
+    for option in ["--bas <file>", "--no-run"] {
+        assert!(usage.contains(option), "{option} in {usage}");
+    }
+    let output = run(&["--headless", "--frames", "1", "--no-run"]);
+    assert_eq!(output.status.code(), Some(2), "--no-run alone");
+    assert!(
+        stderr(&output).contains("--no-run needs --bas"),
+        "{}",
+        stderr(&output)
+    );
 }

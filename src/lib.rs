@@ -5,6 +5,7 @@
 //! | Module | Contents |
 //! | --- | --- |
 //! | [`cli`] | The command line |
+//! | [`bas`] | A BASIC program from a text file, typed at the `Ready` prompt (REQ-080) |
 //! | [`keymap`] | Host key to Atari key (REQ-009, REQ-010, REQ-017) |
 //! | [`frontend`] | Machine setup, input, pause, frame conversion, pacing, PNG screenshot |
 //! | [`window`] | The `minifb` window loop (REQ-008) |
@@ -15,6 +16,7 @@
     reason = "bitflags 1 comes only from sdl2, which orbclient uses on non-Redox hosts; minifb uses orbclient only on Redox, so it is never built (cargo-deny checks only the real targets)"
 )]
 
+pub mod bas;
 pub mod cli;
 pub mod error;
 pub mod frontend;
@@ -29,6 +31,7 @@ use std::time::Instant;
 
 pub use atari_core;
 
+use crate::bas::Typist;
 use crate::cli::{Command, Options, USAGE};
 use crate::error::FrontendError;
 use crate::frontend::{Frontend, load_machine, window_title, write_png};
@@ -49,19 +52,38 @@ pub fn run(
     }
 }
 
+/// Creates the frontend for `options`: reads and checks the BASIC program file of `--bas`
+/// first (REQ-080 criteria 4 and 5), then creates the machine.
+///
+/// # Errors
+///
+/// The errors of [`bas::load`] and [`load_machine`].
+pub fn start(options: &Options) -> Result<Frontend, FrontendError> {
+    let codes = options
+        .bas
+        .as_deref()
+        .map(|path| bas::load(path, !options.no_run))
+        .transpose()?;
+    let frontend = Frontend::new(load_machine(options)?);
+    Ok(match codes {
+        Some(codes) => frontend.with_typist(Typist::new(codes)),
+        None => frontend,
+    })
+}
+
 /// Runs the machine with the window or headless, then writes the elapsed time and the
 /// screenshot.
 fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendError> {
-    let mut frontend = Frontend::new(load_machine(options)?);
+    let mut frontend = start(options)?;
     let elapsed = match options.frames {
         Some(frames) if options.headless => {
             let start = Instant::now();
-            frontend.run_frames(frames);
+            frontend.run_frames(frames)?;
             start.elapsed()
         }
         frames => window::run(
             &mut frontend,
-            &window_title(options.cart.as_deref()),
+            &window_title(options.cart.as_deref().or(options.bas.as_deref())),
             options.scale,
             options.filters,
             frames,
