@@ -71,7 +71,8 @@ pub struct CycleOutput {
     pub dma: DmaKind,
     /// The byte that ANTIC read. Valid only if `halt` and `dma != Refresh`.
     pub dma_data: u8,
-    /// `true` on the one cycle where the NMI becomes visible to the CPU (REQ-334).
+    /// `true` in the tick after the cycle in which the NMI level rises (REQ-334).
+    /// For tests and tracing: the CPU uses `nmi_level` (OI-017).
     pub nmi: bool,
     /// The codes for the two color clocks of this cycle, left first (REQ-306, REQ-307).
     pub video: [AnCode; 2],
@@ -167,7 +168,7 @@ The machine must make these changes to the draft code in `machine.rs`:
 2. During a RDY wait, the machine repeats the CPU read on the bus in each cycle. This matters only for read-sensitive addresses (HRM 4.9, Bus activity during WSYNC). This is Could behavior.
 3. `Machine::reset_key` calls `antic.reset()`. On the XL/XE, the RESET key also resets ANTIC (HRM 4.1).
 4. `Machine::cold_reset` calls `antic.reset()`. It does not set the scan line and cycle to 0. `Antic::new` sets them to 0 (REQ-303).
-5. After the CPU access of cycle c, the machine passes `antic.nmi_level()` to the CPU as the NMI level of cycle c (OI-017). `out.nmi` has the same value as the level of the previous `tick`, for tests and tracing only.
+5. After the CPU access of cycle c, the machine passes `antic.nmi_level()` to the CPU as the NMI level of cycle c (OI-017). `out.nmi` is true in the `tick` after the cycle in which the level rises (tick 9, or tick 10 after an enable on cycle 7), for tests and tracing only.
 
 ### Interface with GTIA
 
@@ -230,7 +231,9 @@ All state is in `struct Antic`. Sizes are the sizes in hardware. The Rust type c
 | `wsync_start`, `wsync_end` | u64 each | 0 | Kept | RDY-low window, in `total_cycles` |
 | `dli_this_line` | 1 bit | 0 | Kept | Result of the DLI check on cycle 5 |
 | `nmien_prev` | 2 bits | 0 | Cleared | `NMIEN` bits 6-7 as written by the previous cycles, for `en_by(6)` and `en_by(7)` |
-| `nmi_lost` | 1 bit | 0 | Kept | IRQ started on cycle 4 of this line (REQ-335) |
+| `nmi_source` | 2 bits | 0 | Kept | R: the NMI source of this scan line (DLI or VBI), set on cycle 7 |
+| `nmi_armed` | 2 bits | 0 | Kept | `R && en_by(6)` on cycle 8, `R && en_by(7)` on cycle 9, else 0. `nmi_level()` is `nmi_armed & nmien != 0` |
+| `nmi_was_high` | 1 bit | 0 | Kept | NMI level of the cycle before the last tick, for `out.nmi` |
 | `virtual_pending` | 1 bit + kind | none | Kept | A virtual fetch waits for `end_cycle` |
 
 ## Behavior
@@ -475,7 +478,7 @@ All start and stop events move one cycle later for each 2 of `HSCROL` on scrolle
 
 ### Test methods
 
-Unit tests are in `crates/atari-core/src/antic.rs` (`#[cfg(test)] mod tests`). They call `tick`, `read`, `write`, `end_cycle`, `reset` and `irq_sequence_started` directly, between two ticks. They use these helpers:
+Unit tests are in `crates/atari-core/src/antic.rs` (`#[cfg(test)] mod tests`). They call `tick`, `read`, `write`, `end_cycle`, `reset` and `nmi_level` directly, between two ticks. They use these helpers:
 
 - **Fake memory.** A fake `DmaMemory` holds 64 KB. It logs each `dma_read` as `(cycle, address)`. It uses interior mutability (`RefCell`), because `dma_read` takes `&self`. A test finds the address of each fetch from this log.
 - **Output record.** The test records the `CycleOutput` of each cycle. "`out.dma` is X on cycle t" means the record of cycle t.
@@ -526,7 +529,7 @@ Machine unit tests are in `crates/atari-core/src/machine.rs`. They are necessary
 | REQ-331 | `antic.rs` `nmist_low_bits_read_one` (1), `dli_clears_vbi_bit` (2), `vbi_clears_dli_bit` (3), `nmist_set_when_disabled` (4), `nmires_clears_status` (5), `dli_bit_stays_set` (6), `nmist_bit5_stays_clear` (7) |
 | REQ-332 | `antic.rs` `dli_on_last_line_of_mode_line` (1), `dli_masked_by_nmien` (2), `dli_on_blank_line` (3), `dli_on_shortened_line` (4), `dli_on_jump` (5) |
 | REQ-333 | `antic.rs` `vbi_on_line_248` (1), `vbi_masked_by_nmien` (2); `crates/harness/tests/antic_nmi.rs` `os_vbi_increments_rtclok` (3) |
-| REQ-334 | `antic.rs` `nmist_visible_from_cycle_7` (1), `nmien_enable_on_7_delays_nmi` (3), `nmien_enable_on_8_too_late` (4), `nmien_disable_on_8_prevents` (5), `nmires_does_not_cancel` (6); `crates/harness/tests/antic_nmi.rs` `nmi_sequence_start_cycles` (2, 3); `crates/harness/tests/antic_cpu.rs` `nmi_start_cycles_with_real_cpu` (joint ANTIC and CPU test, OI-017) |
+| REQ-334 | `antic.rs` `nmist_visible_from_cycle_7` (1), `nmien_enable_on_7_delays_nmi` (3), `nmien_enable_on_8_too_late` (4), `nmien_disable_on_8_prevents` (5), `nmires_does_not_cancel` (6); `crates/harness/tests/antic_nmi.rs` `nmi_sequence_start_cycles` (2, 3); `crates/harness/tests/antic_cpu.rs` `nmi_start_cycles_with_real_cpu` (2, 5; joint ANTIC and CPU test, OI-017) |
 | REQ-335 | `crates/harness/tests/antic_nmi.rs` `brk_on_cycle_4_skips_vbi_handler` (1), `brk_on_cycle_3_or_5_keeps_vbi_handler` (2); `machine.rs` `brk_on_cycle_4_loses_vbi_nmi` |
 | REQ-336 | `antic.rs` `wsync_rdy_window` (5), `halt_on_cycles_105_106_setups` (supports 3, 4); `crates/harness/tests/antic_wsync.rs` `wsync_next_instruction_on_104` (1), `wsync_blocked_next_cycle_starts_on_105` (2), `wsync_delayed_by_playfield_105` (3), `wsync_delayed_by_refresh_105` (4), `wsync_delayed_by_refresh_106` (4) |
 | REQ-337 | `antic.rs` `wsync_write_on_104_waits_next_line` (supports 1), `wsync_windows_join` (supports 2, 3); `crates/harness/tests/antic_wsync.rs` `wsync_write_on_104_next_line` (1), `inc_wsync_ignores_dma` (2), `inc_wsync_on_103_104` (3), `wsync_write_on_113` (4) |
@@ -580,6 +583,7 @@ These tests are new in this revision of the test plan. Each line tells what the 
 - `nmist_bit5_stays_clear`: after an `NMIRES` write, checks bit 5 for 2 frames and after a reset.
 - `os_vbi_increments_rtclok`: boots AltirraOS and checks that `$14` increases by 1 in each frame. It replaces `os_boots_with_vbi`.
 - `nmi_sequence_start_cycles`: a DLI on a `$80` line with `NOP` loops at two alignments, and an `NMIEN` write on cycle 7; finds the start of the NMI sequence from the cycle of its first stack write (sequence cycle 3).
+- `nmi_start_cycles_with_real_cpu`: the four cases of the OI-017 WP-5 measurement with the real CPU: `NOP` on cycle 8 and 9 of a DLI line, `NMIEN` = `$00` written on cycle 8 and on cycle 9, and a `BRK` on cycle 5 of scan line 248 (NMI handler only, pushed `P` with bit 4 = 1).
 - `brk_on_cycle_4_skips_vbi_handler`: a `BRK` with its opcode fetch on cycle 4 of scan line 248; the NMI handler writes a marker to RAM, and the marker does not change in that frame. It replaces `irq_on_cycle_4_skips_dli_handler`.
 - `brk_on_cycle_3_or_5_keeps_vbi_handler`: the same with the `BRK` on cycle 3 and on cycle 5; the marker changes once.
 - `halt_on_cycles_105_106_setups`: checks `out.halt` on cycles 104-107 in the three setups of REQ-336 criteria 3 and 4.

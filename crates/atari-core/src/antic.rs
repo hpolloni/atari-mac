@@ -100,7 +100,8 @@ pub struct CycleOutput {
     pub dma: DmaKind,
     /// The byte that ANTIC read. Valid only if `halt` and `dma != Refresh`.
     pub dma_data: u8,
-    /// `true` on the one cycle where the NMI becomes visible to the CPU (REQ-334).
+    /// `true` in the tick after the cycle in which the NMI level rises (REQ-334). For tests
+    /// and tracing: the machine passes `Antic::nmi_level` to the CPU (OI-017).
     pub nmi: bool,
     /// The codes for the two color clocks of this cycle, left first (REQ-306, REQ-307).
     pub video: [AnCode; 2],
@@ -224,8 +225,9 @@ pub struct Antic {
     chbase_late: u8,
     /// `NMIEN` (bits 7-6).
     nmien: u8,
-    /// `NMIEN` as seen by tick 7 (writes up to cycle 6).
-    nmien_at_7: u8,
+    /// `NMIEN` as written by the previous cycles: by cycle 6 after tick 7, by cycle 7 after
+    /// tick 8 (`en_by(6)` and `en_by(7)`, OI-017).
+    nmien_prev: u8,
     /// `NMIST` bits 7-5.
     nmist: u8,
     /// The instruction register.
@@ -278,12 +280,11 @@ pub struct Antic {
     dli_this_line: bool,
     /// The NMI source of this scan line (`NMI_DLI` or `NMI_VBI`), from tick 7.
     nmi_source: u8,
-    /// The NMI request of tick 8.
-    nmi_request: u8,
-    /// The request comes one cycle late (`NMIEN` was set on cycle 7).
-    nmi_late: bool,
-    /// An IRQ sequence started on cycle 4 of this scan line (REQ-335).
-    nmi_lost: bool,
+    /// The NMI sources that the earlier `NMIEN` value enables for this cycle: `R` and
+    /// `en_by(6)` on cycle 8, `R` and `en_by(7)` on cycle 9, else 0 (OI-017).
+    nmi_armed: u8,
+    /// The NMI level of the cycle before the last tick, for `out.nmi`.
+    nmi_was_high: bool,
     /// The IR mode was hi-res at scan line 248 (REQ-346).
     hires_bug: bool,
     /// A virtual or disabled playfield fetch waits for `end_cycle`.
@@ -370,7 +371,7 @@ impl Antic {
             chbase: 0,
             chbase_late: 0,
             nmien: 0,
-            nmien_at_7: 0,
+            nmien_prev: 0,
             nmist: 0x60,
             ir: 0,
             prev_vs: false,
@@ -397,9 +398,8 @@ impl Antic {
             wsync_end: 0,
             dli_this_line: false,
             nmi_source: 0,
-            nmi_request: 0,
-            nmi_late: false,
-            nmi_lost: false,
+            nmi_armed: 0,
+            nmi_was_high: false,
             hires_bug: false,
             deferred: None,
         }
@@ -411,7 +411,6 @@ impl Antic {
         self.dmactl = 0;
         self.dmactl_late = 0;
         self.nmien = 0;
-        self.nmi_request = 0;
         self.dma_clock = 0;
         self.tap_history = 0;
     }
@@ -490,11 +489,12 @@ impl Antic {
         }
     }
 
-    /// The CPU started an IRQ or BRK interrupt sequence in this cycle (REQ-335).
-    pub const fn irq_sequence_started(&mut self) {
-        if self.cur_cycle == 4 {
-            self.nmi_lost = true;
-        }
+    /// The NMI level of the cycle of the last tick, after the CPU access of the cycle
+    /// (OI-017): `nmi(8) = R && en_by(6) && en_now`, `nmi(9) = R && en_by(7) && en_now`, and
+    /// false on all other cycles. `en_now` includes an `NMIEN` write in this cycle (REQ-334).
+    #[must_use]
+    pub const fn nmi_level(&self) -> bool {
+        self.nmi_armed & self.nmien != 0
     }
 
     /// The scan line of the next `tick`, `0..lines_per_frame`.
@@ -607,7 +607,6 @@ impl Antic {
         self.tap_history = 0;
         self.dl_fetched = false;
         self.dli_this_line = false;
-        self.nmi_lost = false;
         if self.cur_line == FIRST_DISPLAY_LINE {
             self.hires_bug = false;
         }
@@ -885,8 +884,13 @@ impl Antic {
         }
     }
 
-    /// `NMIST` and the NMI edge (REQ-331 to REQ-335).
+    /// `NMIST` and the NMI level (REQ-331 to REQ-334, OI-017). `out.nmi` is the rising edge
+    /// of the level of the cycle before this tick, for tests and tracing.
     const fn nmi(&mut self, out: &mut CycleOutput) {
+        let high = self.nmi_level();
+        out.nmi = high && !self.nmi_was_high;
+        self.nmi_was_high = high;
+        self.nmi_armed = 0;
         match self.cur_cycle {
             7 => {
                 self.nmi_source = if self.cur_line == VBLANK_START_LINE {
@@ -899,19 +903,13 @@ impl Antic {
                 if self.nmi_source != 0 {
                     self.nmist = (self.nmist & 0x20) | self.nmi_source;
                 }
-                self.nmien_at_7 = self.nmien;
+                self.nmien_prev = self.nmien;
             }
             8 => {
-                self.nmi_request = self.nmi_source & self.nmien;
-                self.nmi_late = self.nmi_request & !self.nmien_at_7 != 0;
+                self.nmi_armed = self.nmi_source & self.nmien_prev;
+                self.nmien_prev = self.nmien;
             }
-            9 | 10 => {
-                let late_cycle = self.cur_cycle == 10;
-                if self.nmi_request != 0 && self.nmi_late == late_cycle {
-                    out.nmi = self.nmi_request & self.nmien != 0 && !self.nmi_lost;
-                    self.nmi_request = 0;
-                }
-            }
+            9 => self.nmi_armed = self.nmi_source & self.nmien_prev,
             _ => {}
         }
     }

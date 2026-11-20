@@ -1,4 +1,4 @@
-//! ANTIC `WSYNC` system tests with the CPU (REQ-336).
+//! ANTIC `WSYNC` system tests with the CPU (REQ-336, REQ-337).
 //!
 //! Method of `docs/design/antic.md`, "Test plan": the test runs one machine cycle at a time
 //! and finds the cycle of a CPU write as the first cycle after which the RAM byte has the new
@@ -203,50 +203,119 @@ mod wsync {
         assert_eq!(fetch, (TEST_LINE, 9), "the STX opcode fetch");
         assert_eq!(write, (TEST_LINE, 109), "the STX write");
     }
-}
 
-/// The planned tests (`docs/design/spec-gates.md`, "Planned test stubs"). The module has
-/// `cfg(test)`, so that the helper can panic as the tests do.
-#[cfg(test)]
-mod stubs {
-    /// Fails the calling test: a planned stub never counts as a pass.
-    fn planned() {
-        panic!("planned test: not written yet");
+    /// The RAM byte of the calibration writes.
+    const PROBE: u16 = 0x0602;
+
+    /// The cycles of the instruction `opcode` at the end of a program: runs the program of
+    /// `setup` and `fill` with `opcode $0602` (RAM) in place of the `WSYNC` access (`STX`
+    /// in place of `STA`, because `A` can be 0). Returns the
+    /// positions of the operand high byte fetch and of the last write. Both instructions have
+    /// the same cycles up to the write that changes RAM.
+    fn probe_cycles(
+        setup: &[(u16, u8)],
+        fill: u32,
+        opcode: u8,
+        ir: u8,
+    ) -> ((u32, u32), (u32, u32)) {
+        let mut tail = abs(opcode, PROBE).to_vec();
+        tail.extend(abs(0x8E, TARGET));
+        let code = program(setup, fill, &tail);
+        let mut m = machine(&code, ir);
+        let after_operand = 0xC000 + u16::try_from(code.len() - 6).unwrap();
+        assert_eq!(
+            write_position(&mut m, MARKER),
+            (MARKER_LINE, 107),
+            "the marker write"
+        );
+        let operand = loop {
+            let n = m.cycle_count();
+            assert!(n < LIMIT, "no operand fetch in {LIMIT} cycles");
+            m.run_cycle();
+            if m.cpu().registers().pc == after_operand {
+                break position(n);
+            }
+        };
+        (operand, write_position(&mut m, PROBE))
+    }
+
+    /// `opcode WSYNC`, then `STX $0600`.
+    fn op_wsync_stx(opcode: u8) -> Vec<u8> {
+        let mut tail = abs(opcode, WSYNC).to_vec();
+        tail.extend(abs(0x8E, TARGET));
+        tail
     }
 
     /// Verifies REQ-337: with `DMACTL` = `$00`, `STA WSYNC` with its write on cycle 104 of
     /// scan line N, then `STX $0600`: the `STX` opcode fetch is on cycle 105 of scan line N and
-    /// the `STX` write on cycle 107 of scan line N + 1.
+    /// the `STX` write on cycle 107 of scan line N + 1 (criterion 1).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn wsync_write_on_104_next_line() {
-        planned();
+        // 6 free cycles on scan line 31 and 92 free cycles before cycle 101 on scan line 32
+        // (refresh on cycles 25, 29, ..., 57) make 98, so `STA WSYNC` runs on cycles 101-104.
+        let (operand, write) = probe_cycles(&[], 98, 0x8E, 0x0E);
+        assert_eq!(
+            (operand, write),
+            ((TEST_LINE, 103), (TEST_LINE, 104)),
+            "the STA write"
+        );
+        let (fetch, write) = stx_cycles(&program(&[], 98, &wsync_stx()), 0x0E);
+        assert_eq!(fetch, (TEST_LINE, 105), "the STX opcode fetch");
+        assert_eq!(write, (TEST_LINE + 1, 107), "the STX write");
     }
 
-    /// Verifies REQ-337: on the first scan line of a mode A line with `DMACTL` = `$23`,
-    /// `INC WSYNC` with its write cycles on cycles 102 and 103, then `STX $0600`: the `STX`
-    /// opcode fetch is on cycle 105 and the `STX` write on cycle 108.
+    /// Verifies REQ-337: on the first scan line of a mode A line with `DMACTL` = `$23`
+    /// (`Bitmap` fetch on cycle 104), `INC WSYNC` with its write cycles on cycles 102 and 103,
+    /// then `STX $0600`: the `STX` opcode fetch is on cycle 105 and the `STX` write on cycle
+    /// 108 (criterion 2).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn inc_wsync_ignores_dma() {
-        planned();
+        // The wide mode A line fetches a `Bitmap` byte on every fourth cycle (..., 96, 100,
+        // 104). 69 free cycles put the operand fetch on cycle 99 and the last write on cycle
+        // 103: the read is on cycle 101 (after the fetch on 100), the writes on 102 and 103.
+        let setup = display_setup(0x23);
+        let (operand, write) = probe_cycles(&setup, 69, 0xEE, 0x0A);
+        assert_eq!(
+            (operand, write),
+            ((TEST_LINE, 99), (TEST_LINE, 103)),
+            "the INC writes on cycles 102 and 103"
+        );
+        let (fetch, write) = stx_cycles(&program(&setup, 69, &op_wsync_stx(0xEE)), 0x0A);
+        assert_eq!(fetch, (TEST_LINE, 105), "the STX opcode fetch");
+        assert_eq!(write, (TEST_LINE, 108), "the STX write");
     }
 
     /// Verifies REQ-337: with `DMACTL` = `$00`, `INC WSYNC` with its write cycles on cycles 103
     /// and 104 of scan line N, then `STX $0600`: the `STX` opcode fetch is on cycle 105 of
-    /// scan line N and the `STX` write on cycle 107 of scan line N + 1.
+    /// scan line N and the `STX` write on cycle 107 of scan line N + 1 (criterion 3).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn inc_wsync_on_103_104() {
-        planned();
+        // 6 + 90 free cycles reach cycle 99, so `INC WSYNC` runs on cycles 99-104.
+        let (operand, write) = probe_cycles(&[], 96, 0xEE, 0x0E);
+        assert_eq!(
+            (operand, write),
+            ((TEST_LINE, 101), (TEST_LINE, 104)),
+            "the INC writes on cycles 103 and 104"
+        );
+        let (fetch, write) = stx_cycles(&program(&[], 96, &op_wsync_stx(0xEE)), 0x0E);
+        assert_eq!(fetch, (TEST_LINE, 105), "the STX opcode fetch");
+        assert_eq!(write, (TEST_LINE + 1, 107), "the STX write");
     }
 
     /// Verifies REQ-337: with `DMACTL` = `$00`, `STA WSYNC` with its write on cycle 113 of
     /// scan line N, then `STX $0600`: the `STX` opcode fetch is on cycle 0 of scan line N + 1
-    /// and the `STX` write on cycle 107 of scan line N + 1.
+    /// and the `STX` write on cycle 107 of scan line N + 1 (criterion 4).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn wsync_write_on_113() {
-        planned();
+        // 6 + 101 free cycles reach cycle 110, so `STA WSYNC` runs on cycles 110-113.
+        let (operand, write) = probe_cycles(&[], 107, 0x8E, 0x0E);
+        assert_eq!(
+            (operand, write),
+            ((TEST_LINE, 112), (TEST_LINE, 113)),
+            "the STA write"
+        );
+        let (fetch, write) = stx_cycles(&program(&[], 107, &wsync_stx()), 0x0E);
+        assert_eq!(fetch, (TEST_LINE + 1, 0), "the STX opcode fetch");
+        assert_eq!(write, (TEST_LINE + 1, 107), "the STX write");
     }
 }
