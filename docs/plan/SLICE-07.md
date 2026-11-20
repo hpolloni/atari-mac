@@ -1,12 +1,12 @@
 ---
 id: SLICE-07
 title: Run a BASIC program from a file
-status: in-progress
+status: done
 depends_on: "SLICE-01"
 packages:
   - id: WP-1
     title: The --bas option
-    status: in-progress
+    status: done
     requirements: [REQ-080]
 ---
 # SLICE-07: Run a BASIC program from a file
