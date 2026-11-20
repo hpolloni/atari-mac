@@ -1,0 +1,52 @@
+# Section index of FSM-800XL: 800XL Computer Field Service Manual, FD100740 Rev. 01,
+# February 1984. Format: one section per line, key<TAB>title. Lines that start with # are
+# comments.
+#
+# Keys: the numbered sections use their number (1-6), and the introduction uses
+# INTRODUCTION. The topics inside a section have no numbers; their key is the section
+# number, a "/", and the words of the title (letters and digits only) joined with "-":
+# 1/Memory-Management-Unit-MMU.
+#
+# How it was made: the PDF is an image scan with no text layer. The titles are read from
+# the image of the table of contents (PDF page 5, printed page iii, rendered at 130 dpi).
+# The headings on PDF pages 9-13, 24-28 and 39-44 were compared with the TOC and agree.
+# The PDF has 47 pages; the schematics and silkscreens of section 5 are the large pages.
+INTRODUCTION	INTRODUCTION
+1	THEORY OF OPERATION
+1/User-Interface	User Interface
+1/Mechanical-Theory	Mechanical Theory
+1/Electrical-Theory	Electrical Theory
+1/6502C-CPU-Microprocessor	6502C CPU Microprocessor
+1/Alphanumeric-Television-Interface-Controller-ANTIC	Alphanumeric Television Interface Controller (ANTIC)
+1/Graphic-Television-Interface-Adaptor-GTIA	Graphic Television Interface Adaptor (GTIA)
+1/Pot-Keyboard-Integrated-Circuit-POKEY	Pot Keyboard Integrated Circuit (POKEY)
+1/Peripheral-Interface-Adaptor-PIA	Peripheral Interface Adaptor (PIA)
+1/Memory-ROMs-and-DRAMs	Memory (ROMs and DRAMs)
+1/OS-ROM	OS ROM
+1/BASIC-ROM	BASIC ROM
+1/DRAMS	DRAMS
+1/Memory-Management-Unit-MMU	Memory Management Unit (MMU)
+1/RF-Modulator	RF Modulator
+1/Monitor-Output	Monitor Output
+1/Power-Supply	Power Supply
+1/System-Interface	System Interface
+1/Serial-Input-Output-SIO-Interface	Serial Input/Output (SIO) Interface
+1/Keyboard-Interface	Keyboard Interface
+1/Controller-Jack-Interfaces	Controller Jack Interfaces
+1/Cartridge-Interface	Cartridge Interface
+1/Parallel-Bus-Interface	Parallel Bus Interface
+2	TESTING
+2/Overview	Overview
+2/Equipment-Needed	Equipment Needed
+2/Self-Test-Features	Self Test Features
+2/Description-of-Self-Tests	Description of Self Tests
+2/Memory-Test	Memory Test
+2/Audio-Visual-Test	Audio Visual Test
+2/Keyboard-Test	Keyboard Test
+2/All-Tests	All Tests
+2/SuperSALT-Testing	SuperSALT Testing
+3	SYMPTOM CHECKLIST
+4	ASSEMBLY/DISASSEMBLY
+5	SCHEMATICS AND SILKSCREENS, AND PARTS LIST
+5/Parts-List	Parts List
+6	SERVICE BULLETINS
