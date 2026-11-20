@@ -133,12 +133,13 @@ also on small synthetic files in a temporary directory, so that each failure rul
 | `structure` | REQ-044: sections, `shall`, numbered criteria |
 | `vague_words` | REQ-045: the words in `docs/spec/vague-words.txt` |
 | `sources` | REQ-046: `HRM n.m` against `docs/spec/hrm-sections.txt` |
-| `references` | REQ-047: `REQ-`, `OI-`, `SLICE-` references and relative links |
+| `references` | REQ-047, REQ-056: `REQ-`, `OI-`, `SLICE-` references and relative links, also in `README.md` |
 | `test_plans` | REQ-048: each requirement in exactly one test plan, with tests or evidence |
 | `trace` | REQ-027, REQ-049: test plan to code and code to test plan for all packages; a running test for `done` packages |
 | `slices` | REQ-050, REQ-054: each requirement in a package, package status |
 | `evidence` | REQ-051: evidence records for `done` packages |
-| `indexes` | REQ-053: the generated indexes are up to date |
+| `indexes` | REQ-053, REQ-056: the generated indexes and the README status block are up to date |
+| `readme` | REQ-056: `make` targets and command-line options that `README.md` names exist |
 
 `tests/traceability.rs` moves into this design: its rules become the `trace` gate.
 
@@ -171,7 +172,8 @@ The binary `cargo run -p atari-harness --bin spec-index` writes:
 
 - `docs/spec/requirements/INDEX.md` (replaces `scripts/req-index.sh`, which is deleted),
 - `docs/spec/open-items/README.md` (the table of open items),
-- `target/traceability.md` (the matrix, REQ-052).
+- `target/traceability.md` (the matrix, REQ-052),
+- the status block of `README.md` between the `BEGIN GENERATED: status` and `END GENERATED: status` markers (REQ-056). The rest of `README.md` is written by hand.
 
 The `indexes` gate compares the committed files with a new generation.
 
@@ -221,6 +223,7 @@ frontmatter. The converter is not committed. The migration commit must show that
 | REQ-053 | `spec_gates.rs` `open_item_gate_rejects_bad_files`, `indexes_are_up_to_date` |
 | REQ-054 | `spec_gates.rs` `slice_gate_rejects_bad_files` |
 | REQ-055 | `spec_gates.rs` `gates_run_within_10_seconds`; CI job `Specification` |
+| REQ-056 | `spec_gates.rs` `readme_status_block_is_current` (1-3), `readme_status_block_rejects_bad_markers` (1), `readme_links_and_ids_are_checked` (4), `readme_make_targets_exist` (5), `readme_options_exist` (6) |
 
 ## Open issues
 
