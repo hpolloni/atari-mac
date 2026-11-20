@@ -7,7 +7,6 @@ use super::objects::{
 use super::{COLBK, COLPM0, GRACTL, at, row};
 use crate::antic::DmaKind;
 use crate::gtia::{FRAME_HEIGHT, Gtia};
-use crate::planned::planned;
 use crate::timing::VideoStandard;
 
 /// `HPOSP0`.
