@@ -229,3 +229,115 @@ fn loads_cart_xex_and_disk() {
 fn rejects_bad_cart_xex_and_disk() {
     planned();
 }
+
+/// Runs `--headless --frames 240 --screenshot` with `flags` and returns the PNG pixels as
+/// `0x00RRGGBB` values.
+fn screenshot_240(test: &str, flags: &[&str]) -> Vec<u32> {
+    let png_path = temp_dir(test).join("out.png");
+    let png_arg = png_path.to_str().expect("UTF-8 path");
+    let mut args = vec!["--headless", "--frames", "240", "--screenshot", png_arg];
+    args.extend(flags);
+    let output = run(&args);
+    assert!(output.status.success(), "{flags:?}: {}", stderr(&output));
+    let decoder = png::Decoder::new(BufReader::new(File::open(&png_path).expect("PNG file")));
+    let mut reader = decoder.read_info().expect("PNG header");
+    let mut pixels = vec![0; reader.output_buffer_size().expect("PNG size")];
+    let info = reader.next_frame(&mut pixels).expect("PNG data");
+    assert_eq!((info.width, info.height), (384, 240), "PNG size in pixels");
+    pixels
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|&[r, g, b]| u32::from_be_bytes([0, r, g, b]))
+        .collect()
+}
+
+/// The frame buffer of an NTSC machine with the free ROMs after 240 frames from power-on.
+fn frame_after_240() -> Vec<u8> {
+    let mut machine = Machine::new(MachineConfig {
+        os_rom: fs::read(OS_ROM).expect("OS ROM"),
+        basic_rom: Some(fs::read(BASIC_ROM).expect("BASIC ROM")),
+        cartridge: None,
+        standard: VideoStandard::Ntsc,
+        audio_sample_rate: 48_000,
+    })
+    .expect("machine");
+    for _ in 0..240 {
+        machine.run_frame();
+    }
+    machine.frame().to_vec()
+}
+
+/// Verifies REQ-019: without the flags, the screenshot of `--headless --frames 240
+/// --screenshot` has each pixel equal to `palette::rgb` of the frame buffer byte
+/// (criterion 1).
+#[test]
+fn filters_off_without_flags() {
+    let pixels = screenshot_240("filters_off_without_flags", &[]);
+    let frame = frame_after_240();
+    for (i, (&color, &pixel)) in frame.iter().zip(&pixels).enumerate() {
+        assert_eq!(
+            pixel,
+            palette::rgb(VideoStandard::Ntsc, color),
+            "pixel ({}, {})",
+            i % FRAME_WIDTH,
+            i / FRAME_WIDTH
+        );
+    }
+}
+
+/// Verifies REQ-019: with `--artifacting` on an NTSC machine, the screenshot equals the
+/// output of `palette::artifact_ntsc_row` for each row (criterion 2).
+#[test]
+fn artifacting_flag_filters_screenshot() {
+    let pixels = screenshot_240("artifacting_flag_filters_screenshot", &["--artifacting"]);
+    let frame = frame_after_240();
+    let mut expected = [0; FRAME_WIDTH];
+    for (y, (row, out)) in frame
+        .chunks(FRAME_WIDTH)
+        .zip(pixels.chunks(FRAME_WIDTH))
+        .enumerate()
+    {
+        palette::artifact_ntsc_row(row, &mut expected);
+        assert_eq!(out, expected, "row {y}");
+    }
+    let plain: Vec<u32> = frame
+        .iter()
+        .map(|&color| palette::rgb(VideoStandard::Ntsc, color))
+        .collect();
+    assert_ne!(pixels, plain, "the filter changes the hires text");
+}
+
+/// Verifies REQ-019: with `--pal-blending` on a PAL machine, the screenshot equals the output
+/// of `palette::pal_blend_row` for each row (criterion 3).
+#[test]
+#[ignore = "planned: SLICE-02"]
+fn pal_blending_flag_filters_screenshot() {
+    planned();
+}
+
+/// Verifies REQ-019: `--help` lists both flags (criterion 4).
+#[test]
+fn help_lists_filter_flags() {
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help");
+    let usage = String::from_utf8_lossy(&output.stdout);
+    for flag in ["--artifacting", "--pal-blending"] {
+        assert!(usage.contains(flag), "{flag} in {usage}");
+    }
+}
+
+/// Verifies REQ-019: `--pal-blending` on an NTSC machine gives exit code 2 and a message that
+/// names the flag and the video standard (criterion 5). The command line has no option for a
+/// PAL machine, so `--artifacting` on a PAL machine is checked by the unit test
+/// `filter_flags_and_standards` in `src/cli.rs`.
+#[test]
+fn filter_flag_needs_matching_standard() {
+    let output = run(&["--headless", "--frames", "1", "--pal-blending"]);
+    assert_eq!(output.status.code(), Some(2), "exit status");
+    let message = stderr(&output);
+    assert!(
+        message.contains("--pal-blending") && message.contains("NTSC"),
+        "{message}"
+    );
+}

@@ -54,7 +54,7 @@ pub fn load_machine(options: &Options) -> Result<Machine, FrontendError> {
         os_rom,
         basic_rom: Some(basic_rom),
         cartridge,
-        standard: VideoStandard::Ntsc,
+        standard: options.standard,
         audio_sample_rate: AUDIO_SAMPLE_RATE,
     })
     .map_err(|error| FrontendError::Rom {
@@ -81,14 +81,57 @@ pub const fn window_size(scale: usize) -> (usize, usize) {
     (FRAME_WIDTH * scale, FRAME_HEIGHT * scale)
 }
 
-/// Converts the frame buffer to `0x00RRGGBB` pixels and scales it by `scale`: each frame
-/// buffer pixel becomes a block of `scale` x `scale` pixels in `out` (REQ-008).
-pub fn render(frame: &[u8], standard: VideoStandard, scale: usize, out: &mut Vec<u32>) {
+/// The optional display filters (REQ-019, REQ-411, REQ-412). `Default` turns both off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DisplayFilters {
+    /// The NTSC artifacting filter (`--artifacting`, REQ-411).
+    pub artifacting: bool,
+    /// The PAL chroma blending filter (`--pal-blending`, REQ-412).
+    pub pal_blending: bool,
+}
+
+/// Converts frame buffer row `y` to `0x00RRGGBB` pixels in `out`.
+///
+/// Without a filter, each pixel is `palette::rgb` of its byte. Artifacting works on NTSC rows only, and PAL
+/// blending on PAL rows 1-239 only (row 0 has no row above it, OI-021).
+pub fn convert_row(
+    frame: &[u8],
+    y: usize,
+    standard: VideoStandard,
+    filters: DisplayFilters,
+    out: &mut [u32; FRAME_WIDTH],
+) {
+    let row = &frame[y * FRAME_WIDTH..(y + 1) * FRAME_WIDTH];
+    match standard {
+        VideoStandard::Ntsc if filters.artifacting => palette::artifact_ntsc_row(row, out),
+        VideoStandard::Pal if filters.pal_blending && y > 0 => {
+            let above = &frame[(y - 1) * FRAME_WIDTH..y * FRAME_WIDTH];
+            palette::pal_blend_row(above, row, out);
+        }
+        _ => {
+            for (slot, &color) in out.iter_mut().zip(row) {
+                *slot = palette::rgb(standard, color);
+            }
+        }
+    }
+}
+
+/// Converts the frame buffer to `0x00RRGGBB` pixels with `filters` and scales it by
+/// `scale`: each frame buffer pixel becomes a block of `scale` x `scale` pixels in `out`
+/// (REQ-008).
+pub fn render(
+    frame: &[u8],
+    standard: VideoStandard,
+    filters: DisplayFilters,
+    scale: usize,
+    out: &mut Vec<u32>,
+) {
     out.clear();
-    for row in frame.as_chunks::<FRAME_WIDTH>().0 {
+    let mut pixels = [0; FRAME_WIDTH];
+    for y in 0..frame.len() / FRAME_WIDTH {
+        convert_row(frame, y, standard, filters, &mut pixels);
         let start = out.len();
-        for &color in row {
-            let rgb = palette::rgb(standard, color);
+        for &rgb in &pixels {
             out.extend((0..scale).map(|_| rgb));
         }
         let end = out.len();
@@ -98,13 +141,18 @@ pub fn render(frame: &[u8], standard: VideoStandard, scale: usize, out: &mut Vec
     }
 }
 
-/// Writes the frame buffer as a 384 x 240 RGB PNG file (REQ-013). Each pixel is
-/// `palette::rgb` of the frame buffer byte.
+/// Writes the frame buffer as a 384 x 240 RGB PNG file (REQ-013). Each pixel is the
+/// output of [`convert_row`]: `palette::rgb` of the frame buffer byte without a filter.
 ///
 /// # Errors
 ///
 /// [`FrontendError::Screenshot`] when the file cannot be written.
-pub fn write_png(path: &Path, frame: &[u8], standard: VideoStandard) -> Result<(), FrontendError> {
+pub fn write_png(
+    path: &Path,
+    frame: &[u8],
+    standard: VideoStandard,
+    filters: DisplayFilters,
+) -> Result<(), FrontendError> {
     let error = |source| FrontendError::Screenshot {
         path: path.to_owned(),
         source,
@@ -115,13 +163,15 @@ pub fn write_png(path: &Path, frame: &[u8], standard: VideoStandard) -> Result<(
     let mut encoder = png::Encoder::new(BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
-    let data: Vec<u8> = frame
-        .iter()
-        .flat_map(|&color| {
-            let [_, r, g, b] = palette::rgb(standard, color).to_be_bytes();
+    let mut data = Vec::with_capacity(frame.len() * 3);
+    let mut pixels = [0; FRAME_WIDTH];
+    for y in 0..frame.len() / FRAME_WIDTH {
+        convert_row(frame, y, standard, filters, &mut pixels);
+        data.extend(pixels.iter().flat_map(|&rgb| {
+            let [_, r, g, b] = rgb.to_be_bytes();
             [r, g, b]
-        })
-        .collect();
+        }));
+    }
     let mut writer = encoder.write_header().map_err(error)?;
     writer.write_image_data(&data).map_err(error)?;
     writer.finish().map_err(error)
@@ -290,10 +340,12 @@ mod tests {
     use atari_core::{Machine, MachineConfig, VideoStandard, palette};
     use minifb::Key;
 
-    use super::{Flow, Frontend, Pacer, load_machine, render, window_size, window_title};
+    use super::{
+        DisplayFilters, Flow, Frontend, Pacer, convert_row, load_machine, render, window_size,
+        window_title,
+    };
     use crate::cli::Options;
     use crate::error::FrontendError;
-    use crate::planned::planned;
 
     fn machine() -> Machine {
         Machine::new(MachineConfig {
@@ -342,7 +394,13 @@ mod tests {
         frame[FRAME_WIDTH * FRAME_HEIGHT - 1] = 0x46;
         for scale in [1, 2, 3] {
             let mut out = vec![1, 2, 3];
-            render(&frame, VideoStandard::Ntsc, scale, &mut out);
+            render(
+                &frame,
+                VideoStandard::Ntsc,
+                DisplayFilters::default(),
+                scale,
+                &mut out,
+            );
             let (width, height) = window_size(scale);
             assert_eq!(out.len(), width * height, "size at scale {scale}");
             for y in 0..height {
@@ -521,8 +579,50 @@ mod tests {
     /// compares each pixel with `palette::rgb` (REQ-411 and REQ-412 criterion 1: the display
     /// filters are off by default).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn display_filters_off_by_default() {
-        planned();
+        let filters = Options::default().filters;
+        assert_eq!(filters, DisplayFilters::default(), "no filter by default");
+        let frame: Vec<u8> = (0..FRAME_WIDTH * FRAME_HEIGHT)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        for standard in [VideoStandard::Ntsc, VideoStandard::Pal] {
+            let mut out = Vec::new();
+            render(&frame, standard, filters, 1, &mut out);
+            for (i, (&pixel, &color)) in out.iter().zip(&frame).enumerate() {
+                assert_eq!(
+                    pixel,
+                    palette::rgb(standard, color),
+                    "{standard:?} pixel {i}"
+                );
+            }
+        }
+    }
+
+    /// Verifies REQ-019: each filter works only on its own video standard, and PAL blending
+    /// keeps row 0 (REQ-411, REQ-412).
+    #[test]
+    fn filters_apply_to_their_standard() {
+        let frame: Vec<u8> = (0..FRAME_WIDTH * FRAME_HEIGHT)
+            .map(|i| if i % 2 == 0 { 0x0E } else { 0x48 })
+            .collect();
+        let both = DisplayFilters {
+            artifacting: true,
+            pal_blending: true,
+        };
+        let row = |y: usize| &frame[y * FRAME_WIDTH..(y + 1) * FRAME_WIDTH];
+        let mut out = [0; FRAME_WIDTH];
+        let mut expected = [0; FRAME_WIDTH];
+        convert_row(&frame, 5, VideoStandard::Ntsc, both, &mut out);
+        palette::artifact_ntsc_row(row(5), &mut expected);
+        assert_eq!(out, expected, "NTSC: artifacting");
+        convert_row(&frame, 5, VideoStandard::Pal, both, &mut out);
+        palette::pal_blend_row(row(4), row(5), &mut expected);
+        assert_eq!(out, expected, "PAL: blending");
+        convert_row(&frame, 0, VideoStandard::Pal, both, &mut out);
+        let plain: Vec<u32> = row(0)
+            .iter()
+            .map(|&c| palette::rgb(VideoStandard::Pal, c))
+            .collect();
+        assert_eq!(out[..], plain[..], "PAL: row 0 is not blended");
     }
 }

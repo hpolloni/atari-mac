@@ -74,9 +74,11 @@ pub fn rgb(standard: VideoStandard, color: u8) -> u32;
 /// The palette for other parameters (for tests and a later settings screen).
 pub fn build(standard: VideoStandard, params: &PaletteParams) -> [u32; 256];
 
-/// Optional display filters (Could). They work on RGB rows, not on the frame buffer.
+/// Optional display filters (Could). They make RGB rows, and do not change the frame buffer.
 pub fn artifact_ntsc_row(row: &[u8], out: &mut [u32]);
 pub fn pal_blend_row(prev: &[u8], row: &[u8], out: &mut [u32]);
+/// PAL blending of a whole frame: row 0 is `rgb(PAL, b)`, rows 1-239 use `pal_blend_row`.
+pub fn pal_blend_frame(frame: &[u8], width: usize, out: &mut [u32]);
 ```
 
 ### Call contract
@@ -141,7 +143,7 @@ All values are 0 at power-on (REQ-402), except where the table gives a value.
 | `clock` | `u64` | Absolute color clock count, for `pending`. |
 | `line`, `cycle` | `u32` each | The values of the last `tick`. |
 | `back`, `front` | `Vec<u8>` of 92160 each | Frame buffers. |
-| `priority` | `Box<[u16; 64 * 512]>` | Priority table (see "Priority"). Built in `new`. |
+| `priority` | `Box<[u16]>` of 32 x 256 entries | Priority table (see "Priority"). Built in `new`. |
 
 `PendingWrite` holds the absolute color clock at which the write takes effect, the
 register and the value. `PRIOR` makes two entries: bits 0-5 and bits 6-7.
@@ -203,7 +205,9 @@ even color clock.
   GTIA loads `grafp[n]` from `data_bus` on cycles 2-5.
 - Per color clock and per object: if `h == position`, then `shift |= latch` and
   `state = 0`. A missile latch is its 2 bits in bits 7-6. The object bit is bit 7 of
-  `shift`. Then `state = (state + 1) & size`, and if `state == 0`, `shift <<= 1`.
+  `shift`. Then `state = (state + 1) & size`, and if `state == 0`, `shift <<= 1`. `size` is
+  the 2-bit size code itself, so `%10` gives single width from state `%00` and the lockup of
+  HRM 6.5 from states `%01` and `%10` (REQ-419).
 - The shifters run on all color clocks of all scanlines (REQ-418).
 
 ### Collisions (REQ-420 to REQ-423)
@@ -213,7 +217,7 @@ even color clock.
 - `PnPL |= players & !(1 << n)`. `MnPL |= players`.
 - `pf_collision_bits`: low resolution codes `PF0-PF3`; hires `PF2` if a pixel bit is 1;
   mode 10 codes `%x100-%x111`; none in modes 9 and 11.
-- The fifth player and multicolor bits do not change the collision logic.
+- The multicolor bit does not change the collision logic. `PRIOR` bit 4 is ignored (OI-019).
 - `HITCLR` clears `collisions` at once.
 
 ### Priority (REQ-424 to REQ-427)
@@ -239,8 +243,9 @@ The same builder function is the reference for the unit tests against HRM Table 
   luminance bits are cleared.
 - Mode 10: the even color clock uses `gtia_pixel` (the last pixel) and the odd color
   clock uses `p`. Then `gtia_pixel = p`. `p` in 0-3 sets the input `Pp`. `p` in 4-7 or
-  12-15 sets `PF(p & 3)`. `p` in 8-11 sets nothing. If `an[1]` is `%000`, `p` is 8
-  (REQ-433).
+  12-15 sets `PF(p & 3)`. `p` in 8-11 sets nothing. If `an[1]` is `%000` and `p` is not 0,
+  `p` is 8 (REQ-433: the `BAK` code mutes the playfield of the pixel). `p` = 0 stays `P0`, so
+  the border, where both codes are `%000`, shows `P0` (HRM 6.9, REQ-430 criterion 3).
 
 ### Palette (REQ-409 to REQ-412)
 
@@ -252,7 +257,18 @@ clamped to 0-1 and converted with `(255 * x).round()`. The defaults are `step = 
 `S = 0.233`. `table` keeps the two default tables in a `std::sync::OnceLock`.
 
 The filters of REQ-411 and REQ-412 are off by default. The frontend calls them on the RGB
-output. They do not change the frame buffer.
+output (REQ-019, `--artifacting` and `--pal-blending`). They do not change the frame buffer.
+
+- `artifact_ntsc_row` (NTSC only, OI-020) samples the composite signal at 4 x fsc, two
+  samples for each hires pixel (HRM D.3). For each pixel it demodulates the luma `L / 15` at
+  the color subcarrier over the 4 samples (one color clock) around the pixel, with sample
+  phase `90° k + 60°` and a gain of `S / (7 / 15)` (the 130XE color burst of about 14
+  luminance steps peak to peak, HRM 6.4). It adds the result to the U and V of the pixel
+  itself, and uses the mean luma of the 4 samples as Y. A solid row gives the palette
+  colors; alternating hires pixels give red and blue with the mean luma (HRM 6.4). The phase
+  and the gain are project decisions.
+- `pal_blend_row` uses the formula of REQ-412 with the PAL colors before the clamp.
+  `pal_blend_frame` and the frontend leave row 0 unblended (OI-021).
 
 ## Timing
 
@@ -299,12 +315,12 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-411 | `palette.rs` `artifact_alternating_rows_are_colored`, `artifact_luma_is_average`, `artifact_solid_row_unchanged`; `src/frontend.rs` `display_filters_off_by_default` |
 | REQ-412 | `palette.rs` `pal_blend_formula`, `pal_blend_reference_rows`, `pal_blend_row_0_unchanged` (6); `src/frontend.rs` `display_filters_off_by_default` |
 | REQ-413 | `gtia.rs` `player_bits_msb_first`, `missile_bits_and_colors`, `all_object_colors`, `latch_repeats_without_dma` |
-| REQ-414 | `gtia.rs` `gractl_gates_dma`, `gractl_off_keeps_latch`, `cpu_writes_ignore_gractl`; `crates/harness/tests/gtia.rs` `pm_dma_one_line_resolution` |
+| REQ-414 | `gtia.rs` `gractl_gates_dma`, `gractl_off_keeps_latch`, `missile_dma_needs_gractl_bit_0` (3), `cpu_writes_ignore_gractl`; `crates/harness/tests/gtia.rs` `pm_dma_one_line_resolution` |
 | REQ-415 | `gtia.rs` `vdelay_bit_map`, `vdelay_accepts_odd_lines_only`, `vdelay_ignores_cpu_writes` |
 | REQ-416 | `gtia.rs` `player_starts_at_hpos`, `player_clipped_at_left_and_right` |
 | REQ-417 | `gtia.rs` `player_sizes`, `missile_sizes`, `size_bits_2_7_ignored` |
 | REQ-418 | `gtia.rs` `retrigger_shows_second_copy`, `move_left_suppresses_image`, `move_during_image_keeps_image`, `reload_ors_shift_register`, `image_shifts_out_in_hblank` |
-| REQ-419 | `gtia.rs` `size_change_table_15`, `size_10_lockup_persists`, `size_change_after_image` |
+| REQ-419 | `gtia.rs` `size_change_table_15`, `size_10_lockup_next_line` (2, first sentence), `size_10_lockup_persists`, `size_change_after_image` |
 | REQ-420 | `gtia.rs` `pm_playfield_collisions`, `hires_collisions_use_pf2`, `gtia_mode_playfield_collisions`, `collisions_ignore_colors_and_priority` |
 | REQ-421 | `gtia.rs` `player_player_collisions`, `missile_player_collisions`, `no_missile_missile_collisions`, `no_self_collision`, `same_color_players_collide` |
 | REQ-422 | `gtia.rs` `collisions_only_in_visible_area` |
@@ -393,3 +409,15 @@ The tests that this list adds or changes do these checks:
     helper to load and start such a program. The design must add one, or the tests must use an
     OS vector (for example the deferred vertical blank vector) or a display list interrupt.
 13. Resolved by OI-020: artifacting is NTSC only.
+14. REQ-419 criterion 2, last sentence: a lockup from a write on scan line 247 cannot reach
+    scan line 8 of the next frame. The object is retriggered at its position on each scan
+    line, also in vertical blank (REQ-418), and each load sets state `%00` and ends the lockup
+    (REQ-419). The test `size_10_lockup_persists` stays a stub; `size_10_lockup_next_line`
+    checks the first sentence.
+15. REQ-019 criterion 3 needs a PAL machine from the command line, but no requirement gives an
+    option to select the video standard. `pal_blending_flag_filters_screenshot` stays a stub.
+16. REQ-433 states that each pixel whose second code is `%000` shows the background. Taken
+    literally, the mode 10 border (both codes `%000`) would show `COLBK`, against REQ-430
+    criterion 3 and HRM 6.9 ("Border regions are rendered with a code of 0000 or player 0").
+    GTIA mutes only the playfield values (pixel value not 0); this meets all criteria of
+    REQ-430 and REQ-433.

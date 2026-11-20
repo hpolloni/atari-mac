@@ -7,6 +7,8 @@
 /// `unwrap` as the tests do.
 #[cfg(test)]
 mod system {
+    use std::iter::repeat_n;
+
     use atari_core::gtia::{ConsoleKeys, FRAME_WIDTH};
     use atari_core::media::{CartKind, Cartridge};
     use atari_core::{JoystickState, Machine, MachineConfig, VideoStandard};
@@ -333,36 +335,170 @@ mod system {
     /// `PRIOR` = `$00`, `HSCROL` = 0 and an ANTIC mode E line at normal width with first byte
     /// `$1B`, HPOS `$30`, `$31`, `$32`, `$33` show `$02`, `$14`, `$26`, `$38` (criterion 2).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn mode_e_colors() {
-        planned();
+        let mut code = set_dlist();
+        for (reg, value) in [
+            (0xD01A, 0x02), // COLBK
+            (0xD016, 0x14), // COLPF0
+            (0xD017, 0x26), // COLPF1
+            (0xD018, 0x38), // COLPF2
+            (0xD019, 0x4A), // COLPF3
+            (0xD01B, 0x00), // PRIOR
+            (0xD404, 0x00), // HSCROL
+            (0xD400, 0x22), // DMACTL
+        ] {
+            code.extend(store(reg, value));
+        }
+        let mut m = machine(&code, None);
+        put_display(&mut m, 0x0E, &[0x1B]);
+        run_frames(&mut m, 3);
+        let shown: Vec<[u8; 2]> = (0x30..=0x33).map(|h| pixel(&m, 24, h)).collect();
+        assert_eq!(
+            shown,
+            [[0x02; 2], [0x14; 2], [0x26; 2], [0x38; 2]],
+            "HPOS $30-$33 of the mode E line"
+        );
     }
 
     /// Verifies REQ-414: with one-line P/M DMA in `DMACTL`, `GRACTL` = `$03` and player 0 data
     /// in memory that is `$80` for even scanlines and `$40` for odd scanlines, each even row
     /// shows `COLPM0` at HPOS `$80` only and each odd row at HPOS `$81` only (criterion 6).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn pm_dma_one_line_resolution() {
-        planned();
+        let mut code = set_dlist();
+        for (reg, value) in [
+            (0xD000, 0x80), // HPOSP0
+            (0xD004, 0x90), // HPOSM0
+            (0xD012, 0x46), // COLPM0
+            (0xD01A, 0x02), // COLBK
+            (0xD01D, 0x03), // GRACTL
+            (0xD407, 0x50), // PMBASE: one-line P/M data at $5000
+            (0xD400, 0x3E), // DMACTL: normal width, missiles, players, one-line, DL
+        ] {
+            code.extend(store(reg, value));
+        }
+        let mut m = machine(&code, None);
+        put_display(&mut m, 0x0E, &[0x00; 40]);
+        for y in 0..=255_u16 {
+            m.poke_ram(0x5300 + y, 0x00);
+            m.poke_ram(0x5400 + y, if y % 2 == 0 { 0x80 } else { 0x40 });
+        }
+        run_frames(&mut m, 3);
+        for row in 0..240 {
+            let player: Vec<usize> = (0x22..=0xDD)
+                .filter(|&h| pixel(&m, row, h) == [0x46; 2])
+                .collect();
+            // Row r is scan line r + 8, so even rows are even scan lines.
+            let expected = if row % 2 == 0 { 0x80 } else { 0x81 };
+            assert_eq!(player, [expected], "row {row}");
+        }
     }
 
     /// Verifies REQ-428: ANTIC mode F and mode E lines with `PRIOR` = `$40`: a mode F first
     /// byte `$1F` shows `$01` at HPOS `$30-$31` and `$0F` at HPOS `$32-$33`, and a mode E line
     /// of `$FF` bytes shows `$0A` at HPOS `$30-$CF` (criteria 1 and 2).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn gtia_mode_pixels_from_antic() {
-        planned();
+        let mut code = set_dlist();
+        for (reg, value) in [
+            (0xD01A, 0x00), // COLBK
+            (0xD01B, 0x40), // PRIOR
+            (0xD404, 0x00), // HSCROL
+            (0xD400, 0x22), // DMACTL
+        ] {
+            code.extend(store(reg, value));
+        }
+        let mut m = machine(&code, None);
+        // Mode F at scan line 32 (row 24), mode E at scan line 33 (row 25).
+        let [lo, hi] = SCREEN.to_le_bytes();
+        let [e_lo, e_hi] = (SCREEN + 0x100).to_le_bytes();
+        let [dl_lo, dl_hi] = DLIST.to_le_bytes();
+        let list = [
+            0x70, 0x70, 0x70, 0x4F, lo, hi, 0x4E, e_lo, e_hi, 0x41, dl_lo, dl_hi,
+        ];
+        for (addr, &byte) in (DLIST..).zip(&list) {
+            m.poke_ram(addr, byte);
+        }
+        m.poke_ram(SCREEN, 0x1F);
+        for addr in SCREEN + 0x100..SCREEN + 0x100 + 40 {
+            m.poke_ram(addr, 0xFF);
+        }
+        run_frames(&mut m, 3);
+        assert_eq!(pixel(&m, 24, 0x30), [0x01; 2], "1: mode F HPOS $30");
+        assert_eq!(pixel(&m, 24, 0x31), [0x01; 2], "1: mode F HPOS $31");
+        assert_eq!(pixel(&m, 24, 0x32), [0x0F; 2], "1: mode F HPOS $32");
+        assert_eq!(pixel(&m, 24, 0x33), [0x0F; 2], "1: mode F HPOS $33");
+        for h in 0x30..=0xCF {
+            assert_eq!(pixel(&m, 25, h), [0x0A; 2], "2: mode E HPOS ${h:02X}");
+        }
+    }
+
+    /// The program of `mid_line_colbk_change`: `COLBK` = `$02`, a wait for scan line 100
+    /// (`VCOUNT` = 50), `STA WSYNC`, one `LDA $80` (3 cycles) if `odd`, `nops` `NOP`
+    /// instructions and `STX COLBK` with X = `$46`. Returns the code and the address after
+    /// the `STX`.
+    fn colbk_program(odd: bool, nops: usize) -> (Vec<u8>, u16) {
+        let mut code = store(0xD01A, 0x02);
+        code.extend([0xA2, 0x46]); // LDX #$46
+        code.extend(read(0xD40B)); // wait: LDA VCOUNT
+        code.extend([0xC9, 50, 0xD0, 0xF9]); // CMP #50, BNE wait
+        code.extend([0x8D, 0x0A, 0xD4]); // STA WSYNC
+        if odd {
+            code.extend([0xA5, 0x80]); // LDA $80
+        }
+        code.extend(repeat_n(0xEA, nops));
+        code.extend([0x8E, 0x1A, 0xD0]); // STX COLBK
+        let after = 0xC000 + u16::try_from(code.len()).unwrap();
+        (code, after)
+    }
+
+    /// Runs the machine until the `STX COLBK` of `colbk_program` is done, then to the end of
+    /// the frame. Returns the scan line and cycle of the write.
+    fn run_to_colbk_write(m: &mut Machine, after: u16) -> (u32, u32) {
+        let mut cycles = 0;
+        while !(m.cpu().at_boundary() && m.cpu().registers().pc == after) {
+            m.run_cycle();
+            cycles += 1;
+            assert!(cycles < 200_000, "the program reaches the write");
+        }
+        // The write was the last cycle. ANTIC ends the frame in the cycle of scan line 248,
+        // cycle 0: `(248 - line) * 114 - cycle` cycles later.
+        let frames = m.frame_count();
+        let mut k = 0_u32;
+        while m.frame_count() == frames {
+            m.run_cycle();
+            k += 1;
+        }
+        let cycle = (114 - k % 114) % 114;
+        (248 - (k + cycle) / 114, cycle)
     }
 
     /// Verifies REQ-434: a 6502 program writes `$46` to `COLBK` (old value `$02`) on machine
     /// cycle 30 of a scanline, and HPOS `$3A` of that row shows `$02` and HPOS `$3B` shows
     /// `$46` (criterion 7, on the full machine).
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn mid_line_colbk_change() {
-        planned();
+        let programs = (0..40).flat_map(|nops| [(false, nops), (true, nops)]);
+        let found = programs.into_iter().find_map(|(odd, nops)| {
+            let (code, after) = colbk_program(odd, nops);
+            let mut m = machine(&code, None);
+            let (line, cycle) = run_to_colbk_write(&mut m, after);
+            (cycle == 30).then_some((m, line))
+        });
+        let (m, line) = found.expect("a NOP count that puts the write on cycle 30");
+        let row = usize::try_from(line - 8).unwrap();
+        assert_eq!(
+            pixel(&m, row, 0x3A),
+            [0x02; 2],
+            "HPOS $3A of scan line {line}"
+        );
+        assert_eq!(
+            pixel(&m, row, 0x3B),
+            [0x46; 2],
+            "HPOS $3B of scan line {line}"
+        );
+        assert_eq!(pixel(&m, row - 1, 0x80), [0x02; 2], "the scan line before");
+        assert_eq!(pixel(&m, row + 1, 0x22), [0x46; 2], "the scan line after");
     }
 
     /// Verifies REQ-438: after boot to the BASIC prompt with all POKEY channels silent, the

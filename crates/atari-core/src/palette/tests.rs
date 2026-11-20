@@ -1,7 +1,9 @@
 //! Palette unit tests (`docs/design/gtia.md`, "Test plan").
 
-use super::{PAL_ANGLES, PaletteParams, build, rgb, table, unclamped};
-use crate::planned::planned;
+use super::{
+    PAL_ANGLES, PaletteParams, artifact_ntsc_row, build, pal_blend_frame, pal_blend_row, rgb,
+    table, unclamped,
+};
 use crate::timing::VideoStandard;
 
 /// The R, G and B bytes of a color.
@@ -141,46 +143,174 @@ fn pal_hue_1_equals_hue_15() {
     }
 }
 
+/// The mean R, G and B of columns 16-367 of an output row.
+fn mean_color(out: &[u32]) -> [f64; 3] {
+    let columns = &out[16..368];
+    let count = f64::from(u32::try_from(columns.len()).unwrap());
+    [16, 8, 0].map(|shift| {
+        columns
+            .iter()
+            .map(|&value| f64::from((value >> shift) & 0xFF))
+            .sum::<f64>()
+            / count
+    })
+}
+
+/// The artifacting filter output for a row of 384 bytes `pattern[i % pattern.len()]`.
+fn artifact(pattern: &[u8]) -> Vec<u32> {
+    let row: Vec<u8> = pattern.iter().copied().cycle().take(384).collect();
+    let mut out = vec![0; 384];
+    artifact_ntsc_row(&row, &mut out);
+    out
+}
+
+/// Row A (`$0E`, `$00`, ...) and row B (`$00`, `$0E`, ...) of REQ-411: their mean colors.
+fn artifact_rows() -> [[f64; 3]; 2] {
+    [
+        mean_color(&artifact(&[0x0E, 0x00])),
+        mean_color(&artifact(&[0x00, 0x0E])),
+    ]
+}
+
 /// Verifies REQ-411: `artifact_ntsc_row` on row A (`$0E`, `$00`, ...) and on row B (`$00`,
 /// `$0E`, ...) gives mean colors (columns 16-367) with `max(R, G, B) - min(R, G, B)` of 32 or
 /// more, and the two mean colors differ by 32 or more in at least one channel (criteria 2 and
 /// 3).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn artifact_alternating_rows_are_colored() {
-    planned();
+    let [a, b] = artifact_rows();
+    for (name, color) in [("A", a), ("B", b)] {
+        let max = color.iter().copied().fold(f64::MIN, f64::max);
+        let min = color.iter().copied().fold(f64::MAX, f64::min);
+        assert!(max - min >= 32.0, "row {name}: {color:?}");
+    }
+    let differ = a.iter().zip(b).any(|(x, y)| (x - y).abs() >= 32.0);
+    assert!(differ, "rows A and B: {a:?} {b:?}");
 }
 
 /// Verifies REQ-411: the luma `0.299 R + 0.587 G + 0.114 B` of the mean color of row A and of
 /// row B after `artifact_ntsc_row` is 119 ± 34 (criterion 4).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn artifact_luma_is_average() {
-    planned();
+    for (name, [r, g, b]) in ["A", "B"].into_iter().zip(artifact_rows()) {
+        let luma = 0.114_f64.mul_add(b, 0.299_f64.mul_add(r, 0.587 * g));
+        assert!((luma - 119.0).abs() <= 34.0, "row {name}: luma {luma}");
+    }
 }
 
 /// Verifies REQ-411: `artifact_ntsc_row` on a row of 384 bytes `$94` gives
 /// `rgb(NTSC, $94)` in columns 16-367, with a tolerance of 2 for each channel (criterion 5).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn artifact_solid_row_unchanged() {
-    planned();
+    let expected = rgb(VideoStandard::Ntsc, 0x94);
+    for (column, value) in artifact(&[0x94]).into_iter().enumerate().take(368).skip(16) {
+        for shift in [16, 8, 0] {
+            let (a, e) = ((value >> shift) & 0xFF, (expected >> shift) & 0xFF);
+            assert!(
+                a.abs_diff(e) <= 2,
+                "column {column}: {value:06X} {expected:06X}"
+            );
+        }
+    }
+}
+
+/// The blended color of `color` below `above`, by the formula of REQ-412 criterion 2.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the channel is clamped and rounded to 0-255 before the cast"
+)]
+fn blend_formula(above: u8, color: u8) -> u32 {
+    let params = PaletteParams::default();
+    let first = unclamped(VideoStandard::Pal, &params, above);
+    let second = unclamped(VideoStandard::Pal, &params, color);
+    let y1 = f64::from(above & 0x0F) / 15.0;
+    let y2 = f64::from(color & 0x0F) / 15.0;
+    let channel = |n: usize| {
+        let value = y2 + f64::midpoint(first[n] - y1, second[n] - y2);
+        (255.0 * value.clamp(0.0, 1.0)).round()
+    };
+    let [r, g, b] = [channel(0), channel(1), channel(2)].map(|c| c as u32);
+    (r << 16) | (g << 8) | b
 }
 
 /// Verifies REQ-412: `pal_blend_row` gives `Y2 + ((RGB1 - Y1) + (RGB2 - Y2)) / 2` for each
 /// channel of each pixel of rows 1-239, clamped to 0-1 and converted with `round(255 x
 /// value)` (criterion 2).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn pal_blend_formula() {
-    planned();
+    let colors: Vec<u8> = (0..=255).collect();
+    for above in (0..=255_u8).step_by(3) {
+        let prev = vec![above; 256];
+        let mut out = vec![0; 256];
+        pal_blend_row(&prev, &colors, &mut out);
+        for (&color, &value) in colors.iter().zip(&out) {
+            assert_eq!(
+                value,
+                blend_formula(above, color),
+                "${above:02X} above ${color:02X}"
+            );
+        }
+    }
+    let frame: Vec<u8> = (0..240 * 384)
+        .map(|i| u8::try_from(i * 7 % 256).unwrap())
+        .collect();
+    let mut out = vec![0; 240 * 384];
+    pal_blend_frame(&frame, 384, &mut out);
+    for row in 1..240 {
+        for column in (0..384).step_by(5) {
+            let i = row * 384 + column;
+            assert_eq!(
+                out[i],
+                blend_formula(frame[i - 384], frame[i]),
+                "row {row} column {column}"
+            );
+        }
+    }
+}
+
+/// The blended color of the second row of a row of `above` above a row of `color`.
+fn blended(above: u8, color: u8) -> [u32; 3] {
+    let mut out = [0; 384];
+    pal_blend_row(&[above; 384], &[color; 384], &mut out);
+    assert!(out.iter().all(|&value| value == out[0]), "one color");
+    [(out[0] >> 16) & 0xFF, (out[0] >> 8) & 0xFF, out[0] & 0xFF]
 }
 
 /// Verifies REQ-412: `pal_blend_row` gives (167, 116, 159) for `$08` above `$48` and for `$48`
 /// above `$08`, and (154, 133, 103) for `$48` above `$C8`, with a tolerance of 1 for each
 /// channel (criteria 3-5).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn pal_blend_reference_rows() {
-    planned();
+    for (above, color, expected) in [
+        (0x08, 0x48, [167, 116, 159]),
+        (0x48, 0x08, [167, 116, 159]),
+        (0x48, 0xC8, [154, 133, 103]),
+    ] {
+        let actual = blended(above, color);
+        for (a, e) in actual.iter().zip(expected) {
+            assert!(
+                a.abs_diff(e) <= 1,
+                "${above:02X} above ${color:02X}: {actual:?}"
+            );
+        }
+    }
+}
+
+/// Verifies REQ-412: with the filter on, the output of each pixel of row 0 is
+/// `rgb(PAL, b)` of its own byte b (criterion 6).
+#[test]
+fn pal_blend_row_0_unchanged() {
+    let frame: Vec<u8> = (0..240 * 384)
+        .map(|i| u8::try_from(i % 256).unwrap())
+        .collect();
+    let mut out = vec![0; 240 * 384];
+    pal_blend_frame(&frame, 384, &mut out);
+    for column in 0..384 {
+        assert_eq!(
+            out[column],
+            rgb(VideoStandard::Pal, frame[column]),
+            "column {column}"
+        );
+    }
 }

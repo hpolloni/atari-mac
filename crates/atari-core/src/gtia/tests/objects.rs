@@ -1,30 +1,38 @@
 //! P/M graphics, collisions, GTIA modes and write delays.
 
+use std::array;
+use std::ops::RangeInclusive;
+
 use super::{COLBK, COLPF2, COLPM0, GRACTL, PRIOR, at, scan_line_code};
 use crate::antic::{AnCode, CycleOutput, DmaKind};
 use crate::gtia::Gtia;
 use crate::timing::VideoStandard;
 
 /// The P/M DMA of one cycle: `(kind, data bus)` for `(line, cycle)`.
-type Dma<'a> = &'a dyn Fn(u32, u32) -> (DmaKind, u8);
+pub(super) type Dma<'a> = &'a dyn Fn(u32, u32) -> (DmaKind, u8);
 /// A hook that runs before the `clock` of `(line, cycle)` (the CPU access of the cycle).
-type Hook<'a> = &'a mut dyn FnMut(&mut Gtia, u32, u32);
+pub(super) type Hook<'a> = &'a mut dyn FnMut(&mut Gtia, u32, u32);
 
 /// No P/M DMA.
-fn no_dma(_: u32, _: u32) -> (DmaKind, u8) {
+pub(super) fn no_dma(_: u32, _: u32) -> (DmaKind, u8) {
     (DmaKind::None, 0xFF)
 }
 
-/// Feeds scan lines 0-248 with the codes `inner(h)` in `$22-$DD`, the P/M DMA `dma` and
-/// the CPU accesses `hook`, so that `frame()` shows scan lines 8-247.
-fn run_frame(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the test feeder takes all inputs of `clock` as separate arguments"
+)]
+/// Feeds the scan lines `lines` with the codes `inner(h)` in `$22-$DD` (horizontal blank
+/// codes elsewhere), the P/M DMA `dma` and the CPU accesses `hook`.
+pub(super) fn run_lines(
     gtia: &mut Gtia,
+    lines: impl Iterator<Item = u32>,
     hires: bool,
     inner: &dyn Fn(u32) -> AnCode,
     dma: Dma<'_>,
     hook: Hook<'_>,
 ) {
-    for line in 0..249 {
+    for line in lines {
         for cycle in 0..114 {
             hook(gtia, line, cycle);
             let h = (2 * cycle + 226) % 228;
@@ -45,23 +53,66 @@ fn run_frame(
     }
 }
 
+/// Feeds scan lines 0-248 with the codes `inner(h)` in `$22-$DD`, the P/M DMA `dma` and
+/// the CPU accesses `hook`, so that `frame()` shows scan lines 8-247.
+pub(super) fn run_frame(
+    gtia: &mut Gtia,
+    hires: bool,
+    inner: &dyn Fn(u32) -> AnCode,
+    dma: Dma<'_>,
+    hook: Hook<'_>,
+) {
+    run_lines(gtia, 0..249, hires, inner, dma, hook);
+}
+
 /// Like `run_frame` with no DMA and no CPU access.
-fn plain_frame(gtia: &mut Gtia, hires: bool, inner: &dyn Fn(u32) -> AnCode) {
+pub(super) fn plain_frame(gtia: &mut Gtia, hires: bool, inner: &dyn Fn(u32) -> AnCode) {
     run_frame(gtia, hires, inner, &no_dma, &mut |_, _, _| {});
 }
 
-/// A GTIA with the setup of REQ-414: `HPOSP0` = `$80`, `HPOSM0` = `$90`, `COLPM0` = `$46`,
-/// `COLBK` = `$02`.
-fn pm_gtia() -> Gtia {
+/// A GTIA with the register writes `setup` (in order, before the first `clock`).
+pub(super) fn gtia_with(setup: &[(u8, u8)]) -> Gtia {
     let mut gtia = Gtia::new(VideoStandard::Ntsc);
-    for (reg, value) in [(0x00, 0x80), (0x04, 0x90), (COLPM0, 0x46), (COLBK, 0x02)] {
+    for &(reg, value) in setup {
         gtia.write(reg, value);
     }
     gtia
 }
 
+/// The frame buffer bytes of HPOS `hpos` in `row` (two bytes for each HPOS).
+pub(super) fn span(gtia: &Gtia, row: usize, hpos: RangeInclusive<usize>) -> Vec<u8> {
+    hpos.flat_map(|h| at(gtia, row, h)).collect()
+}
+
+/// The HPOS values in `$22-$DD` of `row` that show `color` in both columns.
+pub(super) fn hpos_with(gtia: &Gtia, row: usize, color: u8) -> Vec<usize> {
+    (0x22..=0xDD)
+        .filter(|&h| at(gtia, row, h) == [color; 2])
+        .collect()
+}
+
+/// The 16 collision registers.
+pub(super) fn collisions(gtia: &Gtia) -> [u8; 16] {
+    array::from_fn(|reg| gtia.read(u8::try_from(reg).unwrap()))
+}
+
+/// The collision registers with `value` in `reg` and `$00` elsewhere.
+pub(super) fn only(entries: &[(usize, u8)]) -> [u8; 16] {
+    let mut out = [0; 16];
+    for &(reg, value) in entries {
+        out[reg] = value;
+    }
+    out
+}
+
+/// A GTIA with the setup of REQ-414: `HPOSP0` = `$80`, `HPOSM0` = `$90`, `COLPM0` = `$46`,
+/// `COLBK` = `$02`.
+pub(super) fn pm_gtia() -> Gtia {
+    gtia_with(&[(0x00, 0x80), (0x04, 0x90), (COLPM0, 0x46), (COLBK, 0x02)])
+}
+
 /// Background codes.
-fn background(_: u32) -> AnCode {
+pub(super) fn background(_: u32) -> AnCode {
     AnCode::BACKGROUND
 }
 
@@ -126,40 +177,6 @@ fn vdelay_accepts_odd_lines_only() {
                 [0x46; 2],
                 "VDELAY ${vdelay:02X} scan line {line}"
             );
-        }
-    }
-}
-
-/// Verifies REQ-441: with missile DMA only, the players load the bus on cycles 2-5.
-#[test]
-fn players_load_bus_without_player_dma() {
-    for gractl in [0x03, 0x01] {
-        let mut gtia = Gtia::new(VideoStandard::Ntsc);
-        for n in 0..4 {
-            gtia.write(n, 0x40 + 0x10 * n);
-            gtia.write(COLPM0 + n, 0x46);
-        }
-        gtia.write(GRACTL, gractl);
-        let dma = |_, cycle| match cycle {
-            0 => (DmaKind::Missile, 0x00),
-            2 => (DmaKind::None, 0x81),
-            3 => (DmaKind::None, 0x42),
-            4 => (DmaKind::None, 0x24),
-            5 => (DmaKind::None, 0x18),
-            _ => (DmaKind::None, 0xFF),
-        };
-        run_frame(&mut gtia, false, &background, &dma, &mut |_, _, _| {});
-        for (n, pattern) in [0x81_u8, 0x42, 0x24, 0x18].into_iter().enumerate() {
-            for bit in 0..8 {
-                let shown = gractl == 0x03 && pattern & (0x80 >> bit) != 0;
-                let expected = if shown { 0x46 } else { 0x00 };
-                let h = 0x40 + 0x10 * n + bit;
-                assert_eq!(
-                    at(&gtia, 50, h),
-                    [expected; 2],
-                    "GRACTL {gractl} player {n} bit {bit}"
-                );
-            }
         }
     }
 }
@@ -236,7 +253,7 @@ fn missile_player_collisions() {
 }
 
 /// The codes of GTIA mode pixel `p` (even HPOS gives bits 3-2, odd HPOS bits 1-0).
-fn pixel_codes(p: u8) -> impl Fn(u32) -> AnCode {
+pub(super) fn pixel_codes(p: u8) -> impl Fn(u32) -> AnCode {
     move |h| {
         let bits = if h % 2 == 0 { p >> 2 } else { p };
         AnCode::hires(bits & 3)
@@ -272,25 +289,14 @@ fn mode_11_hues() {
     );
 }
 
-/// Verifies REQ-430: mode 10 uses the 9 color registers, one color clock late.
-#[test]
-fn mode_10_register_map() {
-    let mut gtia = Gtia::new(VideoStandard::Ntsc);
-    for (n, reg) in (0x12..=0x1A).enumerate() {
-        gtia.write(reg, u8::try_from(0x10 * (n + 1)).unwrap());
-    }
-    gtia.write(PRIOR, 0x80);
-    plain_frame(&mut gtia, false, &pixel_codes(5));
-    assert_eq!(at(&gtia, 100, 0x81), [0x60; 2], "pixel 5 is COLPF1");
-    plain_frame(&mut gtia, false, &pixel_codes(2));
-    assert_eq!(at(&gtia, 100, 0x81), [0x30; 2], "pixel 2 is COLPM2");
-    plain_frame(&mut gtia, false, &pixel_codes(9));
-    assert_eq!(at(&gtia, 100, 0x81), [0x90; 2], "pixel 9 is COLBK");
-}
-
 /// One frame with player 0 and a CPU write of `value` to `reg` on cycle `cycle` of
 /// scan line 100 (row 92). The other scan lines have no write.
-fn write_on_cycle(gtia: &mut Gtia, inner: &dyn Fn(u32) -> AnCode, cycle: u32, write: (u8, u8)) {
+pub(super) fn write_on_cycle(
+    gtia: &mut Gtia,
+    inner: &dyn Fn(u32) -> AnCode,
+    cycle: u32,
+    write: (u8, u8),
+) {
     let (reg, value) = write;
     run_frame(gtia, false, inner, &no_dma, &mut |gtia, l, c| {
         if (l, c) == (100, cycle) {
@@ -329,6 +335,73 @@ fn write_delays_table_18() {
     write_on_cycle(&mut gtia, &pf2, 65, (PRIOR, 0x40));
     assert_eq!(at(&gtia, 92, 0x83), [0x38; 2], "PRIOR bits 6-7 at $83");
     assert_eq!(at(&gtia, 92, 0x84), [0x9A; 2], "PRIOR bits 6-7 at $84");
+    write_delays_objects();
+}
+
+/// The player 0 HPOS values on row 92 after a write on cycle 65 of scan line 100, with the
+/// writes `setup` first, `COLPM0` = `$46` and `COLBK` = `$02`.
+fn after_cycle_65(setup: &[(u8, u8)], inner: &dyn Fn(u32) -> AnCode, write: (u8, u8)) -> Gtia {
+    let mut gtia = gtia_with(&[(COLBK, 0x02), (COLPM0, 0x46)]);
+    for &(reg, value) in setup {
+        gtia.write(reg, value);
+    }
+    write_on_cycle(&mut gtia, inner, 65, write);
+    gtia
+}
+
+/// REQ-434 criteria 2, 3, 5 and 6: the delays of `PRIOR` bits 0-5, `GRAFP0`, `HPOSP0` and
+/// `SIZEP0` for a write on cycle 65.
+fn write_delays_objects() {
+    let pf0 = |h| {
+        if h >= 0x78 {
+            AnCode::playfield(0)
+        } else {
+            AnCode::BACKGROUND
+        }
+    };
+    let player = [
+        (0x00, 0x78),
+        (0x0D, 0xFF),
+        (0x08, 0x03),
+        (0x16, 0x28),
+        (PRIOR, 0x01),
+    ];
+    let gtia = after_cycle_65(&player, &pf0, (PRIOR, 0x04));
+    assert_eq!(at(&gtia, 92, 0x81), [0x46; 2], "2: PRIOR bits 0-5 at $81");
+    assert_eq!(at(&gtia, 92, 0x82), [0x28; 2], "2: PRIOR bits 0-5 at $82");
+    let gtia = after_cycle_65(&[(0x00, 0x82), (0x0D, 0x80)], &background, (0x0D, 0x00));
+    assert_eq!(
+        hpos_with(&gtia, 92, 0x46),
+        [0x82],
+        "3: GRAFP0 with HPOSP0 = $82"
+    );
+    let gtia = after_cycle_65(&[(0x00, 0x83), (0x0D, 0x80)], &background, (0x0D, 0x00));
+    assert_eq!(
+        hpos_with(&gtia, 91, 0x46),
+        [0x83],
+        "3: row 91 with HPOSP0 = $83"
+    );
+    assert_eq!(
+        hpos_with(&gtia, 92, 0x46),
+        [],
+        "3: GRAFP0 with HPOSP0 = $83"
+    );
+    for (old, new, expected) in [
+        (0x86, 0xC0, (0xC0..=0xC7).collect::<Vec<_>>()),
+        (0x84, 0xC0, (0x84..=0x8B).chain(0xC0..=0xC7).collect()),
+        (0x40, 0x85, (0x40..=0x47).chain(0x85..=0x8C).collect()),
+        (0x40, 0x84, (0x40..=0x47).collect()),
+    ] {
+        let gtia = after_cycle_65(&[(0x00, old), (0x0D, 0xFF)], &background, (0x00, new));
+        assert_eq!(
+            hpos_with(&gtia, 92, 0x46),
+            expected,
+            "5: HPOSP0 ${old:02X} to ${new:02X}"
+        );
+    }
+    let gtia = after_cycle_65(&[(0x00, 0x80), (0x0D, 0xFF)], &background, (0x08, 0x01));
+    let expected: Vec<usize> = (0x80..=0x8A).collect();
+    assert_eq!(hpos_with(&gtia, 92, 0x46), expected, "6: SIZEP0 $00 to $01");
 }
 
 /// Verifies REQ-434: the base of the delay is HPOS 2c - 2 also on other cycles.
