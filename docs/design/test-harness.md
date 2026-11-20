@@ -13,7 +13,7 @@ file has a checksum (REQ-020). Git ignores the output directories.
 | Path | Contents | Source | License | Checksum |
 | --- | --- | --- | --- | --- |
 | `roms/altirraos-xl.rom` | AltirraOS 3.11 | atari800 `src/roms/altirraos_xl.c` | Permissive (Avery Lee) | SHA-256 |
-| `roms/altirra-basic.rom` | Altirra BASIC 1.58 | atari800 `src/roms/altirra_basic.c` | Permissive (Avery Lee) | SHA-256 |
+| `roms/altirra-basic.rom` | Altirra BASIC 1.59 | atari800 `src/roms/altirra_basic.c` | Permissive (Avery Lee) | SHA-256 |
 | `test-data/klaus/6502_functional_test.bin` | 6502 functional test | Klaus2m5/6502_65C02_functional_tests | GPL-3.0 | SHA-256 |
 | `test-data/single-step/6502/*.json` | 256 files, 10,000 cases each (1.1 GB) | SingleStepTests/65x02 `6502/v1` | MIT | Git blob SHA-1 |
 | `reference/altirra-hardware-reference.pdf` | Hardware specification | virtualdub.org | Copyright Avery Lee | SHA-256 |

@@ -8,7 +8,7 @@ C arrays in the atari800 project, commit `98cc2dc749867c9c7317a0271ba062a6c797f8
 | File | Contents | Size | SHA-256 |
 | --- | --- | --- | --- |
 | `altirraos-xl.rom` | AltirraOS 3.11, XL/XE OS ROM (`$C000-$FFFF`) | 16384 | `9de5a313fe3946f04fe236a8d3ceacb471fbed4ec5fc5db009732e1169946ccf` |
-| `altirra-basic.rom` | Altirra BASIC 1.58 (`$A000-$BFFF`) | 8192 | `19fd64377895eb5d4414319855322dd3f860c21fdc1df9adc0e98ab72c540913` |
+| `altirra-basic.rom` | Altirra BASIC 1.59 (`$A000-$BFFF`) | 8192 | `19fd64377895eb5d4414319855322dd3f860c21fdc1df9adc0e98ab72c540913` |
 
 ## License
 

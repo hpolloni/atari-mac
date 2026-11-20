@@ -28,7 +28,7 @@ The full list of non-goals is in [docs/spec/README.md](docs/spec/README.md).
 
 ## ROMs
 
-The emulator uses free replacement ROMs: AltirraOS 3.11 and Altirra BASIC 1.58, by Avery Lee.
+The emulator uses free replacement ROMs: AltirraOS 3.11 and Altirra BASIC 1.59, by Avery Lee.
 Their license permits distribution, but the repository does not contain them. Run `make roms`
 to download them (see [roms/README.md](roms/README.md)). The emulator also accepts the original
 Atari OS and BASIC ROMs, which you must supply yourself.
