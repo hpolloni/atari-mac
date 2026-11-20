@@ -60,6 +60,9 @@ macOS frontend is the root crate `atari-mac`. `README.md` gives the layout and t
 - An evidence record (`docs/verification/REQ-NNN.md`) is only for `inspection` and
   `demonstration` requirements, and only for what the user confirmed. A review of golden
   images is recorded in `crates/harness/golden/README.md`.
+- A new golden image must show what its test intends. The teammate checks it with pixel
+  runs against the expected data, not only by eye. The lead looks at each image enlarged
+  before the user reviews it. A description from a teammate is not proof.
 - No `unsafe`. To silence a lint, use `#[expect(lint, reason = "...")]`. `#[allow]` is
   rejected.
 
