@@ -1,0 +1,8 @@
+# Test folders of SingleStepTests 65x02 at commit 2f6980a2d95757486c7bee24355c360e40e2a224,
+# from the tree of the repository root. The title is the heading of the README.md of the folder.
+# Format: one folder per line, key<TAB>title. Key rule: the folder name.
+6502	6502
+nes6502	NES 6502
+rockwell65c02	Rockwell 65C02
+synertek65c02	Synertek 65C02
+wdc65c02	WDC 65C02

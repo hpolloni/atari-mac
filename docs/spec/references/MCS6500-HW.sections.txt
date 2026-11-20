@@ -1,0 +1,159 @@
+# Section numbers and titles of the MCS6500 Microcomputer Family Hardware Manual (6500-10A,
+# January 1976, second edition, revision A), from its table of contents (pages v to ix).
+# Made by hand from the OCR text of the archive.org item. A teammate corrected the OCR errors
+# in the titles with the section headings in the body text.
+# Format: one section per line, key<TAB>title. The key is the section number as the manual
+# prints it (for example 1.3.2.5). The appendix has the key App-A.
+1.0	Designing with Microcomputer Systems
+1.1	Introduction to Microcomputer Systems
+1.1.1	Organization of a Microcomputer System
+1.1.2	Basic Operation
+1.1.3	Addressing Terms and Concepts
+1.1.3.1	Bit
+1.1.3.2	Address Space
+1.1.3.3	The Address Page
+1.1.4	System Components
+1.1.4.1	Clock Generator
+1.1.4.2	Program Memory
+1.1.4.3	Data Memory
+1.1.4.4	Input/Output Devices
+1.1.4.5	The Microprocessor
+1.2	Introduction to the MCS650X Microprocessor Family
+1.2.1	The MCS6501
+1.2.2	The MCS6502
+1.2.3	The MCS6503, MCS6504 and MCS6505
+1.3	MCS6500 System Concepts
+1.3.1	Bus Structure
+1.3.2	Processor Interrupts
+1.3.2.1	Applications for Interrupts
+1.3.2.2	Interrupt Prioritizing
+1.3.2.3	System Interconnect for Interrupts
+1.3.2.4	Interrupt Servicing
+1.3.2.5	Interrupt Request (IRQ)
+1.3.2.6	Non-Maskable Interrupt (NMI)
+1.3.3	System Reset
+1.4	The Microprocessors
+1.4.1	The MCS6501
+1.4.1.1	Introduction
+1.4.1.2	The MCS6501 Pinouts
+1.4.1.2.1	Vcc, Vss - Supply Lines
+1.4.1.2.2	AB00 - AB15 - Address Bus
+1.4.1.2.3	DB0 - DB7 - Data Bus
+1.4.1.2.4	R/W - Read/Write
+1.4.1.2.5	DBE - Data Bus Enable
+1.4.1.2.6	VMA - Valid Memory Address
+1.4.1.2.7	BA - Bus Available
+1.4.1.2.8	RDY - Ready
+1.4.1.2.9	NMI - Non-Maskable Interrupt
+1.4.1.2.10	IRQ - Interrupt Request
+1.4.1.2.11	RES - Reset
+1.4.2	The MCS6502
+1.4.2.1	Product Characteristics
+1.4.2.2	Device Timing - Requirements and Generation
+1.4.2.3	SYNC Signal
+1.4.2.4	S.O. - Set Overflow
+1.4.3	The MCS6503, MCS6504 and MCS6505
+1.5	Peripheral Interface Device - MCS6520
+1.5.1	Introduction
+1.5.2	Organization of the MCS6520
+1.5.2.1	Data Input Register
+1.5.2.2	Control Registers (CRA and CRB)
+1.5.2.3	Data Direction Registers (DDRA, DDRB)
+1.5.2.4	Peripheral Output Registers (ORA, ORB)
+1.5.2.5	Interrupt Status Control
+1.5.2.6	Peripheral Interface Buffers (A, B) and Data Bus Buffers (DBB)
+1.5.3	Interface Between MCS6520 and the MCS650X Family of Microprocessors
+1.5.3.1	Data Bus (D0-D7)
+1.5.3.2	Enable (E)
+1.5.3.3	Read/Write (R/W)
+1.5.3.4	Chip-Select Lines (CS1, CS2, CS3)
+1.5.3.5	Register-Select Lines (RS0, RS1)
+1.5.3.5.1	Reading the Peripheral A I/O Port
+1.5.3.5.2	Reading the Peripheral B I/O Port
+1.5.3.6	Reset (RES)
+1.5.3.7	Interrupt Request Line (IRQA, IRQB)
+1.5.3.7.1	Control of IRQA
+1.5.3.7.2	Control of IRQB
+1.5.4	Interface Between MCS6520 and Peripheral Devices
+1.5.4.1	Peripheral I/O Ports
+1.5.4.1.1	Peripheral A I/O Port (PA0-PA7)
+1.5.4.1.2	Peripheral B I/O Port (PB0-PB7)
+1.5.4.2	Interrupt Input/Peripheral Control Lines (CA1, CA2, CB1, CB2)
+1.5.4.2.1	Peripheral A Interrupt Input/Peripheral Control Lines (CA1, CA2)
+1.5.4.2.2	Peripheral B Interrupt Input/Peripheral Control Lines (CB1, CB2)
+1.5.5	Summary of MCS6520 Operation
+1.5.5.1	Control Register Operation
+1.5.5.2	MCS6520 Operation in MCS6500 Systems
+1.6	Peripheral Interface/Memory Device - MCS6530
+1.6.1	Introduction
+1.6.2	Pinout Description
+1.6.2.1	Reset (RES)
+1.6.2.2	Input Clock
+1.6.2.3	Read/Write (R/W)
+1.6.2.4	Interrupt Request (IRQ)
+1.6.2.5	Data Bus (D0-D7)
+1.6.2.6	Peripheral Data Ports
+1.6.2.7	Address Lines (A0-A9)
+1.6.3	Internal Organization
+1.6.3.1	ROM - 1K Byte (8K Bits)
+1.6.3.2	RAM - 64 Bytes (512 Bits)
+1.6.3.3	Internal Peripheral Registers
+1.6.3.4	Interval Timer
+1.6.4	Addressing
+1.6.4.1	One-Chip Addressing
+1.6.4.2	Seven-Chip Addressing
+1.6.4.3	I/O Register - Timer Addressing
+2.1	The System Configuration Task
+2.2	Input/Output Techniques
+2.2.1	The General Purpose Input/Output (I/O) Port
+2.2.2	The Special Purpose Peripheral Interface Device
+2.2.3	Configuring the General Purpose I/O Port
+2.2.3.1	Assignment of Outputs
+2.2.3.2	Assignment of Inputs
+2.2.4	Power-On Considerations
+2.2.5	Handshaking
+2.2.5.1	Handshaking on Data Transfers from the Processor
+2.2.5.2	Handshaking on Data Transfers into the Processor
+2.3	Configuring the Interface Between the Microprocessor and the Support Chips
+2.3.1	Assignment of Addresses in the MCS6500 System
+2.3.1.1	ROM Address Assignment
+2.3.1.2	RAM Address Assignment
+2.3.2	Additional Address Assignment Techniques
+2.3.3	Interrupts
+2.3.3.1	Interrupt Prioritizing
+2.3.3.2	Example 1: Selecting the Interrupt Vector
+2.3.3.3	Example 2: Using the Processor Software Power
+2.3.4	The Application of RDY to Controlling the Memory Interface
+2.3.4.1	Interface Slow PROMs
+2.3.4.2	Direct Memory Address (DMA) Techniques
+2.3.4.3	Control of Dynamic RAMs in the MCS6500 System
+2.3.5	Hold-Time Control - MCS6501
+2.4	Additional System Considerations
+2.4.1	Peripheral Interface Devices
+2.4.2	RAM
+2.4.3	ROM
+2.5	Evaluating System Performance
+3.0	Introduction to Microcomputer Testing
+3.1	Static Testing
+3.1.1	Introduction
+3.1.2	Single Cycle Execution
+3.1.3	Single Instruction Execution
+3.2	Dynamic Testing
+3.2.1	Introduction
+3.2.2	Externally Induced Loops
+3.2.3	Software Loops
+3.3	System Diagnosis Using Hardware Programmer Aids
+3.3.1	KIM - Keyboard Input Monitor
+3.3.2	TIM - Teletype Input Monitor
+3.3.3	MDT - Microcomputer Development Terminal
+3.4	Microprocessor Start-Up Procedure
+3.4.1	Introduction
+3.4.2	System Power - Step 1
+3.4.3	Basic System Timing - Step 2
+3.4.4	System Reset - Step 3
+3.4.4.1	Static Analysis of System Details
+3.4.4.2	Dynamic Analysis of System Details
+3.4.4.2.1	Address Bus Verification
+3.4.4.2.2	Data Bus Verification
+3.4.5	Detailed Component Check
+App-A	Summary of Single Cycle Execution

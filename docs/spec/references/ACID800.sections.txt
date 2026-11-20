@@ -1,0 +1,67 @@
+# Tests of the Acid800 test suite 1.2 (Avery Lee), main suite for the Atari 8-bit computers.
+# Made by hand from the archive Acid800-1.2.7z: one line per test program in
+# src/Acid800/source/ that the suite also builds as a standalone test
+# (out/Release/Acid800/standalone/<key>.xex). The support files (disk, library, loader, menu,
+# options) and the display modules (mod_*) are not tests and are not in the index.
+# Format: one test per line, key<TAB>title. Key rule: the file name of the test without the
+# extension, as the suite names it (for example antic_wsync). The title is the heading of the
+# test in README.html, "Hardware test suite notes". The tests antic_hiresbug and
+# pokey_addrmirror have no heading there; their title is the test name in the source file.
+antic_addresswrap	ANTIC: Address wrapping
+antic_addrmirror	ANTIC: Address mirroring
+antic_blockednmi	ANTIC: Blocked NMIs
+antic_charcontrol	ANTIC: Character control
+antic_default	ANTIC: Default value
+antic_dlistwrap	ANTIC: Display list wrapping
+antic_dlitiming	ANTIC: DLI timing
+antic_dmapattern	ANTIC: DMA pattern
+antic_hiresbug	ANTIC: Hires bug
+antic_hscrolbug	ANTIC: HSCROL bug
+antic_linebuffering	ANTIC: Line buffering
+antic_nmist	ANTIC: NMIST/NMIRES test
+antic_pfstarttiming	ANTIC: Playfield start timing
+antic_pfstoptiming	ANTIC: Playfield stop timing
+antic_pmdma	ANTIC: P/M graphics DMA
+antic_vcount	ANTIC: VCOUNT timing
+antic_virtdma	ANTIC: Virtual DMA
+antic_vscroldli	ANTIC: VSCROL+DLI timing
+antic_vscroll	ANTIC: Vertical scrolling
+antic_wsync	ANTIC: WSYNC timing
+cpu_65c816	CPU: 65C816 tests
+cpu_bugs	CPU: Bugs
+cpu_clisei	CPU: CLI/SEI timing
+cpu_decimal	CPU: Decimal mode
+cpu_flags	CPU: Flags
+cpu_illegal	CPU: Illegal instructions
+cpu_illtiming	CPU: Illegal insn timing
+cpu_insn	CPU: Basic instructions
+cpu_timing	CPU: Timing
+gtia_addrmirror	GTIA: Address mirroring
+gtia_collision	GTIA: Collision test
+gtia_collision2	GTIA: Special modes collision test
+gtia_consol	GTIA: CONSOL test
+gtia_default	GTIA: Default value
+gtia_phantomdma	GTIA: Phantom PMG DMA
+gtia_pmoverlap	GTIA: Player overlap
+gtia_pmresize	GTIA: Player resizing
+gtia_pmretrigger	GTIA: P/M retriggering
+gtia_psuedomodee	GTIA: Pseudo mode E
+gtia_vdelay	GTIA: Vertical delay test
+mmu_xlbanking	MMU: XL banking
+pia_basic	PIA: Basic test
+pia_irq	PIA: Interrupt control test
+pokey_addrmirror	POKEY: Address mirroring
+pokey_asyncrecv	POKEY: Asynchronous receive mode
+pokey_default	POKEY: Default value
+pokey_inittiming	POKEY: Init timing
+pokey_irqtiming	POKEY: IRQ timing
+pokey_noise	POKEY: Noise generators
+pokey_serclock	POKEY: Serial clocking modes
+pokey_serdirect	POKEY: Direct serial input
+pokey_seroc	POKEY: Serial output complete IRQ
+pokey_sertiming	POKEY: Serial port timing
+pokey_skstat	POKEY: Serial status
+pokey_timergranularity	POKEY: 1.79MHz timer granularity
+pokey_timerirq	POKEY: Timer IRQs
+pokey_timertiming	POKEY: Timer timing
+pokey_twotone	POKEY: Two-tone mode
