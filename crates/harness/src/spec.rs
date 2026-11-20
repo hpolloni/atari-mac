@@ -1,4 +1,4 @@
-//! Specification gates and two-way traceability (REQ-027, REQ-043 to REQ-055).
+//! Specification gates and two-way traceability (REQ-027, REQ-043 to REQ-056).
 //!
 //! Design: `docs/design/spec-gates.md`. [`load()`] reads the requirements, the open items, the
 //! slices, the evidence records, the test plans of the design documents and the tests in
@@ -8,6 +8,7 @@
 mod code;
 mod gates;
 mod load;
+mod readme;
 mod report;
 mod text;
 
@@ -22,6 +23,7 @@ pub use gates::{
     trace, vague_words,
 };
 pub use load::load;
+pub use readme::{STATUS_BEGIN, STATUS_END, readme, status_block};
 pub use report::{generate, matrix, open_item_index, requirement_index};
 pub use text::requirement_numbers;
 
@@ -36,6 +38,9 @@ pub const REQUIREMENT_INDEX: &str = "docs/spec/requirements/INDEX.md";
 
 /// The path of the open item index, relative to the repository root (REQ-053).
 pub const OPEN_ITEM_INDEX: &str = "docs/spec/open-items/README.md";
+
+/// The path of the README, relative to the repository root (REQ-056).
+pub const README: &str = "README.md";
 
 /// Defines a metadata enum with its frontmatter values.
 macro_rules! keyword_enum {
@@ -460,12 +465,21 @@ pub enum SpecError {
         /// The cause.
         message: String,
     },
+    /// The status markers of `README.md` are missing, duplicated or unclosed (REQ-056).
+    Markers {
+        /// The path.
+        path: PathBuf,
+        /// The cause.
+        message: String,
+    },
 }
 
 impl fmt::Display for SpecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { path, message } => write!(f, "{}: {message}", path.display()),
+            Self::Io { path, message } | Self::Markers { path, message } => {
+                write!(f, "{}: {message}", path.display())
+            }
             Self::Yaml {
                 path,
                 line,
@@ -538,6 +552,7 @@ pub fn check(spec: &Spec, root: &Path) -> Vec<Violation> {
     all.extend(evidence(spec));
     all.extend(open_items(spec, root));
     all.extend(indexes(spec, root));
+    all.extend(readme(spec, root));
     all.sort();
     all.dedup();
     all
@@ -638,4 +653,4 @@ impl Baseline {
 }
 
 /// The rules that the gates check.
-pub const RULES: &[u16] = &[27, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54];
+pub const RULES: &[u16] = &[27, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 56];

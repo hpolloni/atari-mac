@@ -1,4 +1,4 @@
-//! Specification gates (`docs/design/spec-gates.md`, REQ-043 to REQ-055).
+//! Specification gates (`docs/design/spec-gates.md`, REQ-043 to REQ-056).
 //!
 //! Each gate runs on the real repository, where only the violations of
 //! `docs/spec/gate-baseline.txt` are permitted, and on a small synthetic repository in a
@@ -16,8 +16,8 @@ mod gates {
 
     use atari_harness::data::repo_root;
     use atari_harness::spec::{
-        self, Baseline, MATRIX, OPEN_ITEM_INDEX, REQUIREMENT_INDEX, RULES, Spec, SpecError,
-        Violation,
+        self, Baseline, MATRIX, OPEN_ITEM_INDEX, README, REQUIREMENT_INDEX, RULES, STATUS_BEGIN,
+        STATUS_END, Spec, SpecError, Violation,
     };
 
     /// A gate as a function of the specification and the repository root.
@@ -72,7 +72,8 @@ mod gates {
 
     impl Fixture {
         /// A repository that passes all gates: three requirements, one open item, one slice
-        /// with one `done` package, one evidence record, one design document and one test file.
+        /// with one `done` package, one evidence record, one design document, one test file,
+        /// a README with a status block, a Makefile and the help text in `src/cli.rs`.
         fn new() -> Self {
             let number = FIXTURES.fetch_add(1, Ordering::Relaxed);
             let name = format!("atari-spec-gates-{}-{number}", process::id());
@@ -158,6 +159,24 @@ mod gates {
                     "/// Verifies {one}.\n#[test]\nfn first_test() {{}}\n\n/// Verifies {three}.\n\
                      #[test]\n#[ignore = \"planned: SLICE-01\"]\nfn third_test() {{}}\n"
                 ),
+            );
+            self.write(
+                README,
+                &format!(
+                    "# Demo\n\nText above.\n\n{STATUS_BEGIN}\n{STATUS_END}\n\nRun `make check` and \
+                     `demo --pal`. See [the plan](docs/plan/README.md) and SLICE-01.\n\n\
+                     ```sh\nmake test   # make no-target is a comment\n\
+                     cargo run --release -- --pal\n```\n"
+                ),
+            );
+            self.write(
+                "Makefile",
+                "FLAGS := -D\n\ncheck: test\n\ttrue\n\ntest:\n\ttrue\n",
+            );
+            self.write(
+                "src/cli.rs",
+                "//! The command line.\n\n/// The help text.\npub const USAGE: &str = \"\\\n\
+                 Usage: demo [options]\n  --pal       PAL machine\n  -h, --help  Show this text\";\n",
             );
         }
 
@@ -1308,8 +1327,297 @@ mod gates {
         });
     }
 
+    /// Asserts that `violations` has no violation of `rule` whose message contains `needle`.
+    #[track_caller]
+    fn assert_not_reported(violations: &[Violation], rule: u16, needle: &str) {
+        let found: Vec<String> = violations
+            .iter()
+            .filter(|v| v.rule == rule && v.message.contains(needle))
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            found.is_empty(),
+            "unexpected violations:\n{}",
+            found.join("\n")
+        );
+    }
+
+    /// The text of the README of the fixture.
+    fn readme_of(fixture: &Fixture) -> String {
+        fs::read_to_string(fixture.root.join(README)).unwrap()
+    }
+
+    /// Verifies REQ-056: the README of the repository has one status block with a row for each
+    /// slice file, `spec-index` writes the block and keeps the text outside it, and the
+    /// `indexes` gate fails when the block differs from a new generation.
+    #[test]
+    fn readme_status_block_is_current() {
+        let root = repo_root();
+        let spec = spec::load(&root).unwrap();
+        let stale: Vec<String> = spec::indexes(&spec, &root)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(stale.is_empty(), "{}", stale.join("\n"));
+        let text = fs::read_to_string(root.join(README)).unwrap();
+        let block = format!(
+            "{STATUS_BEGIN}\n{}{STATUS_END}\n",
+            spec::status_block(&spec)
+        );
+        assert_eq!(
+            text.matches(&block).count(),
+            1,
+            "README.md has the block once"
+        );
+        let slice_files = fs::read_dir(root.join("docs/plan"))
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("SLICE-")
+            })
+            .count();
+        assert_eq!(block.matches("| [SLICE-").count(), slice_files);
+        for slice in &spec.slices {
+            let link = format!("[SLICE-{0:02}](docs/plan/SLICE-{0:02}.md)", slice.id);
+            assert!(block.contains(&link), "a row links {link}");
+        }
+
+        let fixture = Fixture::new();
+        let text = readme_of(&fixture);
+        assert!(
+            text.contains(
+                "| [SLICE-01](docs/plan/SLICE-01.md) | First slice | in-progress | 1 | 1 | 0 | 1 |"
+            ),
+            "the row has the counts of the states:\n{text}"
+        );
+        assert!(
+            text.contains(
+                "All 3 requirements: 1 tested, 1 pending, 0 missing, 1 not a test requirement. \
+                 Open items with the status `open`: 1."
+            ),
+            "the counts of the matrix:\n{text}"
+        );
+        assert!(
+            fixture.run(spec::indexes).is_empty(),
+            "the block is current"
+        );
+
+        let above = "# Demo\n\nText | above.\n\n";
+        let below = "\nText below.\n<!-- other -->\n";
+        fixture.write(
+            README,
+            &format!("{above}{STATUS_BEGIN}\nold\n{STATUS_END}\n{below}"),
+        );
+        assert_reports(
+            &fixture.run(spec::indexes),
+            56,
+            "status block is not up to date",
+        );
+        let _counts = spec::generate(&fixture.root).unwrap();
+        let text = readme_of(&fixture);
+        assert!(
+            text.starts_with(&format!("{above}{STATUS_BEGIN}\n")),
+            "{text}"
+        );
+        assert!(
+            text.ends_with(&format!("\n{STATUS_END}\n{below}")),
+            "{text}"
+        );
+        assert!(!text.contains("old"), "{text}");
+        assert!(
+            fixture.run(spec::indexes).is_empty(),
+            "the block is current"
+        );
+
+        fixture.replace(
+            "docs/plan/SLICE-01.md",
+            "title: First slice",
+            "title: New slice",
+        );
+        assert_reports(
+            &fixture.run(spec::indexes),
+            56,
+            "status block is not up to date",
+        );
+        assert_reports(&fixture.all(), 56, "status block is not up to date");
+        let _counts = spec::generate(&fixture.root).unwrap();
+        assert!(readme_of(&fixture).contains("| New slice |"));
+        assert!(fixture.all().is_empty(), "all gates pass");
+    }
+
+    /// Verifies REQ-056: a missing, duplicated or unclosed status marker fails the `indexes`
+    /// gate, and `spec-index` does not change the README.
+    #[test]
+    fn readme_status_block_rejects_bad_markers() {
+        let begin = format!("{STATUS_BEGIN}\n");
+        let end = format!("{STATUS_END}\n");
+        let cases: [(&str, String); 5] = [
+            ("no line `<!-- BEGIN", String::new()),
+            (
+                "BEGIN GENERATED: status -->` is duplicated",
+                format!("{begin}{begin}"),
+            ),
+            (
+                "END GENERATED: status -->` is duplicated",
+                format!("{end}{end}"),
+            ),
+            ("is not closed", String::new()),
+            ("is before", String::new()),
+        ];
+        for (index, (needle, replacement)) in cases.iter().enumerate() {
+            let fixture = Fixture::new();
+            let good = readme_of(&fixture);
+            let bad = match index {
+                0 | 1 => good.replacen(&begin, replacement, 1),
+                2 | 3 => good.replacen(&end, replacement, 1),
+                _ => format!("{end}{}", good.replacen(&end, "", 1)),
+            };
+            fixture.write(README, &bad);
+            assert_reports(&fixture.run(spec::indexes), 56, needle);
+            let error = spec::generate(&fixture.root).unwrap_err();
+            assert!(
+                matches!(&error, SpecError::Markers { message, .. } if message.contains(needle)),
+                "{error}"
+            );
+            assert!(error.to_string().contains(README), "{error}");
+            assert_eq!(readme_of(&fixture), bad, "the README does not change");
+        }
+        rejects(spec::indexes, 56, "the file does not exist", |f| {
+            fs::remove_file(f.root.join(README)).unwrap();
+        });
+        rejects(spec::indexes, 56, "no line", |f| {
+            f.replace(README, &begin, &format!("  {begin}"));
+        });
+    }
+
+    /// Verifies REQ-056: the `references` gate checks the links and the IDs of `README.md`.
+    #[test]
+    fn readme_links_and_ids_are_checked() {
+        let root = repo_root();
+        let spec = spec::load(&root).unwrap();
+        let found: Vec<String> = spec::references(&spec, &root)
+            .iter()
+            .filter(|v| v.file == Path::new(README))
+            .map(ToString::to_string)
+            .collect();
+        assert!(found.is_empty(), "{}", found.join("\n"));
+        assert!(
+            spec.documents.iter().any(|d| d.path == Path::new(README)),
+            "the gates read README.md"
+        );
+        let fixture = Fixture::new();
+        fixture.replace(
+            README,
+            "Text above.\n",
+            &format!(
+                "Text above.\n\n[x](docs/missing.md), [y](docs/plan/) and {}.\n",
+                req(999)
+            ),
+        );
+        let found = fixture.run(spec::references);
+        assert_reports(&found, 47, "the link `docs/missing.md` points to no file");
+        assert_reports(&found, 47, &format!("`{}` names no file", req(999)));
+        assert_not_reported(&found, 47, "docs/plan/");
+        assert!(
+            found
+                .iter()
+                .all(|v| v.file == Path::new(README) && v.line == Some(5)),
+            "the file and the line: {found:?}"
+        );
+        let item = format!("OI-{:03}", 7);
+        rejects(
+            spec::references,
+            47,
+            &format!("`{item}` names no file"),
+            |f| {
+                f.replace(README, "SLICE-01.\n", &format!("{item}.\n"));
+            },
+        );
+        let slice = format!("SLICE-{:02}", 9);
+        rejects(
+            spec::references,
+            47,
+            &format!("`{slice}` names no file"),
+            |f| {
+                f.replace(README, "SLICE-01.\n", &format!("{slice}.\n"));
+            },
+        );
+    }
+
+    /// Verifies REQ-056: each `make <target>` in a code span or a code block of `README.md` is
+    /// a target in `Makefile`.
+    #[test]
+    fn readme_make_targets_exist() {
+        repository_passes(spec::readme, &[56]);
+        fixture_passes();
+        let needle = "`nothing` is not a target in Makefile";
+        rejects(spec::readme, 56, needle, |f| {
+            f.replace(README, "`make check`", "`make nothing`");
+        });
+        rejects(spec::readme, 56, needle, |f| {
+            f.replace(README, "make test ", "make -k nothing ");
+        });
+        rejects(spec::readme, 56, "`FLAGS` is not a target", |f| {
+            f.replace(README, "`make check`", "`make FLAGS`");
+        });
+        let fixture = Fixture::new();
+        fixture.replace(README, "`make check`", "`make nothing`");
+        assert_reports(&fixture.all(), 56, needle);
+        let found: Vec<Violation> = fixture.run(spec::readme);
+        assert_eq!(found.len(), 1, "{found:?}");
+        let fixture = Fixture::new();
+        fixture.replace(README, "Text above.", "Text above: make nothing, `make`.");
+        assert!(fixture.run(spec::readme).is_empty(), "prose is not checked");
+        rejects(spec::readme, 56, "`check` is not a target", |f| {
+            fs::remove_file(f.root.join("Makefile")).unwrap();
+        });
+    }
+
+    /// Verifies REQ-056: each command-line option of `README.md` is in the help text of
+    /// `src/cli.rs`, except options of other programs in a code span that starts with `cargo`.
+    #[test]
+    fn readme_options_exist() {
+        repository_passes(spec::readme, &[56]);
+        let needle = "`--ntsc` is not an option in the help text of src/cli.rs";
+        rejects(spec::readme, 56, needle, |f| {
+            f.replace(README, "`demo --pal`", "`demo --ntsc`");
+        });
+        rejects(spec::readme, 56, needle, |f| {
+            f.replace(README, "Text above.", "Text above, with --ntsc.");
+        });
+        rejects(spec::readme, 56, needle, |f| {
+            f.replace(README, "-- --pal\n", "-- --pal --ntsc\n");
+        });
+        rejects(spec::readme, 56, needle, |f| {
+            f.replace(
+                README,
+                "Text above.",
+                "Use `cargo run --release -- --ntsc`.",
+            );
+        });
+        rejects(spec::readme, 56, "`--pal-blending` is not an option", |f| {
+            f.replace(README, "`demo --pal`", "`demo --pal-blending`");
+        });
+        let fixture = Fixture::new();
+        fixture.replace(
+            README,
+            "Text above.",
+            "Use `cargo test --all-targets -- --include-ignored`, `cargo run -p x --bin y -- --z` \
+             and `demo -h --help`. A table | --- | and <!-- a comment -->.",
+        );
+        let found = fixture.run(spec::readme);
+        assert!(found.is_empty(), "{found:?}");
+        rejects(spec::readme, 56, "src/cli.rs has no help text", |f| {
+            f.replace("src/cli.rs", "const USAGE", "const HELP");
+        });
+    }
+
     /// Verifies REQ-055: all gates run on the repository in no more than 10 seconds, and the
-    /// baseline has no line that matches no violation.
+    /// baseline has no line that matches no violation. The gates include the `readme` gate
+    /// of REQ-056.
     #[test]
     fn gates_run_within_10_seconds() {
         let root = repo_root();
@@ -1317,6 +1625,12 @@ mod gates {
         let spec = spec::load(&root).unwrap();
         let violations = spec::check(&spec, &root);
         let elapsed = start.elapsed();
+        assert!(RULES.contains(&56), "the README rules are gate rules");
+        let readme = spec::readme(&spec, &root);
+        assert!(
+            readme.iter().all(|v| violations.contains(v)),
+            "the check runs the readme gate"
+        );
         assert!(
             elapsed <= Duration::from_secs(10),
             "the gates took {elapsed:?}"

@@ -1,5 +1,5 @@
-//! The generated files: the requirement index, the open item index and the traceability
-//! matrix (REQ-052, REQ-053).
+//! The generated files: the requirement index, the open item index, the traceability
+//! matrix and the status block of `README.md` (REQ-052, REQ-053, REQ-056).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -7,15 +7,15 @@ use std::io;
 use std::path::Path;
 
 use super::{
-    Baseline, MATRIX, OPEN_ITEM_INDEX, REQUIREMENT_INDEX, Requirement, Spec, SpecError,
-    Verification, Violation, check, load,
+    Baseline, MATRIX, OPEN_ITEM_INDEX, README, REQUIREMENT_INDEX, Requirement, Spec, SpecError,
+    Verification, Violation, check, load, readme,
 };
 
 /// The command that writes the generated files.
-const COMMAND: &str = "cargo run -p atari-harness --bin spec-index";
+pub(super) const COMMAND: &str = "cargo run -p atari-harness --bin spec-index";
 
 /// Escapes `|` for a markdown table cell.
-fn cell(text: &str) -> String {
+pub(super) fn cell(text: &str) -> String {
     text.replace('|', "\\|")
 }
 
@@ -79,8 +79,11 @@ pub fn open_item_index(spec: &Spec) -> String {
     lines.join("\n")
 }
 
+/// The states of a requirement in the matrix, in the order of the README status block.
+pub(super) const STATES: [&str; 4] = ["tested", "pending", "missing", "not a test requirement"];
+
 /// The state of a requirement in the matrix (REQ-027).
-fn state(spec: &Spec, r: &Requirement) -> &'static str {
+pub(super) fn state(spec: &Spec, r: &Requirement) -> &'static str {
     let (running, ignored) =
         spec.tests_of(r.id).fold(
             (0, 0),
@@ -222,16 +225,37 @@ fn write(root: &Path, rel: &str, text: &str) -> Result<(), SpecError> {
     fs::write(&path, text).map_err(io)
 }
 
-/// Writes `docs/spec/requirements/INDEX.md`, `docs/spec/open-items/README.md` and
-/// `target/traceability.md` below `root`. Gives the counts line of the matrix.
+/// Writes the generated files below `root`, and gives the counts line of the matrix.
+///
+/// The files are `docs/spec/requirements/INDEX.md`, `docs/spec/open-items/README.md`, the
+/// status block of `README.md` (REQ-056, if the file exists) and `target/traceability.md`.
 ///
 /// # Errors
 ///
-/// A [`SpecError`] if the repository cannot be read or a file cannot be written.
+/// A [`SpecError`] if the repository cannot be read, a file cannot be written, or the status
+/// markers of `README.md` are missing, duplicated or unclosed ([`SpecError::Markers`]).
 pub fn generate(root: &Path) -> Result<String, SpecError> {
-    let spec = load(root)?;
+    let mut spec = load(root)?;
     write(root, REQUIREMENT_INDEX, &requirement_index(&spec))?;
     write(root, OPEN_ITEM_INDEX, &open_item_index(&spec))?;
+    let readme_path = root.join(README);
+    if readme_path.exists() {
+        let text = load::read(&readme_path)?;
+        let new = readme::with_status(&text, &spec).map_err(|message| SpecError::Markers {
+            path: readme_path.clone(),
+            message,
+        })?;
+        if new != text {
+            write(root, README, &new)?;
+        }
+        for doc in spec
+            .documents
+            .iter_mut()
+            .filter(|d| d.path == Path::new(README))
+        {
+            doc.text.clone_from(&new);
+        }
+    }
     let violations = check(&spec, root);
     let report = matrix(&spec, &violations, &Baseline::read(root)?);
     write(root, MATRIX, &report)?;
