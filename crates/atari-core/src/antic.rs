@@ -124,8 +124,9 @@ pub struct AnticDebugState {
     pub memscan: u16,
     /// The row counter, 0-15.
     pub row: u8,
-    /// The playfield DMA clock ring. Bit 0 is the tap; bit `n` reaches the tap after `n`
-    /// cycles. The mapping to the bit order of the HRM 4.12 tables is antic.md open issue 15.
+    /// The playfield DMA clock: bit `k` is stage `k` of the 8-stage shift register (see
+    /// `docs/design/antic.md`, "Playfield DMA clock"). The mapping to the bit order of the
+    /// HRM 4.12 tables is antic.md open issue 15.
     pub dma_clock: u8,
     /// The 48-byte line buffer.
     pub line_buffer: [u8; LINE_BUFFER_SIZE],
@@ -155,7 +156,16 @@ pub const LINE_BUFFER_SIZE: usize = 48;
 /// The first scan line of the display list region (REQ-305).
 const FIRST_DISPLAY_LINE: u32 = 8;
 /// The last cycle with real playfield DMA. Later fetches are virtual (REQ-311, OI-018).
+/// Abnormal playfield DMA is virtual on this cycle too (HRM 4.12).
 const LAST_REAL_DMA_CYCLE: u32 = 105;
+/// The number of states of the line buffer address counter (HRM 4.12, REQ-345).
+const LB_STATES: u8 = 63;
+/// The DMA clock stage of the character name request (HRM 4.12: offset 0).
+const STAGE_NAME: u8 = 1 << 0;
+/// The DMA clock stage of the bitmap request (HRM 4.12: offset +2).
+const STAGE_BITMAP: u8 = 1 << 2;
+/// The DMA clock stage of the character data request (HRM 4.12: offset +3).
+const STAGE_CHAR_DATA: u8 = 1 << 3;
 /// The first visible horizontal position (HRM 6.2).
 const FIRST_VISIBLE: usize = 0x22;
 /// The last visible horizontal position (HRM 6.2).
@@ -180,6 +190,10 @@ const NMI_VBI: u8 = 0x40;
 struct Deferred {
     /// The cycle of the fetch.
     cycle: u32,
+    /// The IR mode of the fetch.
+    mode: u8,
+    /// The slot in `names` of a name fetch.
+    slot: usize,
     /// A name or bitmap fetch that loads the line buffer at this index.
     name_or_bitmap: Option<u8>,
     /// A character data fetch for this name, with `false` if ANTIC substitutes `$00`.
@@ -252,11 +266,15 @@ pub struct Antic {
     line_buffer: [u8; LINE_BUFFER_SIZE],
     /// The line buffer address.
     lb_index: u8,
-    /// The playfield DMA clock ring. Bit 0 is the tap.
+    /// The playfield DMA clock: an 8-stage shift register, bit `k` = stage `k`.
     dma_clock: u8,
-    /// The tap outputs: bit 0 = this cycle, bit `n` = `n` cycles before.
-    tap_history: u8,
-    /// The names of the last 4 cycles, indexed by `cycle & 3`.
+    /// The bits of `dma_clock` that the start event of this scan line injected. A request
+    /// from another bit is abnormal DMA (HRM 4.12).
+    dma_clock_normal: u8,
+    /// IR as the playfield DMA clock sees it: the value of the last tick. An instruction
+    /// fetch on cycle 1 changes the clock from cycle 2 (REQ-345).
+    pf_ir: u8,
+    /// The names of the last 4 cycles, indexed by the absolute cycle `& 3`.
     names: [u8; 4],
     /// The playfield started on this scan line.
     pf_started: bool,
@@ -289,6 +307,9 @@ pub struct Antic {
     hires_bug: bool,
     /// A virtual or disabled playfield fetch waits for `end_cycle`.
     deferred: Option<Deferred>,
+    /// The addresses of the DMA requests that the last tick combined into one read.
+    #[cfg(test)]
+    requests: [Option<u16>; 3],
 }
 
 /// Increments the low 10 bits of a display list address (REQ-324).
@@ -337,12 +358,26 @@ const fn window(width: u8) -> (usize, usize) {
     }
 }
 
-/// One DMA read.
-fn dma(mem: &mut impl DmaMemory, out: &mut CycleOutput, kind: DmaKind, addr: u16) -> u8 {
-    let value = mem.dma_read(addr);
-    out.dma = kind;
-    out.dma_data = value;
-    value
+/// The playfield DMA requests of one cycle (HRM 4.12).
+#[derive(Debug, Clone, Copy, Default)]
+#[expect(clippy::struct_excessive_bools, reason = "one flag per request line")]
+struct PfRequest {
+    /// The IR mode that the DMA clock uses.
+    mode: u8,
+    /// A character name or bitmap request.
+    name_or_bitmap: bool,
+    /// A character data request.
+    char_data: bool,
+    /// The name or bitmap request reads memory (first scan line of the mode line).
+    from_memory: bool,
+    /// The requests make a real DMA cycle.
+    real: bool,
+    /// The name of the character data request (from 3 cycles before).
+    name: u8,
+    /// `false` if ANTIC substitutes `$00` for the character data (REQ-313).
+    shown: bool,
+    /// The font address of the character data request.
+    font: u16,
 }
 
 /// The low byte of a value.
@@ -385,7 +420,8 @@ impl Antic {
             line_buffer: [0; LINE_BUFFER_SIZE],
             lb_index: 0,
             dma_clock: 0,
-            tap_history: 0,
+            dma_clock_normal: 0,
+            pf_ir: 0,
             names: [0; 4],
             pf_started: false,
             start_width: 0,
@@ -402,6 +438,8 @@ impl Antic {
             nmi_was_high: false,
             hires_bug: false,
             deferred: None,
+            #[cfg(test)]
+            requests: [None; 3],
         }
     }
 
@@ -412,7 +450,7 @@ impl Antic {
         self.dmactl_late = 0;
         self.nmien = 0;
         self.dma_clock = 0;
-        self.tap_history = 0;
+        self.dma_clock_normal = 0;
     }
 
     /// Reads a register. `reg` is `addr & 0x0F` (REQ-300, REQ-301). No side effects.
@@ -461,10 +499,14 @@ impl Antic {
         if self.cycle == 0 {
             self.start_line(&mut out);
         }
-        if self.in_display() {
-            self.fixed_dma(mem, &mut out);
-        }
-        self.playfield(mem, &mut out);
+        let special = if self.in_display() {
+            self.special_request()
+        } else {
+            None
+        };
+        let pf = self.playfield_request();
+        self.dma_cycle(mem, &mut out, special, &pf);
+        self.clock_step();
         if self.in_display() {
             self.row_events();
         }
@@ -481,10 +523,11 @@ impl Antic {
     pub fn end_cycle(&mut self, data_bus: u8) {
         if let Some(deferred) = self.deferred.take() {
             if let Some(index) = deferred.name_or_bitmap {
-                self.apply_name_or_bitmap(deferred.cycle, index, true, data_bus);
+                let fetch = (deferred.cycle, deferred.mode, deferred.slot);
+                self.apply_name_or_bitmap(fetch, Some(index), data_bus);
             }
             if let Some((name, shown)) = deferred.char_data {
-                self.apply_char_data(deferred.cycle, name, shown, data_bus);
+                self.apply_char_data(deferred.cycle, deferred.mode, (name, shown), data_bus);
             }
         }
     }
@@ -604,7 +647,7 @@ impl Antic {
         self.pixels = [AnCode::BACKGROUND; PIXELS];
         self.pf_started = false;
         self.win_right = OPEN;
-        self.tap_history = 0;
+        self.dma_clock_normal = 0;
         self.dl_fetched = false;
         self.dli_this_line = false;
         if self.cur_line == FIRST_DISPLAY_LINE {
@@ -622,21 +665,20 @@ impl Antic {
         self.first_line = self.in_display() && self.new_mode_line;
     }
 
-    /// The DMA of cycles 0-7: missiles, display list and players (REQ-339, REQ-319).
-    fn fixed_dma(&mut self, mem: &mut impl DmaMemory, out: &mut CycleOutput) {
+    /// The DMA request of cycles 0-7: missiles, display list and players (REQ-319,
+    /// REQ-339).
+    fn special_request(&self) -> Option<(DmaKind, u16)> {
         match self.cur_cycle {
-            0 if self.dmactl_late & 0x0C != 0 => {
-                let addr = self.pm_address(None);
-                let _missiles = dma(mem, out, DmaKind::Missile, addr);
+            0 if self.dmactl_late & 0x0C != 0 => Some((DmaKind::Missile, self.pm_address(None))),
+            1 if self.new_mode_line && !self.jvb_wait && self.dmactl_late & 0x20 != 0 => {
+                Some((DmaKind::DisplayList, self.dlist))
             }
-            1 => self.fetch_instruction(mem, out),
             c @ 2..=5 if self.dmactl_late & 0x08 != 0 => {
                 let player = low_byte(c - 2);
-                let addr = self.pm_address(Some(player));
-                let _player = dma(mem, out, DmaKind::Player(player), addr);
+                Some((DmaKind::Player(player), self.pm_address(Some(player))))
             }
-            6 | 7 => self.fetch_address(mem, out),
-            _ => {}
+            6 | 7 if self.address_fetch() => Some((DmaKind::DisplayListAddress, self.dlist)),
+            _ => None,
         }
     }
 
@@ -657,12 +699,54 @@ impl Antic {
         }
     }
 
-    /// Tick 1: the instruction fetch of a new mode line (REQ-319, REQ-322, REQ-326).
-    fn fetch_instruction(&mut self, mem: &mut impl DmaMemory, out: &mut CycleOutput) {
+    /// The DMA cycle: one read for all requests of the cycle. Two or more requests read
+    /// from the bitwise AND of their addresses, and all get the byte (REQ-345).
+    fn dma_cycle(
+        &mut self,
+        mem: &mut impl DmaMemory,
+        out: &mut CycleOutput,
+        special: Option<(DmaKind, u16)>,
+        pf: &PfRequest,
+    ) {
+        let name_addr = (pf.real && pf.from_memory).then_some(self.memscan);
+        let font_addr = (pf.real && pf.char_data).then_some(pf.font);
+        let requests = [special.map(|(_, addr)| addr), name_addr, font_addr];
+        #[cfg(test)]
+        {
+            self.requests = requests;
+        };
+        let addr = requests
+            .into_iter()
+            .flatten()
+            .reduce(|left, right| left & right);
+        let value = addr.map(|addr| mem.dma_read(addr));
+        if let Some(byte) = value {
+            out.dma = match (special, name_addr.is_some()) {
+                (Some((kind, _)), _) => kind,
+                (None, true) if is_char(pf.mode) => DmaKind::CharacterName,
+                (None, true) => DmaKind::Bitmap,
+                (None, false) => DmaKind::CharacterData,
+            };
+            out.dma_data = byte;
+        }
+        match self.cur_cycle {
+            1 if self.in_display() => self.apply_instruction(special.and(value)),
+            6 | 7 => {
+                if let (Some(_), Some(byte)) = (special, value) {
+                    self.apply_address(byte);
+                }
+            }
+            _ => {}
+        }
+        self.apply_playfield(pf, if pf.real { value } else { None });
+    }
+
+    /// Tick 1: the instruction of a new mode line, if `fetched` (REQ-319, REQ-322, REQ-326).
+    const fn apply_instruction(&mut self, fetched: Option<u8>) {
         if self.new_mode_line {
             self.new_mode_line = false;
-            if !self.jvb_wait && self.dmactl_late & 0x20 != 0 {
-                self.ir = dma(mem, out, DmaKind::DisplayList, self.dlist);
+            if let Some(ir) = fetched {
+                self.ir = ir;
                 self.dlist = inc10(self.dlist);
                 self.dl_fetched = true;
             }
@@ -672,30 +756,27 @@ impl Antic {
                 0
             };
         }
-        if mode(self.ir) < 2 {
-            // HRM 4.12: blank and jump lines reset the playfield DMA clock.
-            self.dma_clock = 0;
-        }
     }
 
-    /// Ticks 6 and 7: the LMS or jump address (REQ-321, REQ-322, REQ-323, REQ-330).
-    fn fetch_address(&mut self, mem: &mut impl DmaMemory, out: &mut CycleOutput) {
+    /// Ticks 6 and 7 fetch an LMS or jump address (REQ-321, REQ-322, REQ-323, REQ-330).
+    const fn address_fetch(&self) -> bool {
         let mode = mode(self.ir);
         let lms = mode >= 2 && self.ir & 0x40 != 0;
         // REQ-330: a jump line that vertical scrolling extends fetches its address again
         // on each of its later scan lines.
         let refetch = mode == 1 && !self.first_line && self.dmactl_late & 0x20 != 0;
-        if !(self.dl_fetched && (mode == 1 || lms)) && !refetch {
-            return;
-        }
-        let value = dma(mem, out, DmaKind::DisplayListAddress, self.dlist);
+        (self.dl_fetched && (mode == 1 || lms)) || refetch
+    }
+
+    /// Ticks 6 and 7: one byte of the LMS or jump address.
+    const fn apply_address(&mut self, value: u8) {
         self.dlist = inc10(self.dlist);
         if self.cur_cycle == 6 {
             self.addr_lo = value;
             return;
         }
         let addr = u16::from_le_bytes([self.addr_lo, value]);
-        if mode == 1 {
+        if mode(self.ir) == 1 {
             self.dlist = addr;
             self.jvb_wait = self.ir & 0x40 != 0;
         } else {
@@ -719,24 +800,62 @@ impl Antic {
         }
     }
 
-    /// The playfield DMA clock and its requests (REQ-309, REQ-311, REQ-312).
-    fn playfield(&mut self, mem: &mut impl DmaMemory, out: &mut CycleOutput) {
-        let mode = mode(self.ir);
-        let tap = self.dma_clock & 1;
-        self.tap_history = (self.tap_history << 1) | tap;
-        self.dma_clock = (self.dma_clock >> 1) | (tap << (period(mode) - 1));
+    /// The slot in `names` of the tick `cycles_before` cycles before this tick.
+    const fn name_slot(&self, cycles_before: u64) -> usize {
+        (self.total_cycles.wrapping_sub(cycles_before).to_le_bytes()[0] & 3) as usize
+    }
+
+    /// The playfield requests of the DMA clock in this tick (REQ-309, REQ-311, REQ-345).
+    fn playfield_request(&self) -> PfRequest {
+        let mode = mode(self.pf_ir);
+        let mut req = PfRequest {
+            mode,
+            ..PfRequest::default()
+        };
         if !self.in_display() || mode < 2 {
+            return req;
+        }
+        let stages = if is_char(mode) {
+            STAGE_NAME | STAGE_CHAR_DATA
+        } else {
+            STAGE_BITMAP
+        };
+        let active = self.dma_clock & stages;
+        if active == 0 {
+            return req;
+        }
+        req.name_or_bitmap = active & (STAGE_NAME | STAGE_BITMAP) != 0;
+        req.char_data = active & STAGE_CHAR_DATA != 0;
+        req.from_memory = req.name_or_bitmap && self.first_line;
+        // HRM 4.12 and OI-018: normal playfield DMA is real up to cycle 105, abnormal
+        // playfield DMA only on cycles 1-104.
+        let cycle = self.cur_cycle;
+        let normal = active & !self.dma_clock_normal == 0;
+        let in_window =
+            (1..LAST_REAL_DMA_CYCLE).contains(&cycle) || (cycle == LAST_REAL_DMA_CYCLE && normal);
+        req.real = self.pf_width() != 0 && in_window && (req.from_memory || req.char_data);
+        req.name = self.names[self.name_slot(3)];
+        let frow = font_row(mode, req.name, self.row, self.chactl);
+        req.shown = frow.is_some();
+        req.font = font_address(mode, req.name, frow.unwrap_or(0), self.chbase_late);
+        req
+    }
+
+    /// One cycle of the playfield DMA clock (HRM 4.12): the shift, then the start and stop
+    /// events. Each stage moves to the next stage. Stage `P - 1` also enters stage 0 again,
+    /// where `P` is the period of the mode. A bit leaves after stage 7.
+    const fn clock_step(&mut self) {
+        let period = period(mode(self.pf_ir));
+        self.dma_clock = (self.dma_clock << 1) | ((self.dma_clock >> (period - 1)) & 1);
+        self.dma_clock_normal =
+            (self.dma_clock_normal << 1) | ((self.dma_clock_normal >> (period - 1)) & 1);
+        // HRM 4.12: blank and jump lines and vertical blank clear the DMA clock.
+        if !self.in_display() || mode(self.ir) < 2 {
+            self.dma_clock = 0;
+            self.dma_clock_normal = 0;
             return;
         }
         self.clock_events();
-        let (name_or_bitmap, char_data) = if is_char(mode) {
-            (self.tap_history & 0x01 != 0, self.tap_history & 0x08 != 0)
-        } else {
-            (self.tap_history & 0x04 != 0, false)
-        };
-        if name_or_bitmap || char_data {
-            self.requests(mem, out, name_or_bitmap, char_data);
-        }
     }
 
     /// The `HSCROL` delay of the start and stop events in cycles.
@@ -748,12 +867,13 @@ impl Antic {
         }
     }
 
-    /// The start and stop events of the playfield DMA clock (HRM 4.12).
+    /// The start and stop events of the playfield DMA clock (HRM 4.11, HRM 4.12).
     const fn clock_events(&mut self) {
         let width = self.dmactl & 3;
         let delay = self.hscrol_cycles();
         if width != 0 && self.cur_cycle == start_cycle(fetch_width(width, self.ir)) + delay {
             self.dma_clock |= 1;
+            self.dma_clock_normal |= 1;
             if !self.pf_started {
                 self.pf_started = true;
                 self.lb_index = 0;
@@ -762,9 +882,14 @@ impl Antic {
             }
         }
         let stop_width = if width == 0 { self.start_width } else { width };
-        if stop_width != 0 && self.cur_cycle == stop_cycle(fetch_width(stop_width, self.ir)) + delay
+        // HRM 4.11: the wide stop position is always active.
+        let wide_stop = self.cur_cycle == stop_cycle(3) + delay;
+        if wide_stop
+            || (stop_width != 0
+                && self.cur_cycle == stop_cycle(fetch_width(stop_width, self.ir)) + delay)
         {
             self.dma_clock &= !1;
+            self.dma_clock_normal &= !1;
         }
         // The right edge of the display window comes from the displayed width without
         // `HSCROL`. On a line without scrolling, this is the cycle of the stop event. On a
@@ -774,58 +899,42 @@ impl Antic {
         }
     }
 
-    /// The name, bitmap and character data requests of one cycle.
-    fn requests(
-        &mut self,
-        mem: &mut impl DmaMemory,
-        out: &mut CycleOutput,
-        name_or_bitmap: bool,
-        char_data: bool,
-    ) {
+    /// The effects of the playfield requests. `value` is the byte of a real DMA cycle, else
+    /// the requests wait for the data bus value (REQ-311, REQ-344, REQ-347).
+    fn apply_playfield(&mut self, pf: &PfRequest, value: Option<u8>) {
         let cycle = self.cur_cycle;
-        let mode = mode(self.ir);
-        let from_memory = name_or_bitmap && self.first_line;
-        let name = self.names[((cycle + 1) & 3) as usize];
-        let frow = font_row(mode, name, self.row, self.chactl);
-        let font = font_address(mode, name, frow.unwrap_or(0), self.chbase_late);
-        let real = self.pf_width() != 0 && cycle <= LAST_REAL_DMA_CYCLE && out.dma == DmaKind::None;
-        let value = (real && (from_memory || char_data)).then(|| {
-            let (kind, addr) = match (from_memory, char_data) {
-                // REQ-345: two requests in one cycle read from the AND of the addresses.
-                (true, true) => (DmaKind::CharacterName, self.memscan & font),
-                (true, false) if is_char(mode) => (DmaKind::CharacterName, self.memscan),
-                (true, false) => (DmaKind::Bitmap, self.memscan),
-                (false, _) => (DmaKind::CharacterData, font),
-            };
-            dma(mem, out, kind, addr)
-        });
+        let fetch = (cycle, pf.mode, self.name_slot(0));
         let mut deferred = Deferred {
             cycle,
+            mode: pf.mode,
+            slot: fetch.2,
             name_or_bitmap: None,
             char_data: None,
         };
-        if name_or_bitmap {
+        if pf.name_or_bitmap {
             let index = self.lb_index;
-            self.lb_index = (index + 1) & 0x3F;
-            if from_memory {
+            // HRM 4.12: the line buffer address counter has 63 states.
+            self.lb_index = if index + 1 >= LB_STATES { 0 } else { index + 1 };
+            if pf.from_memory {
                 self.memscan = inc12(self.memscan);
                 match value {
-                    Some(byte) => self.apply_name_or_bitmap(cycle, index, true, byte),
+                    Some(byte) => self.apply_name_or_bitmap(fetch, Some(index), byte),
                     None => deferred.name_or_bitmap = Some(index),
                 }
             } else {
+                // States 48-62 of the counter read as `$FF`.
                 let byte = self
                     .line_buffer
                     .get(usize::from(index))
                     .copied()
                     .unwrap_or(0xFF);
-                self.apply_name_or_bitmap(cycle, index, false, byte);
+                self.apply_name_or_bitmap(fetch, None, byte);
             }
         }
-        if char_data {
+        if pf.char_data {
             match value {
-                Some(byte) => self.apply_char_data(cycle, name, frow.is_some(), byte),
-                None => deferred.char_data = Some((name, frow.is_some())),
+                Some(byte) => self.apply_char_data(cycle, pf.mode, (pf.name, pf.shown), byte),
+                None => deferred.char_data = Some((pf.name, pf.shown)),
             }
         }
         if deferred.name_or_bitmap.is_some() || deferred.char_data.is_some() {
@@ -833,37 +942,41 @@ impl Antic {
         }
     }
 
-    /// Stores a name or bitmap byte and decodes a bitmap byte.
-    fn apply_name_or_bitmap(&mut self, cycle: u32, index: u8, store: bool, byte: u8) {
-        if store && let Some(slot) = self.line_buffer.get_mut(usize::from(index)) {
-            *slot = byte;
+    /// Uses the name or bitmap byte of the fetch `(cycle, mode, slot)`. `store` is the line
+    /// buffer index for a byte from memory or from the data bus.
+    fn apply_name_or_bitmap(
+        &mut self,
+        (cycle, mode, slot): (u32, u8, usize),
+        store: Option<u8>,
+        byte: u8,
+    ) {
+        if let Some(index) = store
+            && let Some(entry) = self.line_buffer.get_mut(usize::from(index))
+        {
+            *entry = byte;
         }
-        let mode = mode(self.ir);
         if is_char(mode) {
-            self.names[(cycle & 3) as usize] = byte;
+            if let Some(name) = self.names.get_mut(slot) {
+                *name = byte;
+            }
         } else {
             let codes = mapped_codes(mode, byte);
             self.place(2 * cycle as usize + 8, codes.as_slice());
         }
     }
 
-    /// Decodes a character data byte. `shown` is `false` for the `$00` rows of mode 3.
-    fn apply_char_data(&mut self, cycle: u32, name: u8, shown: bool, byte: u8) {
-        let mode = mode(self.ir);
+    /// Decodes a character data byte for `(name, shown)`. `shown` is `false` for the `$00`
+    /// rows of mode 3.
+    fn apply_char_data(&mut self, cycle: u32, mode: u8, (name, shown): (u8, bool), byte: u8) {
         let data = blink_invert(mode, name, if shown { byte } else { 0 }, self.chactl);
         let codes = char_codes(mode, name, data);
         self.place(2 * cycle as usize + 6, codes.as_slice());
     }
 
-    /// Puts the codes of one byte at `position` (plus the odd `HSCROL` delay, HRM 4.7).
+    /// Puts the codes of one byte at `position`. The odd `HSCROL` delay is in the output
+    /// (`code_at`, HRM 4.7).
     fn place(&mut self, position: usize, codes: &[AnCode]) {
-        let odd = if self.ir & 0x10 == 0 {
-            0
-        } else {
-            usize::from(self.hscrol & 1)
-        };
-        let start = position + odd;
-        for (slot, code) in self.pixels.iter_mut().skip(start).zip(codes) {
+        for (slot, code) in self.pixels.iter_mut().skip(position).zip(codes) {
             *slot = *code;
         }
     }
@@ -917,7 +1030,9 @@ impl Antic {
     /// The code for horizontal position `x` of the last tick (REQ-306 to REQ-308).
     fn code_at(&self, x: usize) -> AnCode {
         let visible = (FIRST_VISIBLE..=LAST_VISIBLE).contains(&x);
-        let bug = self.hires_bug && visible && self.pf_width() != 0;
+        // REQ-346, OI-015: the bogus codes cover the playfield window of the `DMACTL` width.
+        let (left, right) = window(self.pf_width());
+        let bug = self.hires_bug && self.pf_width() != 0 && (left..=right).contains(&x);
         let hblank = if is_hires(mode(self.ir)) {
             AnCode::HBLANK_HIRES
         } else {
@@ -940,13 +1055,20 @@ impl Antic {
         if self.pf_width() == 0 || !in_window {
             return AnCode::BACKGROUND;
         }
-        self.pixels.get(x).copied().unwrap_or_default()
+        // HRM 4.7: odd `HSCROL` values delay the playfield encoder by one color clock.
+        let odd = if self.ir & 0x10 == 0 {
+            0
+        } else {
+            usize::from(self.hscrol & 1)
+        };
+        self.pixels.get(x - odd).copied().unwrap_or_default()
     }
 
     /// Advances the counters to the next cycle.
     const fn advance(&mut self) {
         self.dmactl_late = self.dmactl;
         self.chbase_late = self.chbase;
+        self.pf_ir = self.ir;
         self.total_cycles += 1;
         self.cycle += 1;
         if self.cycle == CYCLES_PER_LINE {

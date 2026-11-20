@@ -615,7 +615,6 @@ mod tests {
     use crate::cpu::Bus as _;
     use crate::gtia::{ConsoleKeys, FRAME_HEIGHT, FRAME_WIDTH};
     use crate::media::Cartridge;
-    use crate::planned::planned;
     use crate::timing::VideoStandard;
 
     /// The address of the test programs in the OS ROM.
@@ -1919,8 +1918,56 @@ mod tests {
     /// `HSCROL` = 2, `STA WSYNC` writes on cycle 104 and the CPU waits on the opcode fetch of
     /// a `NOP` (`$EA`); the virtual fetch on cycle 107 loads `$EA` into line buffer byte 47.
     #[test]
-    #[ignore = "planned: SLICE-02"]
     fn virtual_fetch_during_wsync_reads_cpu_byte() {
-        planned();
+        let hit = (1..40).find_map(|nops| {
+            let m = wsync_on_wide_line(nops);
+            (m.cycle_count() > 0).then(|| m.antic.debug_state().line_buffer[47])
+        });
+        assert_eq!(hit, Some(0xEA), "line buffer byte 47 after cycle 107");
+    }
+
+    /// Runs a program with a `STA WSYNC`, `nops` `NOP`s, `STA WSYNC` and `NOP` loop on a
+    /// display of `$1E` lines (`DMACTL` = `$23`, `HSCROL` = 2) for two frames, until a `STA
+    /// WSYNC` writes on cycle 104 of a `$1E` line. Then it runs to the end of cycle 107 of
+    /// that scan line. Returns a machine with no cycles if no write is on cycle 104.
+    fn wsync_on_wide_line(nops: usize) -> Machine {
+        let mut code = vec![
+            0xA9, 0x00, // LDA #$00
+            0x8D, 0x02, 0xD4, // STA DLISTL
+            0xA9, 0x30, // LDA #$30
+            0x8D, 0x03, 0xD4, // STA DLISTH
+            0xA9, 0x02, // LDA #$02
+            0x8D, 0x04, 0xD4, // STA HSCROL
+            0xA9, 0x23, // LDA #$23
+            0x8D, 0x00, 0xD4, // STA DMACTL
+            0x8D, 0x0A, 0xD4, // loop: STA WSYNC
+        ];
+        code.extend(iter::repeat_n(0xEA, nops));
+        code.extend([0x8D, 0x0A, 0xD4, 0xEA, 0x4C, 0x14, 0xC2]); // STA WSYNC, NOP, JMP loop
+        let mut m = program_machine(&code);
+        let mut list = vec![0x5E, 0x00, 0x40];
+        list.extend([0x1E; 238]);
+        list.extend([0x41, 0x00, 0x30]);
+        for (addr, byte) in (0x3000_u16..).zip(list) {
+            m.poke_ram(addr, byte);
+        }
+        for _ in 0..2 * 29_868 {
+            m.run_cycle();
+            let write = matches!(
+                m.last_access,
+                Some(BusAccess {
+                    addr: 0xD40A,
+                    write: true,
+                    ..
+                })
+            );
+            if write && m.last_out.cycle == 104 && (9..247).contains(&m.last_out.line) {
+                for _ in 105..=107 {
+                    m.run_cycle();
+                }
+                return m;
+            }
+        }
+        program_machine(&[])
     }
 }

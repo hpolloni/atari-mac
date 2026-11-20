@@ -118,8 +118,8 @@ impl Antic {
     pub const fn cycle(&self) -> u32;
 
     /// Internal state for tests and the debugger: IR, display list address,
-    /// memory scan counter, row counter, DMA clock (in the bit order of the
-    /// HRM 4.12 tables), line buffer (48 bytes) and line buffer address,
+    /// memory scan counter, row counter, DMA clock (bit k = stage k, see
+    /// "Playfield DMA clock"), line buffer (48 bytes) and line buffer address,
     /// refresh row counter, and the write-only register values `DMACTL`,
     /// `CHACTL`, `HSCROL`, `VSCROL`, `PMBASE`, `CHBASE` and `NMIEN`.
     pub fn debug_state(&self) -> AnticDebugState;
@@ -221,11 +221,11 @@ All state is in `struct Antic`. Sizes are the sizes in hardware. The Rust type c
 | `memscan` | 16 bits | 0 | Kept | Memory scan counter |
 | `line_buffer` | 48 bytes | 0 | Kept | Line buffer (never cleared) |
 | `lb_index` | 6 bits | 0 | Kept | Line buffer address (63-state counter for REQ-345) |
-| `dma_clock` | 8 bits | 0 | Cleared | Playfield DMA clock ring |
-| `tap_history` | 3 bits | 0 | Cleared | Last 3 outputs of the DMA clock tap |
+| `dma_clock` | 8 bits | 0 | Cleared | Playfield DMA clock (8 stages) |
+| `dma_clock_normal` | 8 bits | 0 | Cleared | The bits of `dma_clock` from the start event of this scan line |
+| `pf_ir` | 8 bits | 0 | Kept | IR as the DMA clock sees it (the value of the last tick) |
 | `pf_window` | start/stop positions | none | Kept | Display window of the current scan line |
 | `shifter` | pipeline of codes | empty | Kept | Pixel codes waiting for their display position |
-| `last_invert` | 1 bit | 0 | Kept | Invert/blink state of the last character |
 | `refresh_pending` | 1 bit | 0 | Kept | A blocked refresh request waits |
 | `refresh_row` | 8 bits | 0 | Kept | Refresh row counter |
 | `wsync_start`, `wsync_end` | u64 each | 0 | Kept | RDY-low window, in `total_cycles` |
@@ -289,34 +289,30 @@ The row counter is 4 bits, so rows past 15 wrap to 0 (REQ-328, REQ-330).
 
 ANTIC models the playfield DMA clock of HRM 4.12. This model gives the normal DMA timing and also the abnormal cases.
 
-- `dma_clock` is an 8-bit ring. Bit 0 is the tap. The ring period `P` is 2, 4 or 8 cycles: fast for modes 2-5 and D-F, medium for 6-7 and A-C, slow for 8-9 (HRM 4.12 Table 7).
-- In each `tick`: ANTIC reads the tap (bit 0) into `tap_history`. Then it shifts the ring right by one. A bit that leaves bit 0 enters again at bit `P - 1`. Bits above `P - 1` only shift down.
-- **Start event.** ANTIC sets bit 0 for the next cycle. The start event is in `tick` for cycle `S + (hscrol >> 1)`, where `S` is 25, 17 or 9 for a narrow, normal or wide fetch width.
-- **Stop event.** ANTIC clears bit 0 for the next cycle. The stop event is in `tick` for cycle `E + (hscrol >> 1)`, where `E` is 89, 97 or 105 for a narrow, normal or wide fetch width.
+- `dma_clock` is an 8-stage shift register. Bit `k` is stage `k`. In each `tick`, each bit moves to the next stage, and a bit leaves after stage 7. The bit in stage `P - 1` also enters stage 0 again: this is the ring part of the clock. The ring period `P` is 2, 4 or 8 cycles: fast for modes 2-5 and D-F, medium for 6-7 and A-C, slow for 8-9 (HRM 4.12 Table 7). In a fast or medium mode, a bit continues past the ring part and leaves after 6 or 4 more cycles (HRM 4.12, Disrupting the DMA clock with mode switching).
+- The requests come from fixed stages (HRM 4.12: offsets 0, +2 and +3): character name from stage 0, bitmap data from stage 2, character data from stage 3. Thus a bitmap or character data request comes 2 or 3 cycles after the name request of the same bit.
+- The order in `tick`: first the requests from the stages, then the shift, then the events.
+- **Start event.** ANTIC sets stage 0. The start event is in `tick` for cycle `S + (hscrol >> 1)`, where `S` is 25, 17 or 9 for a narrow, normal or wide fetch width.
+- **Stop event.** ANTIC clears stage 0. The stop event is in `tick` for cycle `E + (hscrol >> 1)`, where `E` is 89, 97 or 105 for a narrow, normal or wide fetch width. The wide stop (`105 + (hscrol >> 1)`) is always active (HRM 4.11, Dynamic changes to playfield width).
 - The fetch width is the `DMACTL` width, or one step wider if IR bit 4 is set (wide stays wide). The `hscrol` term is 0 if IR bit 4 is clear (REQ-327).
 - `DMACTL` and `HSCROL` writes change the start and stop events from the next `tick`. This gives the deadlines of REQ-344.
+- The clock uses `pf_ir`, the IR value of the last tick, for `P` and for the request types. An instruction fetch on cycle 1 thus changes the clock from cycle 2. A bit that leaves the ring part of a fast or medium mode line is still in the register on cycle 2 of the next scan line if its last name request was on cycle 109 or later. If the new mode line is mode 8 or 9, the ring part has 8 stages, and the bit becomes an extra fetch pattern (REQ-345 criterion 4). This gives the conditions of HRM 4.12: `HSCROL` >= 10 for fast modes and >= 14 for medium modes, at normal or wide width.
 
-The taps make the requests (HRM 4.12: offsets 0, +2 and +3):
-
-| Request | Cycle | Modes |
-| --- | --- | --- |
-| Character name | Tap output on this cycle | 2-7 |
-| Bitmap data | Tap output 2 cycles before | 8-F |
-| Character data | Tap output 3 cycles before | 2-7 |
-
-Check against REQ-309: a normal width gives the start event on cycle 17, so names start on cycle 18, bitmap data on cycle 20 and character data on cycle 21. The stop event on cycle 97 removes the bit after the last name on cycle 96 (fast), 94 (medium) or 90 (slow). This gives 40, 20 or 10 fetches. The narrow and wide widths give 26/28 and 10/12, and 32 and 48 fast fetches.
+Check against REQ-309: a normal width gives the start event on cycle 17, so names start on cycle 18, bitmap data on cycle 20 and character data on cycle 21. At the stop event on cycle 97, the bit is in stage `P - 1`, so the stop removes it after the last name on cycle 96 (fast), 94 (medium) or 90 (slow). This gives 40, 20 or 10 fetches. The narrow and wide widths give 26/28 and 10/12, and 32 and 48 fast fetches.
 
 Each request does this:
 
-- **Name or bitmap request, first scan line.** If playfield DMA is enabled, ANTIC reads `memscan` and writes the byte into `line_buffer[lb_index]`. If the cycle is 106 or later, the fetch is virtual: no halt, and the byte comes from `end_cycle` (REQ-311, REQ-347). In all cases, ANTIC increments the low 12 bits of `memscan` (REQ-325) and increments `lb_index`.
+- **Name or bitmap request, first scan line.** If the request is a real DMA cycle (see below), ANTIC reads `memscan` and writes the byte into `line_buffer[lb_index]`. Else the byte comes from `end_cycle`: it is the data bus value of the cycle (REQ-311, REQ-344, REQ-347). In all cases, ANTIC increments the low 12 bits of `memscan` (REQ-325) and increments `lb_index`.
 - **Name or bitmap request, other scan lines.** ANTIC reads `line_buffer[lb_index]` and increments `lb_index`. No DMA occurs.
-- **Character data request.** ANTIC reads the font byte (see Character modes). This is DMA on every scan line.
+- **Character data request.** ANTIC reads the font byte (see Character modes). This is DMA on every scan line. If the request is not a real DMA cycle, the byte comes from `end_cycle`.
 
-The start event sets `lb_index` to 0 (HRM 4.11, Line buffer addressing). A start event on a scan line where the playfield already started does not set `lb_index` to 0 and does not move the left edge of the display window (HRM 4.11: a later start after its deadline is ignored, REQ-344). Mode 0 and mode 1 lines and vertical blank clear the ring (REQ-345).
+A request is a real DMA cycle if playfield DMA is enabled (`DMACTL` bits 1-0 are not `%00`), and the cycle is 1-104, or the cycle is 105 and all requesting stages are set in `dma_clock_normal` (OI-018). Thus normal playfield DMA can occur on cycle 105, and abnormal playfield DMA is virtual on cycles 105-113 and 0 (HRM 4.12, Overlapping DMA). `dma_clock_normal` gets the same shift and events as `dma_clock`. ANTIC clears it on cycle 0. A virtual fetch does not set `halt`.
 
-If playfield DMA is disabled when the playfield has started, the DMA cycles stop, but `memscan` still increments and the line buffer still loads the data bus value (REQ-344). If the playfield did not start, nothing changes.
+The start event sets `lb_index` to 0 (HRM 4.11, Line buffer addressing). A start event on a scan line where the playfield already started does not set `lb_index` to 0 and does not move the left edge of the display window (HRM 4.11: a later start after its deadline is ignored, REQ-344). Mode 0 and mode 1 lines and vertical blank clear the register in each tick (REQ-345). On cycle 1, the new IR value of a `$x0` or `$x1` instruction clears it.
 
-For REQ-345, two requests on the same cycle read from the bitwise AND of their addresses. The data goes to both requests. `lb_index` is a 6-bit maximal-length counter with 63 states. States 48-62 do not access the buffer and read as `$FF`. The exact gate behavior is an open issue.
+If playfield DMA is disabled when the playfield has started, the DMA cycles stop, but `memscan` still increments and the line buffer still loads the data bus value (REQ-344, OI-014). The stop event then uses the width of the start event. If the playfield did not start, nothing changes.
+
+For REQ-345, all requests of one cycle make one read, at the bitwise AND of their addresses. This includes the requests of cycles 0-7 (missile, display list, players, address) and the playfield requests. All requests get the byte. `out.dma` gives the kind of the cycle 0-7 request, or else `CharacterName` for a name and data overlap. A refresh occurs only on a cycle with no other DMA (HRM 4.12). `lb_index` is a counter with 63 states (0-62, then 0). States 48-62 do not write the buffer and read as `$FF`. The emulator does not model the shift clock or the skipped line buffer reads of back-to-back fetches (HRM 4.12). The exact gate behavior is an open issue.
 
 ### Character modes (REQ-313 to REQ-317)
 
@@ -335,7 +331,7 @@ The font address for a character data request is:
 - Modes 5, 7: `frow = (row >> 1) & 7`.
 - If `CHACTL` bit 2 is set, `frow = 7 - frow`. This does not change which mode 3 rows are `$00` (REQ-314).
 
-Then for modes 2 and 3, if name bit 7 is set: `CHACTL` bit 0 sets the data to `$00`, then `CHACTL` bit 1 inverts the data (REQ-314). ANTIC keeps the attribute state in `last_invert`. It uses that state while playfield DMA is off (REQ-344).
+Then for modes 2 and 3, if name bit 7 is set: `CHACTL` bit 0 sets the data to `$00`, then `CHACTL` bit 1 inverts the data (REQ-314). The invert state while playfield DMA is off (HRM 4.11, Mid scan line changes) is not modeled: REQ-344 criterion 8 is removed until a comparison with Altirra (OI-014).
 
 The decoder converts the data byte to codes (REQ-307):
 
@@ -364,10 +360,10 @@ Each byte fills exactly `2 × P` color clocks, so the output is continuous.
 
 The decoder puts the codes of each byte into `shifter`, with the position of the first color clock:
 
-- Bitmap byte fetched on cycle `t`: position `2t + 8 + (hscrol & 1)`.
-- Character data byte fetched on cycle `t`: position `2t + 6 + (hscrol & 1)`.
+- Bitmap byte fetched on cycle `t`: position `2t + 8`.
+- Character data byte fetched on cycle `t`: position `2t + 6`.
 
-The `hscrol & 1` term applies only if IR bit 4 is set. It is the one color clock delay in ANTIC (HRM 4.7).
+If IR bit 4 is set and `hscrol` is odd, the output delays the codes by one color clock: the code for position `x` comes from `shifter` position `x - 1`. This is the one color clock delay in the playfield encoder (HRM 4.7, HRM 4.12). The output uses the `hscrol` value of the tick, so a write in the middle of a scan line moves the codes from the next cycle (REQ-344 criterion 7).
 
 These offsets are a project decision. They make the playfield start at `$30` for a normal width (HRM 6.2): `2 × 20 + 8 = 48 = $30` and `2 × 21 + 6 = 48`. They also give the one-cycle difference between character data and bitmap data (HRM 4.14, Virtual DMA cycles).
 
@@ -393,13 +389,9 @@ On cycles 25, 29, ..., 57, ANTIC makes a refresh request. If no other DMA uses t
 
 ### DMA priority (REQ-310)
 
-In each cycle, at most one DMA cycle occurs, with this priority:
+In each cycle, at most one DMA cycle occurs. In normal operation, the missile, display list, player and address fetches (cycles 0-7) and the playfield fetches (cycles 9-105) never use the same cycle. Abnormal playfield DMA can request a cycle that another request uses: then the requests share one read at the AND of their addresses (see "Playfield DMA clock"). A refresh occurs only on a cycle with no other DMA.
 
-1. Missile, display list, player and address fetches (cycles 0-7).
-2. Playfield fetches (cycles up to 105).
-3. Refresh.
-
-`halt` is `true` if a DMA cycle occurs. A virtual fetch (cycle 106 or later) does not set `halt`.
+`halt` is `true` if a DMA cycle occurs. A virtual fetch (cycle 106 or later, or abnormal DMA on cycle 0 or 105) does not set `halt`.
 
 ### NMIs (REQ-331 to REQ-335)
 
@@ -440,7 +432,7 @@ The light pen is a non-goal (OI-016). `PENH` and `PENV` keep their power-on valu
 
 ### Hi-res bug (REQ-346)
 
-At cycle 0 of scan line 248, ANTIC saves "IR mode is 2, 3 or F". While that flag is set and `DMACTL` bits 1-0 are not `%00`, ANTIC sets AN2 = 1 in the codes of the vertical blank scan lines for positions `$22-$DD`. Thus it sends `%111` instead of `%011`, and `%101` instead of `%001` on the vertical sync scan lines (HRM 6.2, Figure 14). Positions outside `$22-$DD` keep the horizontal blank code. When `DMACTL` bits 1-0 become `%00`, the normal codes return. The range `$22-$DD` is a project decision (see Open issues).
+At cycle 0 of scan line 248, ANTIC saves "IR mode is 2, 3 or F". While that flag is set and `DMACTL` bits 1-0 are not `%00`, ANTIC sets AN2 = 1 in the codes of the vertical blank scan lines in the display window of the current `DMACTL` width: `$40-$BF` narrow, `$30-$CF` normal, `$2C-$DD` wide (OI-015). Thus it sends `%111` instead of `%011`, and `%101` instead of `%001` on the vertical sync scan lines (HRM 6.2, Figure 14). The other positions keep the horizontal blank or vertical sync code. When `DMACTL` bits 1-0 become `%00`, the normal codes return. ANTIC clears the flag on cycle 0 of scan line 8.
 
 ## Timing
 
@@ -614,10 +606,10 @@ These tests are removed, because no acceptance criterion needs them: `crates/har
 7. **DMA reads of I/O addresses.** The HRM does not say what ANTIC DMA reads from `$D000-$D7FF`. The draft `DmaMemory` returns `$FF`. The system design must decide.
 8. **Floating bus value.** The data bus value on refresh cycles and undriven cycles is a system decision (HRM 2.3). XL and some XE machines have pull-ups; others float.
 9. **Abnormal DMA details.** The ring model is from HRM 4.12. The behavior of bits outside the ring after a mode change, and the shift clock in mode 8, need tests against Altirra.
-10. **Character data fetch after the end of the line.** With a wide fetch and large `HSCROL`, a name on cycle 111 has its data request on cycle 114. This design drops requests that fall past cycle 113. The HRM does not describe this case.
+10. **Character data fetch after the end of the line.** With a wide fetch and large `HSCROL`, a name on cycle 111 has its data request on cycle 114. In this design, the request occurs on cycle 0 of the next scan line as a virtual fetch, and its codes are in horizontal blank. The HRM does not describe this case.
 11. **Refresh drop rule.** The HRM does not say which request ANTIC drops when two refresh requests are blocked. This design keeps the waiting request.
 12. **PENH phase.** `PENH = 2 × cycle` is a project decision.
 13. **Hi-res bug region.** Resolved by OI-015: the playfield positions of the current width (REQ-346 criterion 6).
 14. **Name and invert state while playfield DMA is off.** Resolved by OI-014 for the line buffer. The codes of the removed REQ-344 criterion 8 need a comparison with Altirra.
-15. **DMA clock bit order.** REQ-345 criterion 1 uses the bit order of the HRM 4.12 table. `debug_state` must give the DMA clock in that bit order. The mapping from the ring model to that bit order is not yet defined.
+15. **DMA clock bit order.** REQ-345 criterion 1 uses the bit order of the HRM 4.12 table. `debug_state` gives the stages of the model (bit k = stage k). No fixed mapping gives the values of that table. With `HSCROL` `$00` to `$04` (2 cycles of delay), the old bit and the new bit are 4 phases apart on the second scan line (the old bit moves 2 phases on each scan line, because 114 mod 8 = 2), but the table shows them 2 positions apart. The `HSCROL` = `$02` example in the same HRM section agrees with the model, and the table agrees with the model for `HSCROL` `$00` to `$08`. REQ-345 criterion 1 needs a decision. Its test `abnormal_dma_hscrol_0_to_4_mode_8` stays planned.
 16. **Derived DMA cycles.** Resolved by OI-006: the HRM 4.14 charts confirm the derived cycles.

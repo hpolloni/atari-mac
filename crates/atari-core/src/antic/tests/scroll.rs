@@ -3,7 +3,6 @@
 
 use super::{FONT, Rec, Rig, SCREEN, codes, cycles_of, every, fetch_lines, on_line};
 use crate::antic::DmaKind;
-use crate::planned::planned;
 use crate::timing::VBLANK_START_LINE;
 
 /// A different byte for each index `k`.
@@ -285,29 +284,117 @@ fn vscroll_bit_kept_across_vblank() {
     assert_eq!(rows(&mut rig, 9), [0, 1, 2, 3, 4, 5, 6, 7, 0], "rows");
 }
 
+/// Runs the display list `dl` with `VSCROL` = `vscrol` and `NMIEN` = `nmien`, writes
+/// `value` to `VSCROL` on cycle `cycle` of scan line `line`, and runs to scan line 40.
+/// Returns the records from scan line 8.
+fn vscrol_write_run(
+    vscrol: u8,
+    nmien: u8,
+    dl: &[u8],
+    (line, cycle): (u32, u32),
+    value: u8,
+) -> Vec<Rec> {
+    let mut rig = Rig::with_dl(0x22, dl);
+    rig.write(0x05, vscrol);
+    rig.write(0x0E, nmien);
+    let mut recs = rig.after(line, cycle);
+    rig.write(0x05, value);
+    recs.extend(rig.run_to(40, 0));
+    recs
+}
+
+/// The scan lines with `out.nmi` in `recs`.
+fn nmi_lines(recs: &[Rec]) -> Vec<u32> {
+    recs.iter()
+        .filter(|rec| rec.out.nmi)
+        .map(|rec| rec.out.line)
+        .collect()
+}
+
 /// Verifies REQ-329: a write of `$05` to `VSCROL` on cycle 0 of the first line of a `$22`
 /// line gives rows 5-7; the same write on cycle 1 gives rows 0-7.
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn vscrol_start_deadline_cycle_0() {
-    planned();
+    // A `$02` line on scan lines 8-15, the `$22` line from N = 16, then a `$02` line.
+    let dl = [0x42, 0x00, 0x20, 0x22, 0x02, 0x41, 0x00, 0x10];
+    let on_0 = vscrol_write_run(0, 0, &dl, (16, 0), 5);
+    assert_eq!(
+        fetch_lines(&on_0)[..3],
+        [8, 16, 19],
+        "write on cycle 0: 3 scan lines"
+    );
+    let on_1 = vscrol_write_run(0, 0, &dl, (16, 1), 5);
+    assert_eq!(
+        fetch_lines(&on_1)[..3],
+        [8, 16, 24],
+        "write on cycle 1: 8 scan lines"
+    );
 }
 
 /// Verifies REQ-329: a write of `$03` to `VSCROL` on cycle 108 of line N + 3 of a `$02` line
 /// (`VSCROL` = 7) makes it the last scan line; the same write on cycle 109 does not.
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn vscrol_end_deadline_cycle_108() {
-    planned();
+    // A `$42` line on 8-15, a `$22` line (row 7 only) on 16, and the `$02` line from N = 17.
+    let dl = [0x42, 0x00, 0x20, 0x22, 0x02, 0x41, 0x00, 0x10];
+    let on_108 = vscrol_write_run(7, 0, &dl, (20, 108), 3);
+    assert_eq!(
+        fetch_lines(&on_108)[..4],
+        [8, 16, 17, 21],
+        "write on cycle 108: N + 3 is the last scan line"
+    );
+    let on_109 = vscrol_write_run(7, 0, &dl, (20, 109), 3);
+    let lines = fetch_lines(&on_109);
+    assert_eq!(lines[..3], [8, 16, 17], "the first fetches");
+    assert!(
+        lines.get(3).is_none_or(|&line| line != 21),
+        "write on cycle 109: N + 3 is not the last scan line: {lines:?}"
+    );
 }
 
 /// Verifies REQ-329: in a `$82` line with `VSCROL` = 7, a write of `$03` on cycle 5 of line
 /// N + 3 gives a DLI there and a write on cycle 6 does not; with `VSCROL` = 3, a write of
 /// `$07` on cycle 5 prevents the DLI.
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn vscrol_dli_deadline_cycle_5() {
-    planned();
+    // A `$42` line on 8-15, a `$22` line on 16, and the `$82` line from N = 17.
+    let dl = [0x42, 0x00, 0x20, 0x22, 0x82, 0x41, 0x00, 0x10];
+    let mut rig = Rig::with_dl(0x22, &dl);
+    rig.write(0x05, 7);
+    rig.write(0x0E, 0x80);
+    rig.seek_after(20, 5);
+    rig.write(0x05, 3);
+    rig.seek_after(20, 7);
+    assert_eq!(rig.read(0x0F) & 0x80, 0x80, "write on cycle 5: NMIST bit 7");
+    let on_5 = vscrol_write_run(7, 0x80, &dl, (20, 5), 3);
+    assert_eq!(nmi_lines(&on_5), [20], "write on cycle 5: DLI on N + 3");
+    assert_eq!(
+        fetch_lines(&on_5)[..4],
+        [8, 16, 17, 21],
+        "write on cycle 5: N + 3 is the last scan line"
+    );
+    let on_6 = vscrol_write_run(7, 0x80, &dl, (20, 6), 3);
+    assert!(
+        !nmi_lines(&on_6).contains(&20),
+        "write on cycle 6: no DLI on N + 3"
+    );
+    assert_eq!(
+        fetch_lines(&on_6)[..4],
+        [8, 16, 17, 21],
+        "write on cycle 6: N + 3 is still the last scan line"
+    );
+    // With `VSCROL` = 3, the `$22` line has 5 scan lines (16-20), so N = 21.
+    let control = vscrol_write_run(3, 0x80, &dl, (24, 50), 3);
+    assert_eq!(
+        nmi_lines(&control)[..1],
+        [24],
+        "VSCROL = 3 without a change: DLI on N + 3"
+    );
+    let prevent = vscrol_write_run(3, 0x80, &dl, (24, 5), 7);
+    assert!(
+        !nmi_lines(&prevent).contains(&24),
+        "VSCROL = 3, write of $07 on cycle 5: no DLI on N + 3"
+    );
 }
 
 /// The display list of REQ-330 criterion 1 (`VSCROL` = 2): a `$22` line, then a jump
