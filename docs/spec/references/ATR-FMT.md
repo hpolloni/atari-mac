@@ -5,7 +5,7 @@ edition: "1999 (the page says \"Last modified: Wed Apr 21 20:07:36 1999\")"
 author: "Jindroush"
 license: "(c) 1999 Jindroush"
 storage: pin
-url: "http://web.archive.org/web/20171226030507id_/http://ftp.pigwa.net/stuff/collections/nir_dary_cds/Tech%20Info/file%20formats/afmtatr.htm"
+url: "https://web.archive.org/web/20171226030507id_/http://ftp.pigwa.net/stuff/collections/nir_dary_cds/Tech%20Info/file%20formats/afmtatr.htm"
 sha256: "d605ec510445d5693257fcad12689cd88e698e44cea9cd5d60982226e5ad8bdd"
 file: "reference/pinned/jindroush-atr-format.htm"
 ---

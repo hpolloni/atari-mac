@@ -5,7 +5,7 @@ edition: "v1.0, 2025-12-24"
 author: "groepaz/solution"
 license: "This documentation is free as in free beer. All rights reversed."
 storage: pin
-url: "http://web.archive.org/web/20260101094603id_/https://csdb.dk/getinternalfile.php/275743/NoMoreSecrets-NMOS6510UnintendedOpcodes-20252412.pdf"
+url: "https://web.archive.org/web/20260101094603id_/https://csdb.dk/getinternalfile.php/275743/NoMoreSecrets-NMOS6510UnintendedOpcodes-20252412.pdf"
 sha256: "009058fcc8bbc06da9f56cf3eac27ef35d61e35b22df3ac3af21f576e86d2924"
 file: "reference/pinned/no-more-secrets.pdf"
 ---

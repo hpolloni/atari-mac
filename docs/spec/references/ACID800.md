@@ -5,7 +5,7 @@ edition: "1.2"
 author: "Avery Lee"
 license: "The Acid800 test suite is licensed under the MIT license. Copyright (C) 2010-2022 Avery Lee, All Rights Reserved."
 storage: pin
-url: "http://web.archive.org/web/20251231052911/https://www.virtualdub.org/downloads/Acid800-1.2.7z"
+url: "https://web.archive.org/web/20251231052911id_/https://www.virtualdub.org/downloads/Acid800-1.2.7z"
 sha256: "4074e6a40db1833e97603e334ca130f5923bff34a0d4f8a83e2ecf9617de1b20"
 file: "reference/pinned/Acid800-1.2.7z"
 ---

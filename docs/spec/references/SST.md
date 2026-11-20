@@ -5,7 +5,7 @@ edition: "Commit 2f6980a2d95757486c7bee24355c360e40e2a224, test sets v1"
 author: "Thomas Harte et al."
 license: "MIT License. Copyright (c) 2024 Thomas Harte et al"
 storage: pin
-url: "https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224"
+url: "https://raw.githubusercontent.com/SingleStepTests/65x02/2f6980a2d95757486c7bee24355c360e40e2a224/LICENSE"
 sha256: "5fb64d1f2e4d74fabc85c768e1f6ffa73b95dc93e217c55acfe7e4a89ba32b04"
 file: "reference/pinned/single-step-65x02-LICENSE"
 ---
