@@ -98,7 +98,6 @@ impl Cpu {
     /// `rdy` is the level of the RDY input in this cycle (`false` = low, CPU stopped).
     pub fn tick(&mut self, bus: &mut impl Bus, rdy: bool) -> Tick;
 
-    /// Sets the level of the NMI input (`true` = asserted). The CPU detects the edge.
     /// Ends machine cycle `c`: latches the NMI edge and makes the poll of cycle `c` (OI-017).
     pub fn end_cycle(&mut self, nmi_level: bool);
 
@@ -110,6 +109,7 @@ impl Cpu {
     pub const fn at_boundary(&self) -> bool;
 
     /// Runs ticks with `rdy = true` until the next boundary. For tests and debuggers.
+    /// Each tick is followed by `end_cycle` with the last NMI level.
     pub fn step(&mut self, bus: &mut impl Bus) -> Step;
 
     pub const fn registers(&self) -> &Registers;

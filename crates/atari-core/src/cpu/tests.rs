@@ -162,12 +162,14 @@ impl Driver {
         self.cycle += 1;
         let c = self.cycle;
         self.bus.now = c;
-        self.cpu.set_nmi(within(&self.nmi, c));
         self.cpu.set_irq(within(&self.irq, c));
-        if within(&self.halt, c) {
-            return None;
-        }
-        Some(self.cpu.tick(&mut self.bus, !within(&self.rdy_low, c)))
+        let tick = if within(&self.halt, c) {
+            None
+        } else {
+            Some(self.cpu.tick(&mut self.bus, !within(&self.rdy_low, c)))
+        };
+        self.cpu.end_cycle(within(&self.nmi, c));
+        tick
     }
 
     /// Runs machine cycles up to and including cycle `last`.
@@ -338,10 +340,10 @@ fn one_access_per_tick() {
     let mut random = Random(7);
     for tick in 0..10_000 {
         let lines = random.byte();
-        cpu.set_nmi(lines & 0x01 != 0);
         cpu.set_irq(lines & 0x02 != 0);
         let before = bus.count;
         let _tick: Tick = cpu.tick(&mut bus, lines & 0x0C != 0);
+        cpu.end_cycle(lines & 0x01 != 0);
         assert_eq!(bus.count, before + 1, "tick {tick}");
     }
 }
@@ -1439,48 +1441,6 @@ fn nmi_hijacks_brk_as_first_handler_instruction() {
         (d.at(15).addr, d.at(16).addr),
         (0xFFFA, 0xFFFB),
         "NMI vector"
-    );
-}
-
-/// Runs cycles up to `last` and returns the cycles whose tick set `irq_sequence_started`.
-fn irq_start_signals(d: &mut Driver, last: u32) -> Vec<u32> {
-    let mut signals = Vec::new();
-    while d.cycle < last {
-        if d.cycle().is_some() && d.cpu.irq_sequence_started() {
-            signals.push(d.cycle);
-        }
-    }
-    signals
-}
-
-/// Verifies REQ-335: the CPU signals the first cycle of each IRQ and `BRK` sequence, but not
-/// of an NMI sequence, and not in a stalled tick.
-#[test]
-fn irq_sequence_start_signal() {
-    // IRQ: the signal is in the first cycle of the sequence.
-    let mut irq = Driver::new();
-    irq.regs().p = 0x20;
-    irq.irq = span(1, 3);
-    let signals = irq_start_signals(&mut irq, 20);
-    assert_eq!(signals, irq.irq_starts(), "IRQ sequence");
-    assert_eq!(signals.len(), 1, "one IRQ sequence");
-    // BRK: the signal is in the opcode fetch.
-    let mut brk = Driver::with_code(&[0x00, 0x00]);
-    let signals = irq_start_signals(&mut brk, 10);
-    assert_eq!(signals, [1], "BRK opcode fetch");
-    assert_eq!(brk.irq_starts(), [1], "BRK sequence");
-    // NMI: no signal.
-    let mut nmi = Driver::new();
-    nmi.nmi = span(1, 100);
-    assert!(irq_start_signals(&mut nmi, 20).is_empty(), "NMI sequence");
-    assert_eq!(nmi.nmi_starts().len(), 1, "one NMI sequence");
-    // RDY low in the opcode fetch of BRK: the stalled ticks give no signal.
-    let mut stalled = Driver::with_code(&[0x00, 0x00]);
-    stalled.rdy_low = span(1, 4);
-    assert_eq!(
-        irq_start_signals(&mut stalled, 12),
-        [5],
-        "BRK opcode fetch after RDY low"
     );
 }
 

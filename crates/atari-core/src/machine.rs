@@ -420,13 +420,11 @@ impl Machine {
         //    (high).
         self.pokey.set_serial_in(true);
         self.pokey.tick();
-        // 3. The interrupt lines. The PIA level is the level of the end of the last cycle.
-        self.cpu.set_nmi(out.nmi);
+        // 3. The IRQ line. The PIA level is the level of the end of the last cycle.
         self.cpu.set_irq(self.irq_line());
         // 4. The CPU access, if ANTIC does not halt the CPU (REQ-202).
         let mut data = self.data_bus;
         self.last_access = None;
-        let mut irq_started = false;
         if out.halt {
             // 5. A refresh cycle drives no byte: the bus keeps the last value.
             if out.dma != DmaKind::Refresh {
@@ -445,16 +443,14 @@ impl Machine {
             let _tick = self.cpu.tick(&mut bus, out.rdy);
             data = bus.data;
             self.last_access = bus.access;
-            irq_started = self.cpu.irq_sequence_started();
         }
-        // 5. The data bus value goes to ANTIC and GTIA. An IRQ or BRK sequence that started
-        //    in this cycle goes to ANTIC before the next tick (REQ-335).
+        // 4a. The NMI level of this cycle, after the CPU access, also in a halted cycle: an
+        //     `NMIEN` write of this cycle is included (OI-017).
+        self.cpu.end_cycle(self.antic.nmi_level());
+        // 5. The data bus value goes to ANTIC and GTIA.
         self.data_bus = data;
         self.antic.end_cycle(data);
         self.gtia.clock(&out, data);
-        if irq_started {
-            self.antic.irq_sequence_started();
-        }
         // 6. The PIA, then the serial output. With no SIO bus in SLICE-01, the bytes that
         //    POKEY sent are dropped.
         self.pia.tick();
@@ -1892,9 +1888,9 @@ mod tests {
         run.map_or((0, 0), |run| (run.1, run.2))
     }
 
-    /// Verifies REQ-335: the machine tells ANTIC when the CPU starts a `BRK` sequence. A
-    /// `BRK` opcode fetch on cycle 4 of scan line 248 loses the VBI NMI; on cycle 3, the NMI
-    /// runs after the `BRK` handler.
+    /// Verifies REQ-335: a `BRK` opcode fetch on cycle 4 of scan line 248 loses the VBI NMI
+    /// (the CPU rule of REQ-122 with the NMI level of OI-017); on cycle 3, the NMI runs after
+    /// the `BRK` handler.
     #[test]
     fn brk_on_cycle_4_loses_vbi_nmi() {
         assert_eq!(brk_on_vbi_line(4), (0, 1), "cycle 4: no NMI vector read");

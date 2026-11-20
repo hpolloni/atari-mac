@@ -149,9 +149,9 @@ pub struct Cpu {
     crossed: bool,
     /// Operand, pointer low byte, branch offset or read-modify-write value.
     data: u8,
-    /// Last level from `set_nmi`.
+    /// Last level from `end_cycle`.
     nmi_level: bool,
-    /// Edge latched by `set_nmi`, not yet sampled.
+    /// Edge latched by `end_cycle`, not yet sampled.
     nmi_edge: bool,
     /// Edge sampled in a tick, not yet serviced.
     nmi_pending: bool,
@@ -167,8 +167,12 @@ pub struct Cpu {
     no_poll_next: bool,
     /// Cycle count in the KIL state.
     jam_cycle: u8,
-    /// The last tick was the first cycle of an IRQ or `BRK` sequence (REQ-335).
-    irq_started: bool,
+    /// How the tick of this machine cycle ended, for `end_cycle`. `None` if no tick ran in
+    /// this cycle (halted, stalled or already ended).
+    tick_end: Option<End>,
+    /// The tick of this machine cycle was cycle 5 of an interrupt sequence: an NMI edge
+    /// sampled at its end is lost (REQ-122).
+    discard_nmi: bool,
 }
 
 /// A bus that forwards each access and records whether it was a write. `tick` uses it when
@@ -243,7 +247,8 @@ impl Cpu {
             brk: false,
             no_poll_next: false,
             jam_cycle: 0,
-            irq_started: false,
+            tick_end: None,
+            discard_nmi: false,
         }
     }
 
@@ -257,6 +262,8 @@ impl Cpu {
         self.nmi_pending = false;
         self.poll = false;
         self.no_poll_next = false;
+        self.tick_end = None;
+        self.discard_nmi = false;
     }
 
     /// Runs one CPU cycle. It makes exactly one call to `bus.read` or `bus.write`. `rdy` is
@@ -264,17 +271,19 @@ impl Cpu {
     ///
     /// With RDY low, a read cycle is made on the bus and then undone: the CPU keeps the state
     /// from before the tick and makes no interrupt poll. A write cycle runs normally
-    /// (REQ-126, REQ-127, HRM 4.9).
+    /// (REQ-126, REQ-127, HRM 4.9). The interrupt poll of the cycle is in `end_cycle`.
     pub fn tick(&mut self, bus: &mut impl Bus, rdy: bool) -> Tick {
-        self.irq_started = false;
+        self.tick_end = None;
+        self.discard_nmi = false;
         if rdy {
-            self.run_cycle(bus);
+            self.tick_end = Some(self.run_cycle(bus));
             return Tick::Ran;
         }
         let saved = *self;
         let mut probe = Probe { bus, wrote: false };
-        self.run_cycle(&mut probe);
+        let end = self.run_cycle(&mut probe);
         if probe.wrote {
+            self.tick_end = Some(end);
             Tick::Ran
         } else {
             *self = saved;
@@ -282,12 +291,33 @@ impl Cpu {
         }
     }
 
-    /// Sets the level of the NMI input (`true` = asserted). The CPU detects the edge.
-    pub const fn set_nmi(&mut self, asserted: bool) {
-        if asserted && !self.nmi_level {
+    /// Ends machine cycle `c`, after the bus access (OI-017). `nmi_level` is the level of the
+    /// NMI input in cycle `c` (`true` = asserted). The machine calls it in every cycle, also
+    /// in a halted cycle.
+    ///
+    /// The CPU latches the NMI edge. If a tick ran in this cycle (`Tick::Ran`), the CPU then
+    /// samples the edge into the pending NMI and makes the interrupt poll of the cycle
+    /// (HRM 3.4, REQ-118, REQ-127).
+    pub const fn end_cycle(&mut self, nmi_level: bool) {
+        if nmi_level && !self.nmi_level {
             self.nmi_edge = true;
         }
-        self.nmi_level = asserted;
+        self.nmi_level = nmi_level;
+        let Some(end) = self.tick_end.take() else {
+            return;
+        };
+        if self.discard_nmi {
+            // An NMI edge sampled in cycle 5 of a sequence is lost (REQ-122).
+            self.discard_nmi = false;
+            self.nmi_edge = false;
+        }
+        if self.nmi_edge {
+            self.nmi_edge = false;
+            self.nmi_pending = true;
+        }
+        if matches!(end, End::Continue) {
+            self.poll = self.nmi_pending || (self.irq_level && self.regs.p & flags::I == 0);
+        }
     }
 
     /// Sets the level of the IRQ input (`true` = asserted).
@@ -307,10 +337,12 @@ impl Cpu {
         }
     }
 
-    /// Runs ticks with `rdy = true` until the next boundary. For tests and debuggers.
+    /// Runs ticks with `rdy = true` until the next boundary. For tests and debuggers. Each
+    /// tick is followed by `end_cycle` with the last NMI level, so no new NMI edge occurs.
     pub fn step(&mut self, bus: &mut impl Bus) -> Step {
         let reset = self.mode == Mode::Reset;
         let _first: Tick = self.tick(bus, true);
+        self.end_cycle(self.nmi_level);
         let kind = match self.mode {
             Mode::Jammed => return Step::Jammed,
             _ if reset => Step::Reset,
@@ -319,6 +351,7 @@ impl Cpu {
         };
         while !self.at_boundary() {
             let _next: Tick = self.tick(bus, true);
+            self.end_cycle(self.nmi_level);
         }
         kind
     }
@@ -334,22 +367,15 @@ impl Cpu {
         &mut self.regs
     }
 
-    /// `true` if the last tick was the first cycle of an IRQ sequence or of a `BRK`
-    /// instruction (the opcode fetch). An NMI sequence and a stalled tick give `false`. The
-    /// machine gives it to ANTIC (REQ-335).
-    #[must_use]
-    pub const fn irq_sequence_started(&self) -> bool {
-        self.irq_started
-    }
-
     /// `true` while a KIL opcode locks the CPU.
     #[must_use]
     pub const fn is_jammed(&self) -> bool {
         matches!(self.mode, Mode::Jammed)
     }
 
-    /// Runs one cycle, then samples the NMI edge and polls the interrupt lines (HRM 3.4).
-    fn run_cycle<B: Bus>(&mut self, bus: &mut B) {
+    /// Runs one cycle. The NMI edge sample and the interrupt poll of the cycle follow in
+    /// `end_cycle` (HRM 3.4, OI-017).
+    fn run_cycle<B: Bus>(&mut self, bus: &mut B) -> End {
         let end = match self.mode {
             Mode::Fetch => self.fetch(bus),
             Mode::Execute => self.execute(bus),
@@ -357,16 +383,10 @@ impl Cpu {
             Mode::Reset => self.reset_cycle(bus),
             Mode::Jammed => self.jam(bus),
         };
-        if mem::take(&mut self.nmi_edge) {
-            self.nmi_pending = true;
+        if end == End::Done {
+            self.mode = Mode::Fetch;
         }
-        match end {
-            End::Continue => {
-                self.poll = self.nmi_pending || (self.irq_level && self.regs.p & flags::I == 0);
-            }
-            End::Hold => {}
-            End::Done => self.mode = Mode::Fetch,
-        }
+        end
     }
 
     /// Reads the byte at `PC` and increments `PC`.
@@ -419,8 +439,6 @@ impl Cpu {
             self.dummy_pc(bus);
             self.mode = Mode::Interrupt;
             self.brk = false;
-            // With an NMI pending, this is an NMI sequence.
-            self.irq_started = !self.nmi_pending;
             return End::Continue;
         }
         self.opcode = self.fetch_pc(bus);
@@ -428,7 +446,6 @@ impl Cpu {
         self.mode = match op {
             Op::Brk => {
                 self.brk = true;
-                self.irq_started = true;
                 Mode::Interrupt
             }
             Op::Kil => {
@@ -480,8 +497,8 @@ impl Cpu {
                 } else {
                     IRQ_VECTOR
                 };
-                // An NMI edge sampled in this cycle is lost (REQ-122).
-                self.nmi_edge = false;
+                // An NMI edge sampled at the end of this cycle is lost (REQ-122).
+                self.discard_nmi = true;
             }
             6 => {
                 self.data = bus.read(self.vector);
