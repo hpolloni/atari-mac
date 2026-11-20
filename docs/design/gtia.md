@@ -320,7 +320,7 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-416 | `gtia.rs` `player_starts_at_hpos`, `player_clipped_at_left_and_right` |
 | REQ-417 | `gtia.rs` `player_sizes`, `missile_sizes`, `size_bits_2_7_ignored` |
 | REQ-418 | `gtia.rs` `retrigger_shows_second_copy`, `move_left_suppresses_image`, `move_during_image_keeps_image`, `reload_ors_shift_register`, `image_shifts_out_in_hblank` |
-| REQ-419 | `gtia.rs` `size_change_table_15`, `size_10_lockup_next_line` (2, first sentence), `size_10_lockup_persists`, `size_change_after_image` |
+| REQ-419 | `gtia.rs` `size_change_table_15`, `size_10_lockup_next_line` (2), `size_change_after_image` |
 | REQ-420 | `gtia.rs` `pm_playfield_collisions`, `hires_collisions_use_pf2`, `gtia_mode_playfield_collisions`, `collisions_ignore_colors_and_priority` |
 | REQ-421 | `gtia.rs` `player_player_collisions`, `missile_player_collisions`, `no_missile_missile_collisions`, `no_self_collision`, `same_color_players_collide` |
 | REQ-422 | `gtia.rs` `collisions_only_in_visible_area` |
@@ -409,11 +409,7 @@ The tests that this list adds or changes do these checks:
     helper to load and start such a program. The design must add one, or the tests must use an
     OS vector (for example the deferred vertical blank vector) or a display list interrupt.
 13. Resolved by OI-020: artifacting is NTSC only.
-14. REQ-419 criterion 2, last sentence: a lockup from a write on scan line 247 cannot reach
-    scan line 8 of the next frame. The object is retriggered at its position on each scan
-    line, also in vertical blank (REQ-418), and each load sets state `%00` and ends the lockup
-    (REQ-419). The test `size_10_lockup_persists` stays a stub; `size_10_lockup_next_line`
-    checks the first sentence.
+14. Resolved: the last sentence of REQ-419 criterion 2 is removed, because a retrigger on each scan line ends the lockup (REQ-418, REQ-419).
 15. REQ-019 criterion 3 needs a PAL machine from the command line, but no requirement gives an
     option to select the video standard. `pal_blending_flag_filters_screenshot` stays a stub.
 16. REQ-433 states that each pixel whose second code is `%000` shows the background. Taken

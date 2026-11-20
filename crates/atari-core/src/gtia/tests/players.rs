@@ -582,15 +582,6 @@ fn size_10_lockup_next_line() {
     );
 }
 
-/// Verifies REQ-419: `SIZEP0` `$01` to `$02` at HPOS `$41` shows `COLPM0` from HPOS `$40` to
-/// the end of the scanline and at HPOS `$22-$3F` of the next scanline, also from scanline 247
-/// to scanline 8 of the next frame (criterion 2).
-#[test]
-#[ignore = "planned: SLICE-02"]
-fn size_10_lockup_persists() {
-    planned();
-}
-
 /// Verifies REQ-419: changes `SIZEP0` after the image and compares the row with a row with
 /// no write (criterion 3). A `SIZEP0` write takes effect at an odd HPOS (REQ-434), so the
 /// test uses HPOS `$81`, the first HPOS after `$80` that a write can reach.
