@@ -1,0 +1,28 @@
+# Section index of POKEY-SPEC: POKEY chip, CO12294 Rev. B.
+# Format: one section per line, key<TAB>title. Lines that start with # are comments.
+# The key is the section number of the document; the subsections of section 9 are
+# lettered, and their key is "9." and the letter (9.A).
+#
+# How it was made: the PDF is an image scan with no text layer. The titles are read from
+# the image of the table of contents on sheet 2 (PDF page 2, rendered at 110 dpi). The
+# headings of sections 1, 2, 8, 9, 9.A, 9.B and 9.C (PDF pages 3, 23, 25 and 28) were
+# compared with the TOC and agree. The headings inside sections 1-8 (for example
+# "AUDIO NOISE FILTERS", "SKCTL", "IRQST") have no numbers and are not in the index.
+#
+# The title block of sheet 1 says 41 sheets; the PDF has 46 pages. PDF pages 1-8 and
+# 21-28 are sheets 1-8 and 21-28.
+1	GENERAL DESCRIPTION
+2	AUDIO
+3	KEYBOARD SCAN
+4	POT PORTS
+5	TIMERS
+6	RANDOM NUMBER GENERATOR
+7	SERIAL I/O PORT
+8	IRQ INTERRUPTS
+9	ELECTRICAL PARAMETERS
+9.A	GENERAL
+9.B	D.C. AND OPERATING CHARACTERISTICS
+9.C	DYNAMIC OPERATING CHARACTERISTICS
+9.D	WRITE I/O TIMING
+9.E	READ I/O TIMING
+9.F	MISC. I/O TIMING

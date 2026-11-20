@@ -1,0 +1,41 @@
+# Section index of ANTIC-SPEC: ANTIC (NTSC) chip specification, CO12296 Rev. D.
+# Format: one section per line, key<TAB>title. Lines that start with # are comments.
+# The key is the section number of the document.
+#
+# How it was made: from the table of contents on sheet 2 (PDF page 2), read from the page
+# image. The text layer of the TOC has OCR errors ("DISTLAY"); each title was checked
+# against the heading on its sheet where that sheet is in the file.
+#
+# Missing sheets: the document has 45 sheets, and the PDF has 37 pages. Sheets 27, 28, 29,
+# 30, 31, 32, 33 and 41 are not in the file (the PDF pages after sheet 26 are sheets 34-40
+# and 42-45). The sections on these sheets cannot be read in this copy:
+#   8.0, 9.0, 10.0, 11.0 and 12.0 (sheets 27-33, all of each section), and
+#   13.5 (sheet 41).
+# These sections stay in the index because the table of contents lists them, but a
+# requirement must not cite them as the only source.
+1.0	GENERAL
+2.0	WSYNC
+3.0	VERTICAL LINE COUNTER
+4.0	OBJECT DMA (Direct Memory Access)
+5.0	PLAYER-MISSILE BASE ADDRESS
+6.0	PLAYFIELD
+6.1	DISPLAY LIST
+6.2	DISPLAY INSTRUCTION FORMAT
+6.3	MEMORY SCAN COUNTER
+6.4	MEMORY MAP DISPLAY INSTRUCTIONS
+6.5	CHARACTER DISPLAY INSTRUCTIONS
+7.0	VERTICAL AND HORIZONTAL FINE SCROLLING
+7.1	HORIZONTAL SCROLLING
+7.2	VERTICAL SCROLLING
+8.0	SIMPLE DISPLAY LIST EXAMPLE
+9.0	CYCLE COUNTING
+10.0	CYCLE COUNTING EXAMPLE
+11.0	LIGHT PEN
+12.0	NMI INTERRUPTS
+13.0	ELECTRICAL PARAMETERS
+13.1	GENERAL
+13.2	D.C. OPERATING CHARACTERISTICS
+13.3	DYNAMIC OPERATING CHARACTERISTICS
+13.4	I/O TIMING
+13.5	I/O TIMING (MICROPROCESSOR TO THE ANTIC)
+13.6	READ I/O TIMING (ANTIC READING FROM THE RAM)

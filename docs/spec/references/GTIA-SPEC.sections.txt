@@ -1,0 +1,27 @@
+# Section index of GTIA-SPEC: GTIA chip (NTSC), CO14805 Rev. A.
+# Format: one section per line, key<TAB>title. Lines that start with # are comments.
+# The key is the section number of the document.
+#
+# How it was made: the PDF is an image scan with no text layer. The titles are read from
+# the image of the table of contents on sheet 2 (PDF page 2, rendered at 110 dpi). The
+# section headings 1.0-7.0 on PDF pages 3-15 were compared with the TOC and agree. The
+# sections have no numbered subsections other than 9.1-9.6.
+#
+# The title block of sheet 1 says 34 sheets; the PDF has 41 pages (PDF pages 34-41 are
+# logic schematics). The scan cuts off most sheet numbers in the page footers, so the
+# sheet number of each PDF page was not confirmed; PDF pages 20 and 21 are sheets 20 and 21.
+1.0	GENERAL
+2.0	COLOR-LUMINANCE CONTROL
+3.0	PRIORITY CONTROL
+4.0	PLAYER-MISSILE CONTROL
+5.0	COLLISION
+6.0	NTSC/PAL REGISTER
+7.0	TRIGGER INPUTS
+8.0	SWITCH I/O
+9.0	ELECTRICAL PARAMETERS
+9.1	GENERAL
+9.2	D.C. & OPERATING CHARACTERISTICS
+9.3	DYNAMIC OPERATING CHARACTERISTICS
+9.4	I/O TIMING
+9.5	WRITE I/O TIMING
+9.6	READ I/O TIMING

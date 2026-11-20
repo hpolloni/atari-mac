@@ -1,0 +1,293 @@
+# Section index of TRN: Atari Home Computer System Technical Reference Notes, CO16555 Rev. A,
+# 1982. Format: one section per line, key<TAB>title. Lines that start with # are comments.
+#
+# The document has three parts, and the parts use the same numbers again. A key therefore
+# starts with the part:
+#   OS-   Operating System User's Manual (PDF pages 2-259). Chapters 1-11 and appendices A-L
+#         are numbered: OS-9, OS-APP-K. Appendix L has the lettered groups A-R (there are no
+#         groups I, O and Q): OS-APP-L.H.
+#   SRC-  Operating System Source Listing (PDF pages 260-415). The listing has no sections.
+#         The keys are the labels of its "MODULE ORIGIN TABLE" (assembler lines 20-32, PDF
+#         page 263), and SRC-EQUATES is the equate file before the first module. A citation
+#         can give the assembler line number after the title.
+#   HW-   Hardware Manual (PDF pages 416-537). Sections I-VI with lettered subsections, and
+#         appendices A-C: HW-II.A, HW-III.B, HW-APP-A.
+# A heading that has no number gets the key of its parent, a "/", and the words of its title
+# (letters and digits only) joined with "-": OS-6/Usage-Notes/POKEY-Interrupt-Mask,
+# HW-II.A/Cycle-Counting. In HW-III the key after the "/" is the register name, or the
+# first and the last name of a register group: HW-III.B/NMIEN, HW-III.D/COLPF0-COLPF3.
+#
+# How it was made: from the text layer of the PDF (Adobe Paper Capture OCR), with each OCR
+# error corrected against the page image ("1/0" is "I/O", "CIa" is "CIO", "as" is "OS",
+# "Q." is "G.", "~." is "J.").
+#   OS-   the table of contents, PDF pages 4-15: chapters, appendices and the second level;
+#         the third level only in chapter 6 (interrupts), in the serial bus part of chapter 9,
+#         and in groups H (SIO) and P (interrupts) of appendix L.
+#   SRC-  the module origin table, PDF page 263.
+#   HW-   the table of contents, PDF page 418 (sections and lettered subsections); the
+#         underlined run-in headings of section II, PDF pages 422-453; the register headings
+#         of section III, PDF pages 454-476 (hexadecimal addresses as printed, with the OCR
+#         "O" corrected to "0").
+OS-PREFACE	PREFACE
+OS-1	INTRODUCTION
+OS-1/General-Description-of-the-ATARI-Computer-System	General Description of the ATARI Computer System
+OS-1/Conventions-Used-in-This-Manual	Conventions Used in This Manual
+OS-2	OPERATING SYSTEM FUNCTIONAL ORGANIZATION
+OS-2/Input-Output-Subsystem	Input/Output Subsystem
+OS-2/Interrupt-Processing	Interrupt Processing
+OS-2/Initialization	Initialization
+OS-2/Floating-Point-Arithmetic-Package	Floating Point Arithmetic Package
+OS-3	CONFIGURATIONS
+OS-3/Program-Environments	Program Environments
+OS-3/RAM-Expansion	RAM Expansion
+OS-3/Peripheral-Devices	Peripheral Devices
+OS-4	SYSTEM MEMORY UTILIZATION
+OS-4/RAM-Region	RAM Region
+OS-4/Cartridges-A-and-B	Cartridges A and B
+OS-4/Mapped-I-O	Mapped I/O
+OS-4/Resident-OS-and-Floating-Point-Package-ROM	Resident OS and Floating Point Package ROM
+OS-4/Central-Data-Base-Description	Central Data Base Description
+OS-4/Memory-Dynamics	Memory Dynamics
+OS-5	I/O SUBSYSTEM
+OS-5/Central-I-O-Utility	Central I/O Utility
+OS-5/CIO-Functions	CIO Functions
+OS-5/Device-Filename-Specification	Device/Filename Specification
+OS-5/I-O-Example	I/O Example
+OS-5/Device-Specific-Information	Device Specific Information
+OS-5/Non-CIO-I-O	Non-CIO I/O
+OS-5/Resident-Device-Handler-Vectors	Resident Device Handler Vectors
+OS-5/Serial-Bus-I-O	Serial Bus I/O
+OS-6	INTERRUPT PROCESSING
+OS-6/Chip-Reset	Chip-Reset
+OS-6/Nonmaskable-Interrupts	Nonmaskable Interrupts
+OS-6/Nonmaskable-Interrupts/Stage-1-VBLANK-Process	Stage 1 VBLANK Process
+OS-6/Nonmaskable-Interrupts/Stage-2-VBLANK-Process	Stage 2 VBLANK Process
+OS-6/Maskable-Interrupts	Maskable Interrupts
+OS-6/Interrupt-Initialization	Interrupt Initialization
+OS-6/System-Timers	System Timers
+OS-6/Usage-Notes	Usage Notes
+OS-6/Usage-Notes/POKEY-Interrupt-Mask	POKEY Interrupt Mask
+OS-6/Usage-Notes/Setting-Interrupt-and-Timer-Vectors	Setting Interrupt and Timer Vectors
+OS-6/Usage-Notes/Stack-Content-at-Interrupt-Vector-Points	Stack Content at Interrupt Vector Points
+OS-6/Usage-Notes/Miscellaneous-Considerations	Miscellaneous Considerations
+OS-6/Flowcharts	Flowcharts
+OS-7	SYSTEM INITIALIZATION
+OS-7/Power-Up-Initialization-Coldstart-Procedure	Power-Up Initialization (Coldstart) Procedure
+OS-7/System-Reset-Initialization-Warmstart-Procedure	System Reset Initialization (Warmstart) Procedure
+OS-8	FLOATING POINT ARITHMETIC PACKAGE
+OS-8/Functions-Calling-Sequences	Functions/Calling Sequences
+OS-8/Resource-Utilization	Resource Utilization
+OS-8/Implementation-Details	Implementation Details
+OS-9	ADDING NEW DEVICE HANDLERS/PERIPHERALS
+OS-9/Device-Table	Device Table
+OS-9/CIO-Handler-Interface	CIO/Handler Interface
+OS-9/Handler-SIO-Interface	Handler/SIO Interface
+OS-9/Serial-I-O-Bus-Characteristics-and-Protocol	Serial I/O Bus Characteristics and Protocol
+OS-9/Serial-I-O-Bus-Characteristics-and-Protocol/Hardware-Electrical-Characteristics	Hardware/Electrical Characteristics
+OS-9/Serial-I-O-Bus-Characteristics-and-Protocol/Serial-Port-Electrical-Specifications	Serial Port Electrical Specifications
+OS-9/Serial-I-O-Bus-Characteristics-and-Protocol/Bus-Commands	Bus Commands
+OS-9/Serial-I-O-Bus-Characteristics-and-Protocol/Bus-Timing	Bus Timing
+OS-9/Handler-Environment	Handler Environment
+OS-9/Flowcharts	Flowcharts
+OS-10	PROGRAM ENVIRONMENT AND INITIALIZATION
+OS-10/Cartridge	Cartridge
+OS-10/Diskette-Booted-Software	Diskette-Booted Software
+OS-10/Cassette-Booted-Software	Cassette-Booted Software
+OS-11	ADVANCED TECHNIQUES AND APPLICATION NOTES
+OS-11/Sound-Generation	Sound Generation
+OS-11/Screen-Graphics	Screen Graphics
+OS-11/Player-Missile-Graphics	Player/Missile Graphics
+OS-11/Reading-Game-Controllers	Reading Game Controllers
+OS-APP-A	CIO COMMAND BYTE VALUES
+OS-APP-B	CIO STATUS BYTE VALUES
+OS-APP-C	SIO STATUS BYTE VALUES
+OS-APP-D	ATASCII CODES
+OS-APP-E	DISPLAY CODES (ATASCII)
+OS-APP-F	KEYBOARD CODES (ATASCII)
+OS-APP-G	PRINTER CODES (ATASCII)
+OS-APP-H	SCREEN MODE CHARACTERISTICS
+OS-APP-I	SERIAL BUS ID AND COMMAND SUMMARY
+OS-APP-J	ROM VECTORS
+OS-APP-K	DEVICE CHARACTERISTICS
+OS-APP-K/Keyboard	Keyboard
+OS-APP-K/Display	Display
+OS-APP-K/ATARI-410-TM-Program-Recorder	ATARI 410(TM) Program Recorder
+OS-APP-K/ATARI-820-TM-40-Column-Impact-Printer	ATARI 820(TM) 40-Column Impact Printer
+OS-APP-K/ATARI-810-TM-Disk-Drive	ATARI 810(TM) Disk Drive
+OS-APP-L	OS DATA BASE VARIABLE FUNCTIONAL DESCRIPTIONS
+OS-APP-L/Central-Data-Base-Description	Central Data Base Description
+OS-APP-L/Functional-Index-to-Data-Base-Variable-Descriptions	Functional Index to Data Base Variable Descriptions
+OS-APP-L.A	MEMORY CONFIGURATION
+OS-APP-L.B	TEXT/GRAPHICS SCREEN
+OS-APP-L.C	DISKETTE HANDLER
+OS-APP-L.D	CASSETTE
+OS-APP-L.E	KEYBOARD
+OS-APP-L.F	PRINTER
+OS-APP-L.G	CENTRAL I/O ROUTINE (CIO)
+OS-APP-L.H	SERIAL I/O ROUTINE (SIO)
+OS-APP-L.H/User-Call-Parameters	User Call Parameters
+OS-APP-L.H/Device-Control-Block	Device Control Block
+OS-APP-L.H/Bus-Sound-Control	Bus Sound Control
+OS-APP-L.H/Serial-Bus-Control	Serial Bus Control
+OS-APP-L.H/Retry-Logic	Retry Logic
+OS-APP-L.H/Checksum	Checksum
+OS-APP-L.H/Data-Buffering	Data Buffering
+OS-APP-L.H/General-Buffer-Control	General Buffer Control
+OS-APP-L.H/Command-Frame-Output-Buffer	Command Frame Output Buffer
+OS-APP-L.H/Receive-Transmit-Data-Buffering	Receive/Transmit Data Buffering
+OS-APP-L.H/SIO-Timeout	SIO Timeout
+OS-APP-L.H/Internal-Working-Variables	Internal Working Variables
+OS-APP-L.J	ATARI CONTROLLERS
+OS-APP-L.K	DISK FILE MANAGER
+OS-APP-L.L	DISK UTILITY POINTER
+OS-APP-L.M	FLOATING POINT PACKAGE
+OS-APP-L.N	Power-Up and System Reset
+OS-APP-L.N/RAM-Sizing	RAM Sizing
+OS-APP-L.N/Diskette-Cassette-Boot	Diskette/Cassette-Boot
+OS-APP-L.N/Environment-Control	Environment Control
+OS-APP-L.P	INTERRUPTS
+OS-APP-L.P/System-Timers	System Timers
+OS-APP-L.P/Real-Time-Clock	Real Time Clock
+OS-APP-L.P/System-Timer-1	System Timer 1
+OS-APP-L.P/System-Timer-2	System Timer 2
+OS-APP-L.P/System-Timers-3-4-and-5	System Timers 3, 4 and 5
+OS-APP-L.P/RAM-Interrupt-Vectors	RAM Interrupt Vectors
+OS-APP-L.P/NMI-Interrupt-Vectors	NMI Interrupt Vectors
+OS-APP-L.P/IRQ-Interrupt-Vectors	IRQ Interrupt Vectors
+OS-APP-L.P/Hardware-Register-Updates	Hardware Register Updates
+OS-APP-L.P/Internal-Working-Variables	Internal Working Variables
+OS-APP-L.R	USER AREAS
+OS-INDEX	INDEX
+SRC-EQUATES	OPERATING SYSTEM EQUATE FILE (module origin table, vector table, OS equates, RAM assignments)
+SRC-CHRORG	CHARACTER SET ($E000)
+SRC-VECTBL	VECTOR TABLE ($E400)
+SRC-VCTABL	RAM VECTOR INITIAL VALUE TABLE ($E480)
+SRC-CIOORG	CENTRAL I/O HANDLER ($E4A6)
+SRC-INTORG	INTERRUPT HANDLER ($E6D5)
+SRC-SIOORG	SERIAL I/O DRIVER ($E944)
+SRC-DSKORG	DISK HANDLER ($EDEA)
+SRC-PRNORG	PRINTER HANDLER ($EE78)
+SRC-CASORG	CASSETTE HANDLER ($EF41)
+SRC-MONORG	MONITOR/POWER UP MODULE ($F0E3)
+SRC-KBDORG	KEYBOARD/DISPLAY HANDLER ($F3E4)
+HW-I	INTRODUCTION
+HW-II	DESCRIPTION OF HARDWARE
+HW-II.A	ANTIC and CTIA
+HW-II.A/TV-Display	TV Display
+HW-II.A/Operating-System-OS	Operating System (OS)
+HW-II.A/OS-Shadowing	OS Shadowing
+HW-II.A/WSYNC	WSYNC
+HW-II.A/Object-DMA-Direct-Memory-Access	Object DMA (Direct Memory Access)
+HW-II.A/Color-luminance	Color-luminance
+HW-II.A/Priority	Priority
+HW-II.A/Players-and-Missiles	Players and Missiles
+HW-II.A/Playfield	Playfield
+HW-II.A/Display-List	Display List
+HW-II.A/Display-Instruction-Format	Display Instruction Format
+HW-II.A/Memory-Scan-Counter	Memory Scan Counter
+HW-II.A/Memory-Map-Display-Instructions	Memory Map Display Instructions
+HW-II.A/Character-Display-Instructions	Character Display Instructions
+HW-II.A/Hardware-Collision-Detection	Hardware Collision Detection
+HW-II.A/Vertical-and-Horizontal-Fine-Scrolling	Vertical and Horizontal Fine Scrolling
+HW-II.A/Vertical-Scrolling	Vertical Scrolling
+HW-II.A/Simple-Display-List-Example	Simple Display List Example
+HW-II.A/Cycle-Counting	Cycle Counting
+HW-II.A/Cycle-Counting-Example	Cycle Counting Example
+HW-II.A/NTSC-vs-PAL-Systems	NTSC vs. PAL Systems
+HW-II.B	POKEY
+HW-II.B/Audio	Audio
+HW-II.B/Frequency-Dividers	Frequency Dividers
+HW-II.B/Poly-Noise-Counters	Poly Noise Counters
+HW-II.B/High-Pass-Filters	High Pass Filters
+HW-II.B/Volume-Control	Volume Control
+HW-II.C	SERIAL PORT
+HW-II.C/Serial-Output	Serial Output
+HW-II.C/Serial-Output-Clock	Serial Output Clock
+HW-II.C/Serial-Input	Serial Input
+HW-II.C/Direct-Serial-Input	Direct Serial Input
+HW-II.C/Bi-Directional-Clock	Bi-Directional Clock
+HW-II.C/Asynchronous-Serial-Input	Asynchronous Serial Input
+HW-II.C/Serial-Mode-Control	Serial Mode Control
+HW-II.D	INTERRUPT SYSTEM
+HW-II.D/NMI-Interrupts	NMI Interrupts
+HW-II.D/IRQ-Interrupts	IRQ Interrupts
+HW-II.E	CONTROLLERS
+HW-II.E/Joysticks	Joysticks
+HW-II.E/Paddles	Paddles
+HW-II.E/Keyboard-Controllers	Keyboard Controllers
+HW-II.E/Light-Pen	Light Pen
+HW-III	HARDWARE REGISTERS
+HW-III.A	PAL (D014)
+HW-III.B	INTERRUPT CONTROL
+HW-III.B/NMIEN	NMIEN (Non Maskable Interrupt Enable) (D40E)
+HW-III.B/NMIST	NMIST (Non Maskable Interrupt Status) (D40F)
+HW-III.B/NMIRES	NMIRES (NMI Status Register Reset) (D40F)
+HW-III.B/IRQST	IRQST (IRQ Interrupt Status) (D20E)
+HW-III.B/IRQEN	IRQEN (IRQ Interrupt Enable) (D20E)
+HW-III.C	TV LINE CONTROL
+HW-III.C/VCOUNT	VCOUNT (Vertical Counter) (D40B)
+HW-III.C/WSYNC	WSYNC (Wait for Horizontal Blank Synchronism - i.e. wait until start of next TV line.) (D40A)
+HW-III.D	GRAPHICS CONTROL
+HW-III.D/DMACTL	DMACTL (Direct Memory Access Control) (D400)
+HW-III.D/GRACTL	GRACTL (Graphics Control) (D01D)
+HW-III.D/CHACTL	CHACTL (Character Control) (D401)
+HW-III.D/DLISTL	DLISTL (Display List Low) (D402)
+HW-III.D/DLISTH	DLISTH (Display List High) (D403)
+HW-III.D/CHBASE	CHBASE (Character Address Base Register) (D409)
+HW-III.D/PMBASE	PMBASE (Player-Missile Address Base Register) (D407)
+HW-III.D/HSCROL	HSCROL (Horizontal Scroll Register) (D404)
+HW-III.D/VSCROL	VSCROL (Vertical Scroll Register) (D405)
+HW-III.D/PRIOR	PRIOR (Priority) (D01B)
+HW-III.D/COLPF0-COLPF3	COLPF0 - COLPF3 (Playfield Color) (D016, D017, D018, D019)
+HW-III.D/COLBK	COLBK (Background Color) (D01A)
+HW-III.E	PLAYERS AND MISSILES
+HW-III.E/COLPM0-COLPM3	COLPM0 - COLPM3 (Player-Missile Color) (D012, D013, D014, D015)
+HW-III.E/GRAFP0-GRAFP3	GRAFP0 - GRAFP3 (Player Graphics Registers) (P0 D00D, P1 D00E, P2 D00F, P3 D010)
+HW-III.E/GRAFM	GRAFM (Missile Graphics Registers) (D011)
+HW-III.E/SIZEP0-SIZEP3	SIZEP0 - SIZEP3 (Player Size) (P0 D008, P1 D009, P2 D00A, P3 D00B)
+HW-III.E/SIZEM	SIZEM (Missile Size) (D00C)
+HW-III.E/HPOSP0-HPOSP3	HPOSP0 - HPOSP3 (Player Horizontal Position) (P0 D000, P1 D001, P2 D002, P3 D003)
+HW-III.E/HPOSM0-HPOSM3	HPOSM0 - HPOSM3 (Missile Horizontal Position) (M0 D004, M1 D005, M2 D006, M3 D007)
+HW-III.E/VDELAY	VDELAY (Vertical Delay) (D01C)
+HW-III.E/M0PF-M3PF	M0PF, M1PF, M2PF, M3PF (Missile to Playfield Collisions) (D000, D001, D002, D003)
+HW-III.E/P0PF-P3PF	P0PF, P1PF, P2PF, P3PF (Player to Playfield Collisions) (D004, D005, D006, D007)
+HW-III.E/M0PL-M3PL	M0PL, M1PL, M2PL, M3PL (Missile to Player Collision) (D008, D009, D00A, D00B)
+HW-III.E/P0PL-P3PL	P0PL, P1PL, P2PL, P3PL (Player to Player Collisions) (D00C, D00D, D00E, D00F)
+HW-III.E/HITCLR	HITCLR (Collision "HIT" Clear) (D01E)
+HW-III.F	AUDIO
+HW-III.F/AUDCTL	AUDCTL (Audio Control) (D208)
+HW-III.F/AUDF1-AUDF4	AUDF1, AUDF2, AUDF3, AUDF4 (Audio Frequency) (D200, D202, D204, D206)
+HW-III.F/AUDC1-AUDC4	AUDC1, AUDC2, AUDC3, AUDC4 (Audio Channel Control) (D201, D203, D205, D207)
+HW-III.F/STIMER	STIMER (Start Timer) (D209)
+HW-III.F/RANDOM	RANDOM (Random Number Generator) (D20A)
+HW-III.G	KEYBOARD and SPEAKER
+HW-III.G/CONSOL	CONSOL (Console Switch Port) (D01F)
+HW-III.G/KBCODE	KBCODE (Keyboard Code) (D209)
+HW-III.H	SERIAL PORT
+HW-III.H/SKCTL	SKCTL (Serial Port Control) (D20F)
+HW-III.H/SKSTAT	SKSTAT (Serial Port-Keyboard Status) (D20F)
+HW-III.H/SKRES	SKRES (Reset above Status Register) (D20A)
+HW-III.H/SERIN	SERIN (Serial Input Data) (D20D)
+HW-III.H/SEROUT	SEROUT (Serial Output Data) (D20D)
+HW-III.I	CONTROLLER PORTS
+HW-III.I/PORTA	PORTA (Port A) (D300)
+HW-III.I/PACTL	PACTL (Port A Control) (D302)
+HW-III.I/PORTB	PORTB (Port B) (D301)
+HW-III.I/PBCTL	PBCTL (Port B Control) (D303)
+HW-III.I/POT0-POT7	POT0 - POT7 (Pot Values) (D200-D207)
+HW-III.I/ALLPOT	ALLPOT (All Pot Lines Simultaneously) (D208)
+HW-III.I/POTGO	POTGO (Start Pot Scan) (D20B)
+HW-III.I/TRIG0-TRIG3	TRIG0, TRIG1, TRIG2, TRIG3 (Trigger Ports) (0 D010, 1 D011, 2 D012, 3 D013)
+HW-III.I/PENH	PENH (Light Pen Horizontal Color Clock Position) (D40C)
+HW-III.I/PENV	PENV (Light Pen Vertical TV Line Position) (D40D)
+HW-IV	SAMPLE DISPLAY PROGRAM
+HW-V	HARDWARE REGISTER LISTS
+HW-V.A	ADDRESS ORDER
+HW-V.B	ALPHABETICAL ORDER
+HW-VI	FIGURES
+HW-VI.A	MEMORY MAP
+HW-VI.B	NTSC and PAL DISPLAY
+HW-VI.C	SCHEMATICS
+HW-APP-A	USE OF PLAYER/MISSILE GRAPHICS WITH BASIC
+HW-APP-B	MIXING GRAPHICS MODES
+HW-APP-C	PINOUTS

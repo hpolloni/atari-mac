@@ -1,0 +1,68 @@
+# Section index of SIO-810: Atari 810 Disk Peripheral Device Description, Revision A,
+# 15-DEC-80, Harry B. Stewart. Format: one section per line, key<TAB>title. Lines that
+# start with # are comments.
+#
+# Keys: the numbered sections use their number (1, 1.3, 1.3.1, 2.4.1.1). The appendices
+# use APP- and the letter (APP-A). The headings inside appendix A have no numbers; their
+# key is APP-A, a "/", and the words of the title (letters and digits only) joined with
+# "-": APP-A/Bus-timing.
+#
+# How it was made: from the table of contents on PDF page 2 (text layer), with all its
+# levels, because the serial bus and I/O sections are cited at the third and fourth
+# level. Where a heading in the body has a different title (2.4.1.1 "FD1771 Floppy Disk
+# Controller chip", 2.4.3 "Interruts"), the index uses the TOC title. The appendix A
+# headings are from PDF pages 16-21. Appendices B, C and D are reprinted data sheets
+# of the manufacturers (FD1771, 6532 and 6507) with their own numbering, which
+# is not in the index. Appendices E and F are image scans.
+1	Functional description of 810
+1.1	General description
+1.2	Overall system performance
+1.2.1	Capacity of media
+1.2.2	Organization and format of data on media
+1.2.3	Data throughput rates
+1.2.4	Operating modes and options
+1.2.5	Expandability
+1.3	Serial bus interface specifications
+1.3.1	GET SECTOR
+1.3.2	PUT SECTOR
+1.3.3	PUT SECTOR WITH VERIFY
+1.3.4	STATUS REQUEST
+1.3.5	FORMAT DISK
+1.4	Operating modes and transient behaviors
+1.4.1	Power-up
+1.4.2	Error handling
+1.4.3	Soft RESET
+1.5	Diagnostic requirements
+1.6	Configurations/options supported
+2	Hardware description
+2.1	General description
+2.2	Block diagram
+2.3	Controller memory and I/O address assignments
+2.4	I/O interface specification
+2.4.1	Parallel I/O ports
+2.4.1.1	FD1771 Floppy controller ports
+2.4.1.2	6532 PIA ports
+2.4.2	Serial I/O ports
+2.4.3	Interrupts
+2.5	Electromechanical components
+2.5.1	Head stepper motor
+2.5.2	Drive motor
+3	Firmware description
+3.1	General description
+3.2	Command descriptions
+3.3	Special considerations
+3.4	Data base description
+3.5	Module hierarchy
+3.6	Procedure descriptions
+APP-A	Serial I/O Bus Characteristics and Protocol
+APP-A/Hardware-electrical-characteristics	Hardware/electrical characteristics
+APP-A/Serial-bus-electrical-specifications	Serial bus electrical specifications
+APP-A/Bus-commands	Bus commands
+APP-A/Bus-timing	Bus timing
+APP-A/Serial-bus-special-character-values	Serial bus special character values
+APP-A/Serial-bus-device-I-D-to-logical-unit-mapping-Model-810	Serial bus device I.D. to logical unit mapping (Model 810)
+APP-B	FD1771 Floppy Disk Controller Chip Description
+APP-C	6532 PIA Chip Description
+APP-D	6507 Microcomputer Description
+APP-E	Controller Schematics
+APP-F	MPI Diskette Drive Description
