@@ -25,7 +25,7 @@ pub const MAX_SCALE: usize = 8;
 pub const USAGE: &str = "\
 Usage: atari-mac [options]
 
-Atari 65XE emulator (NTSC).
+Atari 65XE emulator (NTSC, or PAL with --pal).
 
 Options:
   --os <file>          OS ROM, 16384 bytes (default: roms/altirraos-xl.rom)
@@ -33,6 +33,7 @@ Options:
   --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes
   --xex <file>         Executable (not supported yet)
   --disk <file>        ATR disk image (not supported yet)
+  --pal                PAL machine (default: NTSC)
   --scale <n>          Window scale, 1 to 8 (default: 2)
   --frames <n>         Run n frames, then print the elapsed time and exit
   --headless           No window and no audio (needs --frames)
@@ -61,7 +62,7 @@ pub struct Options {
     pub screenshot: Option<PathBuf>,
     /// The window scale.
     pub scale: usize,
-    /// The video standard of the machine. The command line has no option for it: it is NTSC.
+    /// The video standard of the machine: PAL with `--pal`, else NTSC (REQ-002).
     pub standard: VideoStandard,
     /// The optional display filters (REQ-019).
     pub filters: DisplayFilters,
@@ -137,6 +138,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--xex" => return Err(FrontendError::Unsupported("--xex")),
             "--disk" => return Err(FrontendError::Unsupported("--disk")),
             "--headless" => options.headless = true,
+            "--pal" => options.standard = VideoStandard::Pal,
             "--frames" => options.frames = Some(number(&mut args, "--frames")?),
             "--screenshot" => options.screenshot = Some(value(&mut args, "--screenshot")?.into()),
             "--artifacting" => options.filters.artifacting = true,
@@ -166,7 +168,8 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
 }
 
 /// The name of a video standard in messages.
-const fn standard_name(standard: VideoStandard) -> &'static str {
+#[must_use]
+pub const fn standard_name(standard: VideoStandard) -> &'static str {
     match standard {
         VideoStandard::Ntsc => "NTSC",
         VideoStandard::Pal => "PAL",
@@ -255,6 +258,7 @@ mod tests {
             "out.png",
             "--scale",
             "3",
+            "--pal",
         ]);
         assert_eq!(
             options,
@@ -266,7 +270,7 @@ mod tests {
                 frames: Some(180),
                 screenshot: Some("out.png".into()),
                 scale: 3,
-                standard: VideoStandard::Ntsc,
+                standard: VideoStandard::Pal,
                 filters: DisplayFilters::default(),
             },
             "all options"
@@ -297,7 +301,7 @@ mod tests {
     }
 
     /// Verifies REQ-019: the flags set the filters, and each filter needs its video standard
-    /// (criterion 5, also for a PAL machine, which the command line cannot select yet).
+    /// (criterion 5, for an NTSC and a PAL machine).
     #[test]
     fn filter_flags_and_standards() {
         let options = parse_ok(&["--artifacting"]);
@@ -319,6 +323,16 @@ mod tests {
         assert!(
             check_filters(&pal(false, true)).is_ok(),
             "--pal-blending on PAL"
+        );
+        assert_eq!(
+            parse_ok(&["--pal", "--pal-blending"]),
+            pal(false, true),
+            "--pal --pal-blending"
+        );
+        assert!(
+            parse_err(&["--pal", "--artifacting"])
+                .starts_with("--artifacting needs an NTSC machine, but the machine is PAL"),
+            "--pal --artifacting"
         );
         let error = check_filters(&pal(true, false)).map_err(|e| e.to_string());
         assert!(

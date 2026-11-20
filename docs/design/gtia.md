@@ -410,8 +410,8 @@ The tests that this list adds or changes do these checks:
     OS vector (for example the deferred vertical blank vector) or a display list interrupt.
 13. Resolved by OI-020: artifacting is NTSC only.
 14. Resolved: the last sentence of REQ-419 criterion 2 is removed, because a retrigger on each scan line ends the lockup (REQ-418, REQ-419).
-15. REQ-019 criterion 3 needs a PAL machine from the command line, but no requirement gives an
-    option to select the video standard. `pal_blending_flag_filters_screenshot` stays a stub.
+15. Resolved: REQ-002 criterion 4 adds the option `--pal`, so REQ-019 criterion 3 runs from the
+    command line (`pal_blending_flag_filters_screenshot`).
 16. REQ-433 states that each pixel whose second code is `%000` shows the background. Taken
     literally, the mode 10 border (both codes `%000`) would show `COLBK`, against REQ-430
     criterion 3 and HRM 6.9 ("Border regions are rendered with a code of 0000 or player 0").

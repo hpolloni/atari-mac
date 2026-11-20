@@ -252,13 +252,14 @@ fn screenshot_240(test: &str, flags: &[&str]) -> Vec<u32> {
         .collect()
 }
 
-/// The frame buffer of an NTSC machine with the free ROMs after 240 frames from power-on.
-fn frame_after_240() -> Vec<u8> {
+/// The frame buffer of a `standard` machine with the free ROMs after 240 frames from
+/// power-on.
+fn frame_after_240(standard: VideoStandard) -> Vec<u8> {
     let mut machine = Machine::new(MachineConfig {
         os_rom: fs::read(OS_ROM).expect("OS ROM"),
         basic_rom: Some(fs::read(BASIC_ROM).expect("BASIC ROM")),
         cartridge: None,
-        standard: VideoStandard::Ntsc,
+        standard,
         audio_sample_rate: 48_000,
     })
     .expect("machine");
@@ -274,7 +275,7 @@ fn frame_after_240() -> Vec<u8> {
 #[test]
 fn filters_off_without_flags() {
     let pixels = screenshot_240("filters_off_without_flags", &[]);
-    let frame = frame_after_240();
+    let frame = frame_after_240(VideoStandard::Ntsc);
     for (i, (&color, &pixel)) in frame.iter().zip(&pixels).enumerate() {
         assert_eq!(
             pixel,
@@ -291,7 +292,7 @@ fn filters_off_without_flags() {
 #[test]
 fn artifacting_flag_filters_screenshot() {
     let pixels = screenshot_240("artifacting_flag_filters_screenshot", &["--artifacting"]);
-    let frame = frame_after_240();
+    let frame = frame_after_240(VideoStandard::Ntsc);
     let mut expected = [0; FRAME_WIDTH];
     for (y, (row, out)) in frame
         .chunks(FRAME_WIDTH)
@@ -308,12 +309,63 @@ fn artifacting_flag_filters_screenshot() {
     assert_ne!(pixels, plain, "the filter changes the hires text");
 }
 
-/// Verifies REQ-019: with `--pal-blending` on a PAL machine, the screenshot equals the output
-/// of `palette::pal_blend_row` for each row (criterion 3).
+/// Verifies REQ-019: with `--pal-blending` on a PAL machine (`--pal`), the screenshot equals
+/// the output of `palette::pal_blend_row` for each row (criterion 3). Row 0 has no row above
+/// it and is not blended (OI-021, REQ-412 criterion 6).
 #[test]
-#[ignore = "planned: SLICE-02"]
 fn pal_blending_flag_filters_screenshot() {
-    planned();
+    let pixels = screenshot_240(
+        "pal_blending_flag_filters_screenshot",
+        &["--pal", "--pal-blending"],
+    );
+    let frame = frame_after_240(VideoStandard::Pal);
+    let rows: Vec<&[u8]> = frame.chunks(FRAME_WIDTH).collect();
+    let out_rows: Vec<&[u32]> = pixels.chunks(FRAME_WIDTH).collect();
+    assert_eq!(out_rows.len(), FRAME_HEIGHT, "rows in the screenshot");
+    let plain_row_0: Vec<u32> = rows[0]
+        .iter()
+        .map(|&color| palette::rgb(VideoStandard::Pal, color))
+        .collect();
+    assert_eq!(out_rows[0], plain_row_0, "row 0 is not blended");
+    let mut expected = [0; FRAME_WIDTH];
+    for y in 1..FRAME_HEIGHT {
+        palette::pal_blend_row(rows[y - 1], rows[y], &mut expected);
+        assert_eq!(out_rows[y], expected, "row {y}");
+    }
+    let plain: Vec<u32> = frame
+        .iter()
+        .map(|&color| palette::rgb(VideoStandard::Pal, color))
+        .collect();
+    assert_ne!(pixels, plain, "the filter changes the screen");
+}
+
+/// Verifies REQ-002: `--headless --frames 50 --pal` runs a PAL machine and prints the run
+/// time for 50 frames of 35,568 cycles; without `--pal` the frames have the NTSC length of
+/// 29,868 cycles; `--help` lists `--pal` (criterion 4).
+#[test]
+fn pal_flag_selects_pal() {
+    for (flags, line) in [
+        (&["--pal"][..], " s (PAL, last frame 35568 cycles)"),
+        (&[], " s (NTSC, last frame 29868 cycles)"),
+    ] {
+        let mut args = vec!["--headless", "--frames", "50"];
+        args.extend(flags);
+        let output = run(&args);
+        assert!(output.status.success(), "{flags:?}: {}", stderr(&output));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.starts_with("50 frames in ") && stdout.trim_end().ends_with(line),
+            "{flags:?}: {stdout}"
+        );
+    }
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help");
+    let usage = String::from_utf8_lossy(&output.stdout);
+    assert!(usage.contains("--pal "), "--pal in {usage}");
+    assert!(
+        !usage.contains("(NTSC)"),
+        "the help does not say NTSC only: {usage}"
+    );
 }
 
 /// Verifies REQ-019: `--help` lists both flags (criterion 4).
@@ -327,17 +379,23 @@ fn help_lists_filter_flags() {
     }
 }
 
-/// Verifies REQ-019: `--pal-blending` on an NTSC machine gives exit code 2 and a message that
-/// names the flag and the video standard (criterion 5). The command line has no option for a
-/// PAL machine, so `--artifacting` on a PAL machine is checked by the unit test
-/// `filter_flags_and_standards` in `src/cli.rs`.
+/// Verifies REQ-019: `--pal-blending` on an NTSC machine, or `--artifacting` on a PAL machine
+/// (`--pal`), gives exit code 2 and a message that names the flag and the video standard
+/// (criterion 5).
 #[test]
 fn filter_flag_needs_matching_standard() {
-    let output = run(&["--headless", "--frames", "1", "--pal-blending"]);
-    assert_eq!(output.status.code(), Some(2), "exit status");
-    let message = stderr(&output);
-    assert!(
-        message.contains("--pal-blending") && message.contains("NTSC"),
-        "{message}"
-    );
+    for (flags, flag, standard) in [
+        (&["--pal-blending"][..], "--pal-blending", "NTSC"),
+        (&["--pal", "--artifacting"], "--artifacting", "PAL"),
+    ] {
+        let mut args = vec!["--headless", "--frames", "1"];
+        args.extend(flags);
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{flags:?}: exit status");
+        let message = stderr(&output);
+        assert!(
+            message.contains(flag) && message.contains(&format!("the machine is {standard}")),
+            "{flags:?}: {message}"
+        );
+    }
 }
