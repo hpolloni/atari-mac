@@ -137,7 +137,7 @@ file error.
 
 | Requirement | Test |
 | --- | --- |
-| REQ-002 | `crates/harness/tests/boot.rs` `frame_length_matches_standard` (criteria 1, 2), `default_standard_is_ntsc` (criterion 3) |
+| REQ-002 | `crates/harness/tests/boot.rs` `frame_length_matches_standard` (criteria 1, 2), `default_standard_is_ntsc` (criterion 3); `tests/cli.rs` `pal_flag_selects_pal` (criterion 4) |
 | REQ-003 | `crates/harness/tests/harness_self_test.rs` `free_roms_have_expected_sizes`, `no_rom_is_tracked_by_git` |
 | REQ-004 | `crates/harness/tests/boot.rs` `accepts_user_roms`, `rejects_rom_with_wrong_size`; `tests/cli.rs` `rejects_bad_os_rom` |
 | REQ-005 | `crates/harness/tests/boot.rs` `boots_to_basic_ready` |
