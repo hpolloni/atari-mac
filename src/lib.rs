@@ -69,8 +69,14 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
     };
     if options.frames.is_some() {
         let seconds = elapsed.as_secs_f64();
-        writeln!(out, "{} frames in {seconds:.3} s", frontend.frames_run())
-            .map_err(FrontendError::Output)?;
+        writeln!(
+            out,
+            "{} frames in {seconds:.3} s ({}, last frame {} cycles)",
+            frontend.frames_run(),
+            cli::standard_name(frontend.machine().standard()),
+            frontend.last_frame_cycles()
+        )
+        .map_err(FrontendError::Output)?;
     }
     if let Some(path) = &options.screenshot {
         let machine = frontend.machine();

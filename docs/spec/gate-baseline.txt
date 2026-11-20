@@ -74,8 +74,6 @@ REQ-047 docs/design/README.md: `REQ-599` names no file
 REQ-047 docs/design/README.md: `REQ-699` names no file
 REQ-047 docs/design/antic.md: `REQ-199` names no file
 REQ-047 docs/design/antic.md: `REQ-299` names no file
-REQ-047 docs/design/architecture.md: `REQ-019` names no file
-REQ-047 docs/spec/README.md: `REQ-019` names no file
 REQ-047 docs/spec/README.md: `REQ-039` names no file
 REQ-047 docs/spec/README.md: `REQ-099` names no file
 REQ-047 docs/spec/README.md: `REQ-199` names no file

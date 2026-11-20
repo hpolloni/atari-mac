@@ -197,6 +197,8 @@ pub struct Frontend {
     paused: bool,
     /// The number of frames that [`Frontend::step`] ran.
     frames_run: u64,
+    /// The number of machine cycles of the last frame that ran.
+    last_frame_cycles: u64,
 }
 
 impl Frontend {
@@ -208,6 +210,7 @@ impl Frontend {
             input: InputState::default(),
             paused: false,
             frames_run: 0,
+            last_frame_cycles: 0,
         }
     }
 
@@ -234,6 +237,21 @@ impl Frontend {
         self.frames_run
     }
 
+    /// The number of machine cycles of the last frame that [`Frontend::step`] or
+    /// [`Frontend::run_frames`] ran (REQ-002 criterion 4), or 0 before the first frame.
+    #[must_use]
+    pub const fn last_frame_cycles(&self) -> u64 {
+        self.last_frame_cycles
+    }
+
+    /// Runs one frame and counts it.
+    fn run_frame(&mut self) {
+        let start = self.machine.cycle_count();
+        self.machine.run_frame();
+        self.last_frame_cycles = self.machine.cycle_count() - start;
+        self.frames_run += 1;
+    }
+
     /// One host frame: sends the host keys that are down to the machine, then runs one
     /// frame unless the emulation is paused.
     pub fn step(&mut self, keys: &[Key]) -> Flow {
@@ -244,8 +262,7 @@ impl Frontend {
         self.apply(&input);
         self.input = input;
         if !self.paused {
-            self.machine.run_frame();
-            self.frames_run += 1;
+            self.run_frame();
         }
         Flow::Continue
     }
@@ -253,9 +270,8 @@ impl Frontend {
     /// Runs `frames` frames without input (headless mode, REQ-013).
     pub fn run_frames(&mut self, frames: u64) {
         for _ in 0..frames {
-            self.machine.run_frame();
+            self.run_frame();
         }
-        self.frames_run += frames;
     }
 
     /// Sends the changes from the last input to `input` to the machine.
@@ -483,6 +499,11 @@ mod tests {
         frontend.run_frames(3);
         assert_eq!(frontend.machine().frame_count(), 4, "headless frames");
         assert_eq!(frontend.frames_run(), 4, "all frames counted");
+        assert_eq!(
+            frontend.last_frame_cycles(),
+            u64::from(VideoStandard::Ntsc.cycles_per_frame()),
+            "cycles of the last frame"
+        );
     }
 
     #[test]

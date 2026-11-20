@@ -124,8 +124,10 @@ NTSC machine it calls `palette::artifact_ntsc_row`, with PAL blending on a PAL m
 `palette::pal_blend_row` for rows 1-239 (row 0 is not blended, OI-021), and else
 `palette::rgb`. The window (`render`) and the screenshot (`write_png`) both use it.
 `cli::check_filters` rejects a filter for the other video standard with a usage error (exit
-status 2) that names the flag and the standard. `Options::standard` is NTSC: the command line
-has no option to select PAL yet.
+status 2) that names the flag and the standard. `--pal` sets `Options::standard` to PAL
+(REQ-002 criterion 4); without it the machine is NTSC. With `--frames`, the run time line also
+names the video standard and the cycles of the last frame, for example
+`50 frames in 0.120 s (PAL, last frame 35568 cycles)`.
 
 ## Error handling
 
@@ -144,7 +146,7 @@ file error.
 | REQ-006 | `crates/harness/tests/boot.rs` `option_key_disables_basic`, `basic_is_mapped_without_option` |
 | REQ-012 | `tests/cli.rs` `loads_cart_xex_and_disk` (criterion 1), `rejects_bad_cart_xex_and_disk` (criterion 2) |
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
-| REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5, NTSC machine); `src/cli.rs` unit test `filter_flags_and_standards` (5, also a PAL machine); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
+| REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
 | REQ-007, REQ-011 | Demonstration: the commands in the acceptance criteria |
 | REQ-008 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-008.md` |
 | REQ-009 | `src/keymap.rs` unit tests `every_table_entry_maps`, `every_atari_key_has_a_host_key` |
