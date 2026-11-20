@@ -20,8 +20,9 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | planned | 12 | 16 | 0 | 0 |
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 4 | 32 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | planned | 23 | 2 | 0 | 4 |
+| [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | in-progress | 0 | 0 | 1 | 0 |
 
-All 271 requirements: 199 tested, 65 pending, 0 missing, 7 not a test requirement. Open items with the status `open`: 19.
+All 272 requirements: 199 tested, 65 pending, 1 missing, 7 not a test requirement. Open items with the status `open`: 19.
 
 <!-- END GENERATED: status -->
 

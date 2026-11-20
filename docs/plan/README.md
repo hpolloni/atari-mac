@@ -18,5 +18,6 @@ implements, the work packages, and the conditions that tell when it is done.
 | [SLICE-04](SLICE-04.md) | Cartridges, executable files, joysticks and paddles | Planned |
 | [SLICE-05](SLICE-05.md) | Disk drive D1: with ATR images (needs SLICE-04) | Planned |
 | [SLICE-06](SLICE-06.md) | Exact interrupt and PIA timing, power-on state, save states and product qualities | Planned |
+| [SLICE-07](SLICE-07.md) | Run a BASIC program from a text file with `--bas` | In progress |
 
 Each requirement that is not withdrawn is in exactly one work package (REQ-050). SLICE-02 to SLICE-05 are independent of each other, except that SLICE-05 needs SLICE-04.
