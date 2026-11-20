@@ -48,6 +48,15 @@ macOS frontend is the root crate `atari-mac`. `README.md` gives the layout and t
    (`docs/plan/SLICE-NN.md`). A package or a slice is `done` only when each `test`
    requirement has a test that runs.
 
+### Small changes
+
+- The full order above is for new features and for hardware behavior.
+- A change that stays inside one existing requirement gets one edit to that requirement, at
+  most one new test name in its test plan row, and one teammate. It needs no new design
+  section, no new slice and no measurement study.
+- Ask the user only when the options give different behavior that the user sees. Do not ask
+  how to do something that the user already asked for. Pick the obvious way and say so.
+
 ## Gates
 
 - `make check` runs every gate (more than 10 minutes). `make pre-commit` is the minimum for
