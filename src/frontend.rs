@@ -387,6 +387,77 @@ impl Pacer {
     }
 }
 
+/// The host time after which the window shows the next frame in turbo (REQ-080).
+///
+/// While the window types a BASIC program (criterion 7), one frame and one window update
+/// take much less than 50 ms, so the window shows a frame at least every 100 ms.
+pub const TURBO_PRESENT_INTERVAL: Duration = Duration::from_millis(50);
+
+/// What the window does after a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AfterFrame {
+    /// Show the frame in the window.
+    pub present: bool,
+    /// The time to wait before the next frame.
+    pub wait: Duration,
+}
+
+/// The frame pacing of the window: real time or turbo.
+///
+/// Real time is [`Pacer`] (REQ-007). Turbo is used while a BASIC program is typed (REQ-080
+/// criterion 7). In turbo, the frames run without a wait, and the
+/// window shows a frame each [`TURBO_PRESENT_INTERVAL`] of host time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pacing {
+    /// The video standard, for a new [`Pacer`] after turbo.
+    standard: VideoStandard,
+    /// The real-time pacing.
+    pacer: Pacer,
+    /// The time at which the window showed a frame last.
+    last_present: Instant,
+    /// The last frame ran in turbo.
+    turbo: bool,
+}
+
+impl Pacing {
+    /// Starts the pacing at `now`, when the window shows its first frame.
+    #[must_use]
+    pub fn new(standard: VideoStandard, now: Instant) -> Self {
+        Self {
+            standard,
+            pacer: Pacer::new(standard, now),
+            last_present: now,
+            turbo: false,
+        }
+    }
+
+    /// Called at `now`, after a frame. `turbo` is `true` while the BASIC program is typed
+    /// ([`Frontend::typist`]). After turbo, the real-time pacing starts again from `now`.
+    pub fn after_frame(&mut self, turbo: bool, now: Instant) -> AfterFrame {
+        if turbo {
+            self.turbo = true;
+            let present =
+                now.saturating_duration_since(self.last_present) >= TURBO_PRESENT_INTERVAL;
+            if present {
+                self.last_present = now;
+            }
+            return AfterFrame {
+                present,
+                wait: Duration::ZERO,
+            };
+        }
+        if self.turbo {
+            self.turbo = false;
+            self.pacer = Pacer::new(self.standard, now);
+        }
+        self.last_present = now;
+        AfterFrame {
+            present: true,
+            wait: self.pacer.wait(now),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
@@ -400,10 +471,10 @@ mod tests {
     use minifb::Key;
 
     use super::{
-        DisplayFilters, Flow, Frontend, Pacer, convert_row, load_machine, render, window_size,
-        window_title,
+        DisplayFilters, Flow, Frontend, Pacer, Pacing, TURBO_PRESENT_INTERVAL, convert_row,
+        load_machine, render, window_size, window_title,
     };
-    use crate::bas::{READY_TIMEOUT_FRAMES, Typist};
+    use crate::bas::{CH, READY_TIMEOUT_FRAMES, Typist, program_codes};
     use crate::cli::Options;
     use crate::error::FrontendError;
 
@@ -614,6 +685,75 @@ mod tests {
             Flow::Quit,
             "quit while typing"
         );
+    }
+
+    /// Verifies REQ-080: in the window, the frames run without the real-time pacing from the
+    /// start of the machine until the typing is done, a frame is shown at least every 100 ms
+    /// of host time, and then the frames run at real-time speed again (criterion 7).
+    ///
+    /// The test drives `Frontend::step` and `Pacing::after_frame` as the window loop does,
+    /// with a fake clock: each frame takes 3 ms of host time. The machine has no OS; the
+    /// `Ready` row and an empty `CH` are written to its RAM.
+    #[test]
+    fn bas_turbo_until_typed() {
+        let mut machine = machine();
+        machine.poke_ram(0x58, 0x00);
+        machine.poke_ram(0x59, 0x10);
+        for (i, code) in [0x32, 0x65, 0x61, 0x64, 0x79].into_iter().enumerate() {
+            machine.poke_ram(0x1000 + u16::try_from(i).unwrap(), code);
+        }
+        machine.poke_ram(CH, 0xFF);
+        let codes = program_codes(Path::new("p.bas"), "10 PRINT \"AA11\"\n", true).unwrap();
+        let mut frontend = Frontend::new(machine).with_typist(Typist::new(codes));
+        let frame_time = Duration::from_millis(3);
+        let start = Instant::now();
+        let mut pacing = Pacing::new(VideoStandard::Ntsc, start);
+        let period = Pacer::new(VideoStandard::Ntsc, start).period();
+        let mut clock = start;
+        let mut last_present = start;
+        let mut longest_gap = Duration::ZERO;
+        let mut turbo_frames = 0_u32;
+        let mut shown = false;
+        while frontend.typist().is_some() {
+            step(&mut frontend, &[]);
+            clock += frame_time;
+            let after = pacing.after_frame(frontend.typist().is_some(), clock);
+            if frontend.typist().is_some() {
+                turbo_frames += 1;
+                assert_eq!(after.wait, Duration::ZERO, "no wait in turbo");
+            }
+            if after.present {
+                longest_gap = longest_gap.max(clock - last_present);
+                last_present = clock;
+            }
+            shown = after.present;
+            clock += after.wait;
+        }
+        assert!(turbo_frames > 40, "the typing took {turbo_frames} frames");
+        assert!(
+            clock - start < period * turbo_frames / 4,
+            "turbo is faster than real time: {:?}",
+            clock - start
+        );
+        assert!(
+            longest_gap >= TURBO_PRESENT_INTERVAL && longest_gap <= Duration::from_millis(100),
+            "a frame at least every 100 ms: {longest_gap:?}"
+        );
+        assert!(shown, "the frame after the typing is shown");
+        // Real-time speed again: each frame is shown, and a frame takes one period.
+        for frame in 0..10 {
+            let before = clock;
+            step(&mut frontend, &[]);
+            clock += frame_time;
+            let after = pacing.after_frame(frontend.typist().is_some(), clock);
+            assert!(after.present, "frame {frame} is shown");
+            clock += after.wait;
+            assert!(
+                (clock - before).abs_diff(period) < Duration::from_micros(1),
+                "frame {frame} takes one period: {:?}",
+                clock - before
+            );
+        }
     }
 
     /// While paused, `Machine::frame_count` does not change for 60 host frames.

@@ -4,12 +4,16 @@
 //! and checks the whole file before the machine starts, and gives the key codes to type.
 //! [`Typist`] types them one frame at a time: the frontend calls [`Typist::before_frame`]
 //! before each frame, so the window keeps showing frames while the program is typed.
+//!
+//! The key timing is the shortest timing that `AltirraOS` accepts without a lost or doubled
+//! key (REQ-080 criteria 9 and 10): see [`KEY_DOWN_FRAMES`], [`KEY_UP_FRAMES`],
+//! [`SAME_KEY_UP_FRAMES`] and [`CH`]. It is not the timing of the harness `type_text`.
 
 use std::fs;
 use std::path::Path;
 
 use atari_core::Machine;
-use atari_core::keyboard::{KEY_DOWN_FRAMES, KEY_UP_FRAMES, RETURN, ascii_to_kbcode};
+use atari_core::keyboard::{RETURN, ascii_to_kbcode};
 use atari_core::screen::has_row;
 
 use crate::error::FrontendError;
@@ -19,6 +23,39 @@ pub const READY: &str = "Ready";
 
 /// The frames that the typist waits for [`READY`] before it stops (REQ-080 criterion 6).
 pub const READY_TIMEOUT_FRAMES: u32 = 600;
+
+/// Frames that each key is held down. POKEY registers a key after 64 to 128 scanlines
+/// (REQ-518), so one frame (262 or 312 scanlines) is enough.
+pub const KEY_DOWN_FRAMES: u32 = 1;
+
+/// Frames that the key is up before the next key, when the next key is a different key.
+/// POKEY registers the release after 64 to 128 scanlines (REQ-518).
+pub const KEY_UP_FRAMES: u32 = 1;
+
+/// Frames that the key is up before the same key code again.
+///
+/// The OS keyboard interrupt ignores the key code of the last key while its debounce
+/// counter `KEYDEL` (`$02F1`) is not 0. The OS sets `KEYDEL` to 3 when it accepts a key, and
+/// the vertical blank interrupt counts it down only when it sees no key down. A frame starts
+/// at the vertical blank, so the first VBI after the release still sees the key down; with
+/// 3 frames up, `KEYDEL` is 0 when the next press comes (measured: 2 frames lose the second
+/// key).
+pub const SAME_KEY_UP_FRAMES: u32 = 3;
+
+/// The OS variable `CH` (`$02FC`): the last key code, or `$FF` after the editor read it.
+///
+/// The OS has no key buffer: a key that comes while `CH` holds a key replaces it. So
+/// after each key, the typist waits until `CH` is `$FF` (for example while BASIC stores a
+/// line after RETURN), then it presses the next key.
+pub const CH: u16 = 0x02FC;
+
+/// The value of [`CH`] when no key waits.
+const CH_EMPTY: u8 = 0xFF;
+
+/// The frames that the typist waits for [`CH`] to be `$FF` after the key timing
+/// of a key. Then it types the next key, so a program that does not read the keyboard
+/// cannot stop the typing.
+pub const KEY_READ_TIMEOUT_FRAMES: u32 = 120;
 
 /// The text typed after the program, unless `--no-run`.
 const RUN: &str = "RUN";
@@ -80,7 +117,8 @@ pub fn load(path: &Path, run: bool) -> Result<Vec<u8>, FrontendError> {
 pub enum Phase {
     /// It waits for the `Ready` prompt; the value is the number of frames that ran.
     WaitReady(u32),
-    /// It types key `index`; `tick` is the frame within the key (down, then up).
+    /// It types key `index`; `tick` is the frame within the key (down, up, then the wait
+    /// for the OS to read the key).
     Typing {
         /// The index of the key code.
         index: usize,
@@ -95,9 +133,11 @@ pub enum Phase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NotReady;
 
-/// Types key codes on the machine, one frame at a time, with the key timing of the harness
-/// `type_text` (REQ-025): each key down for [`KEY_DOWN_FRAMES`] frames, then up for
-/// [`KEY_UP_FRAMES`] frames.
+/// Types key codes on the machine, one frame at a time.
+///
+/// Each key is down for [`KEY_DOWN_FRAMES`] frames, then up for [`KEY_UP_FRAMES`] frames
+/// ([`SAME_KEY_UP_FRAMES`] before the same key code again), then until the OS has read the
+/// key ([`CH`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Typist {
     /// The key codes to type.
@@ -146,6 +186,11 @@ impl Typist {
             }
         }
         if let Phase::Typing { index, tick } = self.phase {
+            let (index, tick) = if self.key_done(machine, index, tick) {
+                (index + 1, 0)
+            } else {
+                (index, tick)
+            };
             let Some(&code) = self.codes.get(index) else {
                 self.phase = Phase::Done;
                 return Ok(());
@@ -155,19 +200,29 @@ impl Typist {
             } else if tick == KEY_DOWN_FRAMES {
                 machine.key_up();
             }
-            let tick = tick + 1;
-            self.phase = if tick < KEY_DOWN_FRAMES + KEY_UP_FRAMES {
-                Phase::Typing { index, tick }
-            } else if index + 1 < self.codes.len() {
-                Phase::Typing {
-                    index: index + 1,
-                    tick: 0,
-                }
-            } else {
-                Phase::Done
+            self.phase = Phase::Typing {
+                index,
+                tick: tick + 1,
             };
         }
         Ok(())
+    }
+
+    /// The frames that key `index` is up: [`SAME_KEY_UP_FRAMES`] when the next key has the
+    /// same code, else [`KEY_UP_FRAMES`].
+    fn up_frames(&self, index: usize) -> u32 {
+        if self.codes.get(index + 1) == self.codes.get(index) {
+            SAME_KEY_UP_FRAMES
+        } else {
+            KEY_UP_FRAMES
+        }
+    }
+
+    /// `true` when key `index` at frame `tick` is typed: it was down and up, and the OS read
+    /// it ([`CH`] is empty) or [`KEY_READ_TIMEOUT_FRAMES`] frames passed.
+    fn key_done(&self, machine: &Machine, index: usize, tick: u32) -> bool {
+        let typed = KEY_DOWN_FRAMES + self.up_frames(index);
+        tick >= typed && (machine.peek(CH) == CH_EMPTY || tick >= typed + KEY_READ_TIMEOUT_FRAMES)
     }
 }
 
@@ -175,10 +230,13 @@ impl Typist {
 mod tests {
     use std::path::Path;
 
-    use atari_core::keyboard::{DIGIT_1, KEY_DOWN_FRAMES, KEY_UP_FRAMES, RETURN, ascii_to_kbcode};
+    use atari_core::keyboard::{DIGIT_1, RETURN, ascii_to_kbcode};
     use atari_core::{Machine, MachineConfig, VideoStandard};
 
-    use super::{NotReady, Phase, READY_TIMEOUT_FRAMES, Typist, program_codes};
+    use super::{
+        CH, KEY_DOWN_FRAMES, KEY_READ_TIMEOUT_FRAMES, KEY_UP_FRAMES, NotReady, Phase,
+        READY_TIMEOUT_FRAMES, SAME_KEY_UP_FRAMES, Typist, program_codes,
+    };
     use crate::error::FrontendError;
 
     fn machine() -> Machine {
@@ -236,34 +294,98 @@ mod tests {
         assert_eq!(typist.before_frame(&mut machine), Err(NotReady), "timeout");
     }
 
-    /// After `Ready`, each key is down for 3 frames and up for 3 frames.
-    #[test]
-    fn typist_key_timing() {
+    /// A machine without an OS, with `Ready` (internal codes) in row 0 of a screen at
+    /// `$1000`, and with `CH` = `$FF` (no key waits).
+    fn ready_machine() -> Machine {
         let mut machine = machine();
-        // A screen at $1000 with `Ready` (internal codes) in row 0.
         machine.poke_ram(0x58, 0x00);
         machine.poke_ram(0x59, 0x10);
         for (i, code) in [0x32, 0x65, 0x61, 0x64, 0x79].into_iter().enumerate() {
             machine.poke_ram(0x1000 + u16::try_from(i).unwrap(), code);
         }
-        let mut typist = Typist::new(vec![DIGIT_1, RETURN]);
+        machine.poke_ram(CH, 0xFF);
+        machine
+    }
+
+    /// The phases of `typist` after each call of `before_frame`, until it is done. `on_frame`
+    /// can change the machine before each call.
+    fn run_typist(
+        machine: &mut Machine,
+        typist: &mut Typist,
+        mut on_frame: impl FnMut(usize, &mut Machine),
+    ) -> Vec<Phase> {
         let mut phases = Vec::new();
         while !typist.done() {
-            typist.before_frame(&mut machine).unwrap();
+            on_frame(phases.len(), machine);
+            typist.before_frame(machine).unwrap();
             phases.push(typist.phase());
         }
-        let per_key = usize::try_from(KEY_DOWN_FRAMES + KEY_UP_FRAMES).unwrap();
-        assert_eq!(phases.len(), 2 * per_key, "frames for two keys");
+        phases
+    }
+
+    /// After `Ready`, each key is down for 1 frame and up for 1 frame, and up for 3 frames
+    /// before the same key code again.
+    #[test]
+    fn typist_key_timing() {
+        let mut machine = ready_machine();
+        let mut typist = Typist::new(vec![DIGIT_1, DIGIT_1, RETURN]);
+        let phases = run_typist(&mut machine, &mut typist, |_, _| {});
+        let first = usize::try_from(KEY_DOWN_FRAMES + SAME_KEY_UP_FRAMES).unwrap();
+        let other = usize::try_from(KEY_DOWN_FRAMES + KEY_UP_FRAMES).unwrap();
+        assert_eq!((first, other), (4, 2), "the timing");
+        assert_eq!(phases.len(), first + 2 * other + 1, "frames for three keys");
         assert_eq!(phases[0], Phase::Typing { index: 0, tick: 1 }, "first key");
         assert_eq!(
-            phases[per_key],
+            phases[first],
             Phase::Typing { index: 1, tick: 1 },
-            "second key"
+            "the same key again after 3 frames up"
         );
+        assert_eq!(
+            phases[first + other],
+            Phase::Typing { index: 2, tick: 1 },
+            "a different key after 1 frame up"
+        );
+        assert_eq!(typist.phase(), Phase::Done, "done");
         assert_eq!(typist.before_frame(&mut machine), Ok(()), "done stays done");
         assert!(
             Typist::new(Vec::new()).phase() == Phase::WaitReady(0),
             "new"
+        );
+        let mut empty = Typist::new(Vec::new());
+        assert_eq!(
+            run_typist(&mut machine, &mut empty, |_, _| {}),
+            [Phase::Done],
+            "no key"
+        );
+    }
+
+    /// The next key waits until the OS read the key (`CH` = `$FF`), or until the timeout.
+    #[test]
+    fn typist_waits_for_the_key_to_be_read() {
+        let mut machine = ready_machine();
+        let mut typist = Typist::new(vec![DIGIT_1, RETURN]);
+        // The OS reads the first key 10 frames after it is pressed.
+        let phases = run_typist(&mut machine, &mut typist, |frame, machine| match frame {
+            1 => machine.poke_ram(CH, DIGIT_1),
+            10 => machine.poke_ram(CH, 0xFF),
+            _ => {}
+        });
+        assert_eq!(
+            phases[10],
+            Phase::Typing { index: 1, tick: 1 },
+            "the second key after CH is $FF"
+        );
+
+        let mut machine = ready_machine();
+        machine.poke_ram(CH, DIGIT_1);
+        let mut typist = Typist::new(vec![DIGIT_1, RETURN]);
+        let phases = run_typist(&mut machine, &mut typist, |_, _| {});
+        let wait =
+            usize::try_from(KEY_DOWN_FRAMES + KEY_UP_FRAMES + KEY_READ_TIMEOUT_FRAMES).unwrap();
+        assert_eq!(
+            phases[wait],
+            Phase::Typing { index: 1, tick: 1 },
+            "the second key after the timeout"
         );
     }
 }
