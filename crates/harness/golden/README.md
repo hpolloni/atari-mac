@@ -13,6 +13,7 @@ image once, and this table records the review.
 | `fine-scroll.png` | `golden_fine_scroll`: modes 2 and D, each without scrolling, with `HSCROL` = 2 and with `VSCROL` = 1, NTSC | 2026-11-19, user | `df7697e` | Pass |
 | `players-missiles.png` | `golden_players_missiles`: four players (normal, double, quad, double width), each a box with a cross, and four missiles (normal, double, quad, normal), in four `PRIOR` bands `$01`, `$02`, `$04`, `$08`; in each band one row of boxes over the background and one over mode D stripes; single line resolution (8 lines high) above, double line (16 lines high) below, NTSC | 2026-11-19, user | `657d6d8` | Pass: the boxes, sizes, resolutions and priority bands are as described (the first version of this test was not readable; see the commit history) |
 | `gtia-modes.png` | `golden_gtia_modes`: mode F pixel values 0 to 15 with `PRIOR` `$00`, `$40` (mode 9), `$80` (mode 10), `$C0` (mode 11), NTSC | 2026-11-19, user | `df7697e` | Pass |
+| `pong-scene.png` | `golden_pong_scene`: black background, white top and bottom walls (mode D, 4 scan lines each, playfield width), a dashed center line (2 color clocks, 4 lines on, 4 off), paddles of player 0 (`HPOSP0` `$38`) and player 1 (`HPOSP1` `$C6`), 2 color clocks by 32 scan lines, and a ball of missile 2 (`HPOSM2` `$83`), 2 color clocks by 4 scan lines, at the vertical center and 4 color clocks right of the center line, NTSC | pending user review | | |
 
 The PAL hue depends on the palette parameters (OI-023). When OI-023 is decided, check
 `boot-ready-pal.png` again.

@@ -745,3 +745,98 @@ fn golden_gtia_modes() {
         panic!("gtia-modes: {error}");
     }
 }
+
+/// Verifies REQ-026: a scene with two paddles and a ball (NTSC) is equal to the reference
+/// PNG. Over a black background, a mode D playfield shows a top wall and a bottom wall
+/// (4 scan lines each, the normal playfield width, color clocks `$30-$CF`) and a dashed
+/// center line (color clocks `$7F-$80`, 4 scan lines on, 4 off). Player 0 (`HPOSP0` `$38`)
+/// and player 1 (`HPOSP1` `$C6`) are paddles of 2 color clocks by 32 scan lines, mirrored
+/// about the center, and missile 2 (`HPOSM2` `$83`) is a ball of 2 color clocks by 4 scan
+/// lines at the vertical center, 4 color clocks right of the horizontal center. Single line
+/// resolution, all objects color `$0E`.
+#[test]
+fn golden_pong_scene() {
+    /// The first scan line of the top wall (24 to 27). The field between the walls is scan
+    /// lines 28 to 211, and the bottom wall is scan lines 212 to 215.
+    const TOP_WALL: usize = 24;
+    /// The mode D lines (2 scan lines each) between the walls.
+    const FIELD_LINES: usize = 92;
+    /// The first scan line of each paddle: 32 scan lines (104 to 135), centered about the
+    /// field center (between scan lines 119 and 120).
+    const PADDLE: usize = 104;
+    /// The first scan line of the ball: 4 scan lines (118 to 121), centered about the same
+    /// point.
+    const BALL: usize = 118;
+
+    // Playfield: two blank groups (scan lines 8 to 23), the top wall (2 mode D lines of
+    // PF0), the field (mode D lines off, on, on, off for each 8 scan lines, so that the
+    // dashes are at 30-33, 38-41, ... 206-209), and the bottom wall.
+    let mut s = Screen::default();
+    s.blank(8);
+    s.blank(8);
+    let wall = vec![0x55; 40];
+    // Pixels 79 and 80 (color clocks $7F and $80) are PF0: bits 1-0 of byte 19 and bits
+    // 7-6 of byte 20.
+    let mut dash = vec![0; 40];
+    dash[19] = 0x01;
+    dash[20] = 0x40;
+    let mut rows = vec![wall.clone(), wall.clone()];
+    rows.extend((0..FIELD_LINES).map(|i| {
+        if matches!(i % 4, 1 | 2) {
+            dash.clone()
+        } else {
+            vec![0; 40]
+        }
+    }));
+    rows.extend([wall.clone(), wall]);
+    assert_eq!(
+        TOP_WALL + 2 * rows.len(),
+        216,
+        "the bottom wall ends at 215"
+    );
+    s.band(0xD, &rows);
+
+    // Single line resolution (PMBASE `$50`): missiles at `$300`, player n at `$400` + n *
+    // `$100`, one byte for each scan line.
+    let mut pm = vec![0_u8; 0x800];
+    for line in PADDLE..PADDLE + 32 {
+        pm[0x400 + line] = 0xC0;
+        pm[0x500 + line] = 0xC0;
+    }
+    for line in BALL..BALL + 4 {
+        // Missile 2: bits 5-4.
+        pm[0x300 + line] = 0x30;
+    }
+    let [_, pm_base] = le(PM_ADDR);
+
+    let mut init = base_init(0x3E);
+    init.extend([
+        (COLPF0, 0x0E),
+        (COLBK, 0x00),
+        (COLPM0, 0x0E),
+        (COLPM0 + 1, 0x0E),
+        (COLPM0 + 2, 0x0E),
+        (PMBASE, pm_base),
+        (GRACTL, 0x03),
+        (PRIOR, 0x00),
+        // P0 at color clocks $38-$39 and P1 at $C6-$C7: 8 color clocks from each playfield
+        // edge, mirrored about the center $80 ($80 - $38 = $C8 - $80).
+        (HPOSP0, 0x38),
+        (HPOSP0 + 1, 0xC6),
+        (SIZEP0, 0),
+        (SIZEP0 + 1, 0),
+        // M2 at color clocks $83-$84, normal width.
+        (HPOSM0 + 2, 0x83),
+        (SIZEM, 0x00),
+    ]);
+    let code = program(&init, &[]);
+    if let Err(error) = golden_screen(
+        "pong-scene",
+        VideoStandard::Ntsc,
+        &code,
+        s,
+        &[(PM_ADDR, pm)],
+    ) {
+        panic!("pong-scene: {error}");
+    }
+}

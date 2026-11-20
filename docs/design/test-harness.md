@@ -179,7 +179,7 @@ withdrawn. It writes the matrix to `target/traceability.md`. A work package sets
 | REQ-023 | `cpu_single_step.rs` `single_step_bus_cycles`. The other single-step tests in that file also use the runner, but they verify CPU requirements (`docs/design/cpu.md`). |
 | REQ-024 | `tests/harness_self_test.rs` `screen_text_has_24_rows_of_40`, `internal_to_ascii_values` |
 | REQ-025 | `tests/keyboard.rs` `basic_prints_sum`, `type_text_rejects_unknown_character` |
-| REQ-026 | `tests/golden.rs` `boot_screen_matches_golden` (the BASIC `Ready` screen in NTSC and in PAL), `golden_paths_and_reference_files`, `difference_writes_failure_images`, `wrong_size_or_missing_reference_fails`, `update_mode_writes_reference`, `frame_to_rgb_uses_palette`, `golden_antic_modes_ntsc`, `golden_antic_modes_pal`, `golden_fine_scroll`, `golden_players_missiles`, `golden_gtia_modes` (SLICE-02 test screens) |
+| REQ-026 | `tests/golden.rs` `boot_screen_matches_golden` (the BASIC `Ready` screen in NTSC and in PAL), `golden_paths_and_reference_files`, `difference_writes_failure_images`, `wrong_size_or_missing_reference_fails`, `update_mode_writes_reference`, `frame_to_rgb_uses_palette`, `golden_antic_modes_ntsc`, `golden_antic_modes_pal`, `golden_fine_scroll`, `golden_players_missiles`, `golden_gtia_modes` (SLICE-02 test screens), `golden_pong_scene` (two paddles and a ball) |
 | REQ-027 | `tests/traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests` |
 
 ## Open issues
