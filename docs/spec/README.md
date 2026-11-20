@@ -25,7 +25,8 @@ These items are out of scope. A requirement must not depend on them.
 ## Rules
 
 1. Write one testable statement in each requirement. Use "shall".
-2. Write in Simplified Technical English (see the project output style).
+2. Write in Simplified Technical English. The rules are in the project output style,
+   [`.claude/output-styles/simplified-technical-english.md`](../../.claude/output-styles/simplified-technical-english.md).
 3. Do not specify the implementation. Put implementation decisions in `docs/design/`.
 4. Give each requirement at least one acceptance criterion that a test can check.
 5. Do not change the ID of a requirement. If a requirement is removed, set its status to
