@@ -63,6 +63,7 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
             &mut frontend,
             &window_title(options.cart.as_deref()),
             options.scale,
+            options.filters,
             frames,
         )?,
     };
@@ -73,7 +74,7 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
     }
     if let Some(path) = &options.screenshot {
         let machine = frontend.machine();
-        write_png(path, machine.frame(), machine.standard())?;
+        write_png(path, machine.frame(), machine.standard(), options.filters)?;
     }
     Ok(())
 }

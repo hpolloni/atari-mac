@@ -148,13 +148,10 @@ const fn write_delay(reg: u8) -> u64 {
     }
 }
 
-/// The shift state mask for a 2-bit size: single, double, single, quadruple (HRM 6.5).
+/// The shift state mask for a 2-bit size: `state' = (state + 1) AND size` (HRM 6.5, REQ-419).
+/// Size `%10` gives single width from state `%00`, and the lockup from states `%01` and `%10`.
 const fn size_mask(size: u8) -> u8 {
-    match size & 3 {
-        1 => 1,
-        3 => 3,
-        _ => 0,
-    }
+    size & 3
 }
 
 impl Gtia {
@@ -268,12 +265,13 @@ impl Gtia {
         self.pm_dma(antic, data_bus);
         let h0 = (2 * antic.cycle + 226) % 228;
         let [left, right] = antic.video;
-        // REQ-433: in mode 10, a `%000` right code gives pixel 8 (background).
-        let pixel = if self.prior >> 6 == 2 && right == AnCode::BACKGROUND {
-            8
-        } else {
-            ((left.bits() & 3) << 2) | (right.bits() & 3)
-        };
+        let mut pixel = ((left.bits() & 3) << 2) | (right.bits() & 3);
+        // REQ-433: in mode 10, a `%000` right code mutes the playfield of the pixel: it gives
+        // pixel 8 (background). Pixel 0 is `P0`, not playfield, so the border stays `P0`
+        // (HRM 6.9, REQ-430).
+        if self.prior >> 6 == 2 && right == AnCode::BACKGROUND && pixel != 0 {
+            pixel = 8;
+        }
         self.color_clock(h0, left, pixel, false);
         self.color_clock(h0 + 1, right, pixel, true);
         self.clock += 2;
@@ -531,41 +529,27 @@ impl Gtia {
         }
     }
 
-    /// The left and right color of one color clock (REQ-408, REQ-424 to REQ-431).
+    /// The left and right color of one color clock (REQ-408, REQ-424 to REQ-431). Missile n
+    /// is the input `Pn`: GTIA ignores `PRIOR` bit 4 (the fifth player is a non-goal,
+    /// OI-019).
     fn color(&self, objects: u8, pf: Playfield, pixel: u8) -> (u8, u8) {
-        let players = objects & 0x0F;
-        let missiles = objects >> 4;
-        let fifth = self.prior & 0x10 != 0;
-        let mut inputs = u16::from(players | pf.players | (u8::from(!fifth) * missiles));
-        inputs |= u16::from(pf.inputs) << 4;
-        if fifth && missiles != 0 {
-            inputs |= 1 << 8;
-        }
+        let players = (objects & 0x0F) | (objects >> 4) | pf.players;
+        let inputs = players | (pf.inputs << 4);
         let mask = self.priority[priority::index(self.prior, inputs)];
-        let (bak, pf3) = match self.prior >> 6 {
-            1 => (self.colbk | pixel, self.colpf[3] | pixel),
-            3 => {
-                let hue = pixel << 4;
-                let bak = if pixel == 0 {
-                    self.colbk & 0xF0
-                } else {
-                    self.colbk | hue
-                };
-                (bak, self.colpf[3] | hue)
-            }
-            _ => (self.colbk, self.colpf[3]),
+        let bak = match self.prior >> 6 {
+            1 => self.colbk | pixel,
+            3 if pixel == 0 => self.colbk & 0xF0,
+            3 => self.colbk | (pixel << 4),
+            _ => self.colbk,
         };
         let mut color = 0;
         for n in 0..4 {
             if mask & (1 << n) != 0 {
                 color |= self.colpm[n];
             }
-            if mask & (0x10 << n) != 0 && n < 3 {
+            if mask & (0x10 << n) != 0 {
                 color |= self.colpf[n];
             }
-        }
-        if mask & priority::PF3 != 0 {
-            color |= pf3;
         }
         if mask & priority::BAK != 0 {
             color |= bak;

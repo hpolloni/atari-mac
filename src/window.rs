@@ -9,11 +9,13 @@ use std::time::{Duration, Instant};
 use minifb::{Window, WindowOptions};
 
 use crate::error::FrontendError;
-use crate::frontend::{Flow, Frontend, Pacer, render, window_size};
+use crate::frontend::{DisplayFilters, Flow, Frontend, Pacer, render, window_size};
 
 /// Shows the machine in a window until the user quits or `frames` frames have run.
 /// Returns the time from the first frame to the end. The time to open the window is not
 /// part of it (REQ-007).
+///
+/// `filters` are the display filters of the window (REQ-019).
 ///
 /// # Errors
 ///
@@ -22,6 +24,7 @@ pub fn run(
     frontend: &mut Frontend,
     title: &str,
     scale: usize,
+    filters: DisplayFilters,
     frames: Option<u64>,
 ) -> Result<Duration, FrontendError> {
     let (width, height) = window_size(scale);
@@ -32,7 +35,13 @@ pub fn run(
     let standard = frontend.machine().standard();
     let mut buffer = Vec::with_capacity(width * height);
     // Show the window before the first frame: the first update takes much longer.
-    render(frontend.machine().frame(), standard, scale, &mut buffer);
+    render(
+        frontend.machine().frame(),
+        standard,
+        filters,
+        scale,
+        &mut buffer,
+    );
     window
         .update_with_buffer(&buffer, width, height)
         .map_err(FrontendError::Window)?;
@@ -42,7 +51,13 @@ pub fn run(
         && frames.is_none_or(|n| frontend.frames_run() < n)
         && frontend.step(&window.get_keys()) == Flow::Continue
     {
-        render(frontend.machine().frame(), standard, scale, &mut buffer);
+        render(
+            frontend.machine().frame(),
+            standard,
+            filters,
+            scale,
+            &mut buffer,
+        );
         window
             .update_with_buffer(&buffer, width, height)
             .map_err(FrontendError::Window)?;

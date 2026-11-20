@@ -4,7 +4,10 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use atari_core::VideoStandard;
+
 use crate::error::FrontendError;
+use crate::frontend::DisplayFilters;
 
 /// The default OS ROM file (the free Altirra OS, see `roms/README.md`).
 pub const DEFAULT_OS_ROM: &str = "roms/altirraos-xl.rom";
@@ -34,6 +37,8 @@ Options:
   --frames <n>         Run n frames, then print the elapsed time and exit
   --headless           No window and no audio (needs --frames)
   --screenshot <file>  At exit, save the last frame as a PNG file
+  --artifacting        NTSC artifacting filter: false colors for hires pixel patterns
+  --pal-blending       PAL chroma blending filter (needs a PAL machine)
   -h, --help           Show this text
 
 Keys: F1 inverse, F2 START, F3 SELECT, F4 OPTION, F5 RESET, F6 HELP, F7 BREAK,
@@ -56,6 +61,10 @@ pub struct Options {
     pub screenshot: Option<PathBuf>,
     /// The window scale.
     pub scale: usize,
+    /// The video standard of the machine. The command line has no option for it: it is NTSC.
+    pub standard: VideoStandard,
+    /// The optional display filters (REQ-019).
+    pub filters: DisplayFilters,
 }
 
 impl Default for Options {
@@ -68,6 +77,8 @@ impl Default for Options {
             frames: None,
             screenshot: None,
             scale: DEFAULT_SCALE,
+            standard: VideoStandard::Ntsc,
+            filters: DisplayFilters::default(),
         }
     }
 }
@@ -128,6 +139,8 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--headless" => options.headless = true,
             "--frames" => options.frames = Some(number(&mut args, "--frames")?),
             "--screenshot" => options.screenshot = Some(value(&mut args, "--screenshot")?.into()),
+            "--artifacting" => options.filters.artifacting = true,
+            "--pal-blending" => options.filters.pal_blending = true,
             "--scale" => {
                 let scale = number(&mut args, "--scale")?;
                 if !(1..=MAX_SCALE).contains(&scale) {
@@ -148,7 +161,36 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
     if options.headless && options.frames.is_none() {
         return Err(usage("--headless needs --frames".to_owned()));
     }
+    check_filters(&options)?;
     Ok(Command::Run(options))
+}
+
+/// The name of a video standard in messages.
+const fn standard_name(standard: VideoStandard) -> &'static str {
+    match standard {
+        VideoStandard::Ntsc => "NTSC",
+        VideoStandard::Pal => "PAL",
+    }
+}
+
+/// Checks that each display filter matches the video standard (REQ-019 criterion 5).
+///
+/// # Errors
+///
+/// [`FrontendError::Usage`] for `--artifacting` on a PAL machine or `--pal-blending` on an
+/// NTSC machine. The message names the flag and the video standard.
+pub fn check_filters(options: &Options) -> Result<(), FrontendError> {
+    let name = standard_name(options.standard);
+    let wrong = |flag: &str, needs: &str| {
+        Err(usage(format!(
+            "{flag} needs {needs} machine, but the machine is {name}"
+        )))
+    };
+    match options.standard {
+        VideoStandard::Pal if options.filters.artifacting => wrong("--artifacting", "an NTSC"),
+        VideoStandard::Ntsc if options.filters.pal_blending => wrong("--pal-blending", "a PAL"),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -156,8 +198,11 @@ mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
-    use super::{Command, Options, parse};
+    use atari_core::VideoStandard;
+
+    use super::{Command, Options, check_filters, parse};
     use crate::error::FrontendError;
+    use crate::frontend::DisplayFilters;
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
@@ -221,6 +266,8 @@ mod tests {
                 frames: Some(180),
                 screenshot: Some("out.png".into()),
                 scale: 3,
+                standard: VideoStandard::Ntsc,
+                filters: DisplayFilters::default(),
             },
             "all options"
         );
@@ -247,6 +294,37 @@ mod tests {
             let error = parse_err(list);
             assert!(error.starts_with(message), "{list:?}: {error}");
         }
+    }
+
+    /// Verifies REQ-019: the flags set the filters, and each filter needs its video standard
+    /// (criterion 5, also for a PAL machine, which the command line cannot select yet).
+    #[test]
+    fn filter_flags_and_standards() {
+        let options = parse_ok(&["--artifacting"]);
+        assert!(options.filters.artifacting, "--artifacting");
+        assert!(!options.filters.pal_blending, "no --pal-blending");
+        assert!(
+            parse_err(&["--pal-blending"])
+                .starts_with("--pal-blending needs a PAL machine, but the machine is NTSC"),
+            "--pal-blending on NTSC"
+        );
+        let pal = |artifacting, pal_blending| Options {
+            standard: VideoStandard::Pal,
+            filters: DisplayFilters {
+                artifacting,
+                pal_blending,
+            },
+            ..Options::default()
+        };
+        assert!(
+            check_filters(&pal(false, true)).is_ok(),
+            "--pal-blending on PAL"
+        );
+        let error = check_filters(&pal(true, false)).map_err(|e| e.to_string());
+        assert!(
+            matches!(&error, Err(m) if m.starts_with("--artifacting needs an NTSC machine, but the machine is PAL")),
+            "--artifacting on PAL: {error:?}"
+        );
     }
 
     #[test]
