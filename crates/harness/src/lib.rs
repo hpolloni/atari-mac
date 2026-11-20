@@ -10,6 +10,7 @@ pub mod data;
 pub mod image;
 pub mod input;
 pub mod screen;
+pub mod sha256;
 pub mod single_step;
 pub mod spec;
 pub mod system;

@@ -14,7 +14,7 @@ mod text;
 
 use core::error::Error;
 use core::fmt;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub use code::tests_in;
@@ -142,6 +142,37 @@ keyword_enum! {
         /// The check failed.
         Fail = "fail",
     }
+}
+
+keyword_enum! {
+    /// The storage of a reference (REQ-046).
+    Storage {
+        /// The file is in git, in `reference/`.
+        Commit = "commit",
+        /// The file is not in git. Its URL and its SHA-256 freeze it, and `make reference`
+        /// downloads it to `reference/pinned/`.
+        Pin = "pin",
+    }
+}
+
+/// A registry entry (`docs/spec/references/<ID>.md`) and its section index (REQ-046).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference {
+    /// The `id` value, for example `HRM`.
+    pub id: String,
+    /// The `storage` value.
+    pub storage: Storage,
+    /// The `url` value.
+    pub url: String,
+    /// The `sha256` value.
+    pub sha256: String,
+    /// The `file` value, relative to the repository root.
+    pub file: String,
+    /// The section index (`<ID>.sections.txt`): each key and its title. Empty for a
+    /// reference without sections.
+    pub sections: BTreeMap<String, String>,
+    /// The registry file, relative to the repository root.
+    pub path: PathBuf,
 }
 
 /// A level-2 section (`## Title`) of a markdown file.
@@ -396,8 +427,8 @@ pub struct Spec {
     pub documents: Vec<Document>,
     /// The `area` values of the ID range table in `docs/spec/README.md`.
     pub areas: BTreeSet<String>,
-    /// The section numbers of `docs/spec/hrm-sections.txt`.
-    pub hrm_sections: BTreeSet<String>,
+    /// The registry entries of `docs/spec/references/`, ordered by file name.
+    pub registry: Vec<Reference>,
     /// The phrases of `docs/spec/vague-words.txt`.
     pub vague_words: Vec<String>,
     /// The frontmatter problems that [`load()`] found. The gates report them.
@@ -544,7 +575,7 @@ pub fn check(spec: &Spec, root: &Path) -> Vec<Violation> {
     let mut all = schema(spec);
     all.extend(structure(spec));
     all.extend(vague_words(spec));
-    all.extend(sources(spec));
+    all.extend(sources(spec, root));
     all.extend(references(spec, root));
     all.extend(test_plans(spec));
     all.extend(trace(spec));

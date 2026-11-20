@@ -7,7 +7,7 @@
 //! # Specification
 //!
 //! The hardware specification is the Altirra Hardware Reference Manual by Avery Lee
-//! (`reference/altirra-hardware-reference.pdf`, downloaded by `scripts/fetch-roms.sh`).
+//! (`reference/altirra-hardware-reference.pdf`, in git; `docs/spec/references/HRM.md`).
 //! Code that implements a hardware behavior cites the manual section in its documentation.
 //!
 //! # Module ownership

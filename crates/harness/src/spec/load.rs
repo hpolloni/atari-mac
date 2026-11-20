@@ -1,14 +1,15 @@
 //! Reads the files of the repository into a [`Spec`].
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use yaml_rust2::{Yaml, YamlLoader};
 
 use super::{
-    Document, Evidence, ItemStatus, OpenItem, Outcome, Package, Priority, Requirement, SliceStatus,
-    Spec, SpecError, Status, TestPlanRow, TestRef, Verification, Violation, code, text,
+    Document, Evidence, ItemStatus, OpenItem, Outcome, Package, Priority, Reference, Requirement,
+    SliceStatus, Spec, SpecError, Status, Storage, TestPlanRow, TestRef, Verification, Violation,
+    code, text,
 };
 use crate::spec::Slice;
 
@@ -35,6 +36,14 @@ const PACKAGE_KEYS: &[&str] = &["id", "status", "requirements"];
 
 /// The keys of an evidence record (REQ-051).
 const EVIDENCE_KEYS: &[&str] = &["requirement", "date", "commit", "method", "result", "by"];
+
+/// The keys of a registry entry frontmatter (REQ-046).
+const REFERENCE_KEYS: &[&str] = &[
+    "id", "title", "edition", "author", "license", "storage", "url", "sha256", "file",
+];
+
+/// The directory of the registry entries and the section indices (REQ-046).
+pub(super) const REFERENCE_DIR: &str = "docs/spec/references";
 
 /// Reads a text file.
 pub(super) fn read(path: &Path) -> Result<String, SpecError> {
@@ -541,6 +550,119 @@ fn areas(root: &Path) -> Result<BTreeSet<String>, SpecError> {
     Ok(out)
 }
 
+/// True if `id` is a valid registry ID: upper-case letters, digits and `-` (REQ-046).
+fn is_reference_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Reads one registry entry and its section index (REQ-046 criteria 1 and 2).
+fn reference(root: &Path, path: &Path) -> Result<(Reference, Vec<Violation>), SpecError> {
+    let text = read(path)?;
+    let rel = relative(root, path);
+    let parts = split(&text);
+    let mut front = Front::parse(&rel, 46, &parts)?;
+    front.keys(REFERENCE_KEYS, &[]);
+    let id = front.id();
+    if front.value("id").is_some() && !is_reference_id(&id) {
+        let line = front.line_of("id");
+        front.problem(
+            line,
+            format!("`id` `{id}` has characters other than upper-case letters, digits and `-`"),
+        );
+    }
+    for key in REFERENCE_KEYS {
+        if front
+            .value(key)
+            .and_then(scalar)
+            .is_some_and(|v| v.trim().is_empty())
+        {
+            let line = front.line_of(key);
+            front.problem(line, format!("`{key}` is empty"));
+        }
+    }
+    let sha256 = front.string("sha256");
+    if front.value("sha256").is_some()
+        && !(sha256.len() == 64 && sha256.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')))
+    {
+        let line = front.line_of("sha256");
+        front.problem(line, "`sha256` is not 64 lower-case hexadecimal digits");
+    }
+    let license = text::sections(&parts.body)
+        .into_iter()
+        .find(|s| s.title == "License");
+    if !license.is_some_and(|s| s.lines.iter().any(|(_, l)| !l.trim().is_empty())) {
+        front.problem(None, "the body has no `## License` section with text");
+    }
+    let (sections, index_problems) = section_index(root, &path.with_extension("sections.txt"))?;
+    let reference = Reference {
+        storage: front.keyword("storage", Storage::VALUES, Storage::parse),
+        url: front.string("url"),
+        file: front.string("file"),
+        sha256,
+        sections,
+        path: rel.clone(),
+        id,
+    };
+    let mut problems = front.problems;
+    problems.extend(index_problems);
+    Ok((reference, problems))
+}
+
+/// Reads a section index: one `<key><TAB><title>` per line, `#` comments (REQ-046
+/// criterion 2). A missing file is a problem and an empty index.
+fn section_index(
+    root: &Path,
+    path: &Path,
+) -> Result<(BTreeMap<String, String>, Vec<Violation>), SpecError> {
+    let rel = relative(root, path);
+    let mut sections = BTreeMap::new();
+    let mut problems = Vec::new();
+    if !path.is_file() {
+        problems.push(Violation::new(
+            46,
+            &rel,
+            None,
+            "the section index does not exist",
+        ));
+        return Ok((sections, problems));
+    }
+    for (number, line) in read(path)?.lines().enumerate() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let problem = match line.split_once('\t') {
+            None => Some("the line has no TAB between the key and the title".to_owned()),
+            Some((key, _)) if key.is_empty() || key.chars().any(char::is_whitespace) => {
+                Some(format!("the key `{key}` is empty or has a space"))
+            }
+            Some((_, title)) if title.trim().is_empty() => Some("the title is empty".to_owned()),
+            Some((key, title)) => sections
+                .insert(key.to_owned(), title.to_owned())
+                .map(|_| format!("the key `{key}` is on more than one line")),
+        };
+        if let Some(message) = problem {
+            problems.push(Violation::new(46, &rel, Some(number + 1), message));
+        }
+    }
+    Ok((sections, problems))
+}
+
+/// Reads the registry entries of `docs/spec/references/`. `README.md` is not an entry.
+fn registry(root: &Path, spec: &mut Spec) -> Result<(), SpecError> {
+    for path in markdown_files(&root.join(REFERENCE_DIR), "")? {
+        if stem(&path) == "README" {
+            continue;
+        }
+        let (item, problems) = reference(root, &path)?;
+        spec.registry.push(item);
+        spec.problems.extend(problems);
+    }
+    Ok(())
+}
+
 /// The lines of a data file without comments and empty lines.
 fn data_lines(root: &Path, rel: &str) -> Result<Vec<String>, SpecError> {
     let text = read(&root.join(rel))?;
@@ -622,10 +744,6 @@ fn test_plan_row(rel: &Path, line: usize, row: &str) -> Option<TestPlanRow> {
 pub fn load(root: &Path) -> Result<Spec, SpecError> {
     let mut spec = Spec {
         areas: areas(root)?,
-        hrm_sections: data_lines(root, "docs/spec/hrm-sections.txt")?
-            .iter()
-            .filter_map(|l| l.split('\t').next().map(str::to_owned))
-            .collect(),
         vague_words: data_lines(root, "docs/spec/vague-words.txt")?,
         ..Spec::default()
     };
@@ -652,6 +770,7 @@ pub fn load(root: &Path) -> Result<Spec, SpecError> {
         spec.evidence.push(item);
         spec.problems.extend(problems);
     }
+    registry(root, &mut spec)?;
     load_documents(root, &mut spec)?;
     Ok(spec)
 }

@@ -5,10 +5,17 @@ its own file: `requirements/REQ-NNN.md`.
 
 ## Sources
 
-The primary hardware source is the Altirra Hardware Reference Manual by Avery Lee (edition of
-2026-01-03). Run `scripts/fetch-roms.sh` to download it to
-`reference/altirra-hardware-reference.pdf`. Each hardware requirement cites a section of this
-manual, for example "HRM 4.9 WSYNC".
+The main hardware source is the Altirra Hardware Reference Manual (HRM) by Avery Lee,
+2026-01-02 edition. It is in git: `reference/altirra-hardware-reference.pdf`. Each hardware
+requirement cites a section of this manual, for example "HRM 4.9 WSYNC".
+
+The other references are second sources (OI-041). Each reference has a registry entry and a
+section index in [`references/`](references/) (REQ-046). The HRM and the Atari 8-Bit FAQ are
+in git ([`reference/`](../../reference/README.md)). The other references are pinned by their
+URL and their SHA-256: `make reference` downloads them to `reference/pinned/`.
+
+The HRM is correct when two references do not agree. A requirement also cites each other
+reference that is relevant to it. Its `Notes` section states each difference from the HRM.
 
 ## Non-goals
 
@@ -64,7 +71,7 @@ title: <short title>
 status: draft            # draft | accepted | withdrawn
 priority: must           # must | should | could
 area: <`area` value from the ID range table>
-source: HRM <section number> <section title>   # or: Project decision
+source: HRM <section number> <section title>; <ID> <key> <title>   # or: Project decision
 verification: test       # test | inspection | demonstration
 depends_on: [REQ-NNN, REQ-NNN]                 # [] if none
 ---
@@ -90,7 +97,18 @@ The emulator shall <one testable statement>.
 The metadata is YAML frontmatter (REQ-043). `title` is the text of the first heading after
 `REQ-NNN: `. `verification` is one of: `test` (an automated test), `inspection` (a review of
 the code or the documents) or `demonstration` (a person runs the emulator and looks at the
-result). A source with more than one HRM section separates the sections with `;`.
+result).
+
+`source` is `Project decision`, or a list of citations separated by `; ` (REQ-046). Each
+citation starts with the ID of a registry entry in [`references/`](references/), for example
+`HRM`. When the section index of the reference has sections, the second word is a key of
+the index (the section number), and the citation can continue with the section title and
+other text, for example `HRM 3.3 Cycle timing (Clock speed, Dead memory cycles)`. Use `,`, not
+`;`, inside a citation. When the index has no sections, the citation is only the ID. Each
+citation names its reference: write `HRM 4.9 WSYNC; HRM 14.6 ANTIC registers`, not
+`HRM 4.9 WSYNC; 14.6 ANTIC registers`. When a source cites the HRM and other references, the
+first citation is an `HRM` citation. A source with citations cannot also say "project
+decision": write the project decision in the `Notes` section.
 
 ## Index
 
@@ -102,7 +120,8 @@ items is in [`open-items/README.md`](open-items/README.md). Both are generated: 
 
 `make spec-check` runs the specification gates of
 [`spec-gates.md`](../design/spec-gates.md) (REQ-043 to REQ-055). The gates read
-[`vague-words.txt`](vague-words.txt) and [`hrm-sections.txt`](hrm-sections.txt).
+[`vague-words.txt`](vague-words.txt), the registry entries in [`references/`](references/)
+and their section indices, for example [`references/HRM.sections.txt`](references/HRM.sections.txt).
 
 The violations that the gates found when they were added are in
 [`gate-baseline.txt`](gate-baseline.txt), one per line. The gates ignore these violations.
