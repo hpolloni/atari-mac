@@ -602,17 +602,25 @@ fn golden_fine_scroll() {
 }
 
 /// Verifies REQ-026: the four players and the four missiles with sizes normal, double and
-/// quad and their own colors, over a mode D playfield of BAK, PF0, PF1 and PF2 stripes,
-/// with `PRIOR` `$01`, `$02`, `$04` and `$08` in four bands, single line resolution in the
-/// upper half and double line resolution in the lower half (NTSC), are equal to the
-/// reference PNG.
+/// quad and their own colors, with `PRIOR` `$01`, `$02`, `$04` and `$08` in four bands,
+/// single line resolution in the upper half and double line resolution in the lower half
+/// (NTSC), are equal to the reference PNG. In each band, each player shows a box with a
+/// cross twice: once over the background, and once over a mode D playfield of BAK, PF0, PF1
+/// and PF2 stripes, where the priority shows.
 #[test]
 fn golden_players_missiles() {
     /// The offset of the double line resolution data (PMBASE `$58`).
     const DOUBLE: usize = 0x800;
+    /// The first scan line of each box with a cross. The boxes are 8 scan lines high in
+    /// single line resolution (the first four) and 16 in double line resolution. The first
+    /// box of each band is over the background, the second over the stripes.
+    const BOXES: [usize; 8] = [32, 48, 80, 96, 128, 148, 176, 196];
+    /// The scan lines of the stripes (start, end exclusive): 4 or more lines above and below
+    /// each second box.
+    const STRIPES: [(usize, usize); 4] = [(44, 60), (92, 108), (144, 168), (192, 216)];
 
-    // Playfield: 96 mode D lines (scan lines 24 to 215) in groups of 8: 6 lines of 4 color
-    // clock stripes BAK, PF0, PF1, PF2, then 2 lines of BAK.
+    // Playfield: 96 mode D lines (scan lines 24 to 215), each of 4 color clock stripes BAK,
+    // PF0, PF1, PF2 (from color clock `$30`) in the `STRIPES` ranges, or of BAK.
     let mut s = Screen::default();
     s.blank(8);
     s.blank(8);
@@ -623,7 +631,8 @@ fn golden_players_missiles() {
         .collect();
     let rows: Vec<Vec<u8>> = (0..96)
         .map(|i| {
-            if i % 8 < 6 {
+            let line = 24 + 2 * i;
+            if STRIPES.iter().any(|&(a, b)| (a..b).contains(&line)) {
                 stripes.clone()
             } else {
                 vec![0; 40]
@@ -632,21 +641,29 @@ fn golden_players_missiles() {
         .collect();
     s.band(0xD, &rows);
 
-    // Each player is a box with a cross (8 rows). Single line resolution (PMBASE `$50`):
-    // scan lines 32 to 111. Double line resolution (PMBASE `$58`): scan lines 128 to 207.
-    // The missiles are 2 bits each (all bits set): scan lines 40 to 103, and 136 to 199.
+    // Each player: a box with a cross (8 bytes) at each line of `BOXES`. Single line
+    // resolution (PMBASE `$50`): one byte for each scan line. Double line resolution (PMBASE
+    // `$58`): one byte for two scan lines, at index line / 2. The missiles (2 bits each, all
+    // bits set) are bars at the same lines as the boxes.
     let shape = [0xFF, 0xC3, 0xA5, 0x99, 0x99, 0xA5, 0xC3, 0xFF];
     let mut pm = vec![0_u8; 0xC00];
-    for n in 0..4 {
-        for line in 32..112 {
-            pm[0x400 + n * 0x100 + line] = shape[line % 8];
-        }
-        for index in 64..104 {
-            pm[DOUBLE + 0x200 + n * 0x80 + index] = shape[index % 8];
+    for (i, &first) in BOXES.iter().enumerate() {
+        for (row, &byte) in shape.iter().enumerate() {
+            if i < 4 {
+                let line = first + row;
+                pm[0x300 + line] = 0xFF;
+                for n in 0..4 {
+                    pm[0x400 + n * 0x100 + line] = byte;
+                }
+            } else {
+                let index = first / 2 + row;
+                pm[DOUBLE + 0x180 + index] = 0xFF;
+                for n in 0..4 {
+                    pm[DOUBLE + 0x200 + n * 0x80 + index] = byte;
+                }
+            }
         }
     }
-    pm[0x300 + 40..0x300 + 104].fill(0xFF);
-    pm[DOUBLE + 0x180 + 68..DOUBLE + 0x180 + 100].fill(0xFF);
     let [_, single_base] = le(PM_ADDR);
     let double_base = single_base + 0x08;
 
@@ -662,22 +679,25 @@ fn golden_players_missiles() {
         (COLPM0 + 3, 0x1E),
         (PMBASE, single_base),
         (GRACTL, 0x03),
-        // P0 normal, P1 double (over the right half of P0), P2 quad, P3 double.
+        // P0 normal ($40-$47), P1 double ($50-$5F), P2 quad ($68-$87), P3 double
+        // ($90-$9F): no player overlaps another.
         (HPOSP0, 0x40),
-        (HPOSP0 + 1, 0x44),
-        (HPOSP0 + 2, 0x70),
-        (HPOSP0 + 3, 0xA8),
+        (HPOSP0 + 1, 0x50),
+        (HPOSP0 + 2, 0x68),
+        (HPOSP0 + 3, 0x90),
         (SIZEP0, 0),
         (SIZEP0 + 1, 1),
         (SIZEP0 + 2, 3),
         (SIZEP0 + 3, 1),
-        // M0 normal, M1 double, M2 quad, M3 normal.
-        (HPOSM0, 0x5C),
-        (HPOSM0 + 1, 0x66),
-        (HPOSM0 + 2, 0x98),
-        (HPOSM0 + 3, 0xC1),
+        // M0 normal ($A8-$A9), M1 double ($AE-$B1), M2 quad ($B6-$BD), M3 normal
+        // ($C4-$C5).
+        (HPOSM0, 0xA8),
+        (HPOSM0 + 1, 0xAE),
+        (HPOSM0 + 2, 0xB6),
+        (HPOSM0 + 3, 0xC4),
         (SIZEM, 0x34),
     ]);
+    // The bands start at scan lines 9, 73, 121 and 169 (VCOUNT * 2 + 1).
     let raster: [(u8, &[(u16, u8)]); 4] = [
         (4, &[(PRIOR, 0x01), (DMACTL, 0x3E), (PMBASE, single_base)]),
         (36, &[(PRIOR, 0x02)]),
