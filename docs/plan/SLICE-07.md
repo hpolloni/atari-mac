@@ -21,6 +21,8 @@ The user starts the emulator with `--bas game.bas`. The emulator boots to `Ready
 | --- | --- | --- |
 | WP-1 | The --bas option | REQ-080 |
 
+On 2026-11-19 the user asked for faster typing: turbo while typing, and the shortest safe key timing (REQ-080 criteria 7, 9 and 10).
+
 ## Done when
 
 1. Each acceptance criterion of REQ-080 has a test that runs.
