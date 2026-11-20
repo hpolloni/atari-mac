@@ -1,24 +1,24 @@
 ---
 id: SLICE-02
 title: Graphics modes and player/missile graphics
-status: in-progress
+status: done
 depends_on: "SLICE-01"
 packages:
   - id: WP-1
     title: ANTIC modes, scrolling and P/M DMA
-    status: in-progress
+    status: done
     requirements: [REQ-306, REQ-307, REQ-311, REQ-315, REQ-316, REQ-317, REQ-318, REQ-324, REQ-325, REQ-326, REQ-327, REQ-328, REQ-329, REQ-330, REQ-334, REQ-335, REQ-337, REQ-339, REQ-340, REQ-341, REQ-343, REQ-344, REQ-345, REQ-346, REQ-347]
   - id: WP-2
     title: GTIA playfield colors, players, priority and GTIA modes
-    status: in-progress
+    status: done
     requirements: [REQ-407, REQ-410, REQ-411, REQ-412, REQ-413, REQ-414, REQ-415, REQ-416, REQ-417, REQ-418, REQ-419, REQ-420, REQ-421, REQ-422, REQ-423, REQ-424, REQ-425, REQ-427, REQ-428, REQ-429, REQ-430, REQ-431, REQ-432, REQ-433, REQ-434, REQ-441]
   - id: WP-3
     title: CPU halt, machine video and golden frames
-    status: in-progress
+    status: done
     requirements: [REQ-002, REQ-019, REQ-026, REQ-125, REQ-126, REQ-127, REQ-213]
   - id: WP-4
     title: README gate
-    status: in-progress
+    status: done
     requirements: [REQ-056]
 ---
 # SLICE-02: Graphics modes and player/missile graphics

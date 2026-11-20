@@ -15,7 +15,7 @@ runs, and `pending` has only planned test stubs.
 | Slice | Title | Status | tested | pending | missing | not a test requirement |
 | --- | --- | --- | --- | --- | --- | --- |
 | [SLICE-01](docs/plan/SLICE-01.md) | Boot to BASIC and type a command | done | 99 | 0 | 0 | 1 |
-| [SLICE-02](docs/plan/SLICE-02.md) | Graphics modes and player/missile graphics | in-progress | 59 | 0 | 0 | 0 |
+| [SLICE-02](docs/plan/SLICE-02.md) | Graphics modes and player/missile graphics | done | 59 | 0 | 0 | 0 |
 | [SLICE-03](docs/plan/SLICE-03.md) | Sound | planned | 2 | 15 | 0 | 2 |
 | [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | planned | 12 | 16 | 0 | 0 |
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 4 | 32 | 0 | 0 |
