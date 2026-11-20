@@ -3,7 +3,7 @@
 ## Scope
 
 This document gives the design of the gates that check the specification, the plan and the
-trace from each requirement to its verification. It covers REQ-027 and REQ-043 to REQ-055.
+trace from each requirement to its verification. It covers REQ-027 and REQ-043 to REQ-056.
 
 ## File formats
 
