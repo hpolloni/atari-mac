@@ -1,8 +1,10 @@
-# Section numbers and titles of the Altirra Hardware Reference Manual (HRM), from its table
-# of contents. The specification cites the edition of 2026-01-03; the title page of the text
-# file says "2026-01-02 Edition". Format: one section per line, number<TAB>title.
-# Made with this command, in the directory that holds `reference/`:
-#   sed -n '/^Table of Contents/,/^Index of Tables/p' reference/altirra-hardware-reference.txt |
+# Section index of the Altirra Hardware Reference Manual (HRM), registry entry HRM.md
+# (REQ-046), from the table of contents of the 2026-01-02 edition. Format: one section per
+# line, key<TAB>title. The key is the section number.
+# Made with these commands, in the repository root (pdftotext is in poppler; the text file
+# is not in git, because `reference/text/` is ignored):
+#   pdftotext -layout reference/altirra-hardware-reference.pdf reference/text/altirra-hardware-reference.txt
+#   sed -n '/^Table of Contents/,/^Index of Tables/p' reference/text/altirra-hardware-reference.txt |
 #     sed -nE 's/^ +([0-9A-G]+\.[0-9]+)\. (.*[^ ]) \.{2,}.*$/\1\t\2/p'
 1.1	Introduction
 1.2	Conventions in this manual

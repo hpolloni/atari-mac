@@ -46,7 +46,7 @@ The full list of non-goals is in [docs/spec/README.md](docs/spec/README.md).
 ## Running
 
 ```sh
-make roms                 # downloads the ROMs and the hardware manual (one time)
+make roms                 # downloads the ROMs (one time)
 cargo run --release       # opens the window: NTSC, BASIC enabled
 cargo run --release -- --pal --scale 3
 cargo run --release -- --bas examples/pong.bas
@@ -88,9 +88,11 @@ The repository contains no commercial software.
 | [docs/plan/](docs/plan/README.md) | The delivery plan, in vertical slices (`SLICE-NN`) |
 | [docs/verification/](docs/verification/) | Evidence records for requirements that are verified by inspection or demonstration |
 
-The hardware specification is the Altirra Hardware Reference Manual by Avery Lee. `make roms`
-downloads it to `reference/altirra-hardware-reference.pdf`. Each hardware requirement cites a
-section of it.
+The hardware specification is the Altirra Hardware Reference Manual by Avery Lee, in git at
+`reference/altirra-hardware-reference.pdf`. Each hardware requirement cites a section of it.
+The other references are in the registry [docs/spec/references/](docs/spec/references/HRM.md)
+(see [docs/spec/README.md](docs/spec/README.md)). The Atari 8-Bit FAQ is also in git.
+`make reference` downloads the other references to `reference/pinned/`.
 
 ## Repository layout
 
@@ -100,12 +102,15 @@ section of it.
 | `crates/harness/` | The test harness (`atari-harness`), the specification gates and the golden frame images |
 | `src/`, `tests/` | The `atari-mac` frontend binary and its tests |
 | `docs/` | Specification, design and plan |
-| `scripts/fetch-roms.sh` | Downloads the ROMs, the test data and the hardware manual, and verifies each file |
+| `docs/spec/references/` | The registry of the references and their section indices |
+| `reference/` | The references that are in git: the HRM and the Atari 8-Bit FAQ, with their licenses in [reference/README.md](reference/README.md) |
+| `scripts/fetch-roms.sh` | Downloads the ROMs, the test data and the pinned references, and verifies each file |
 | `scripts/single-step-6502.sha1` | Checksums of the SingleStepTests 6502 suite |
 | `.github/workflows/ci.yml` | The CI workflow |
 
 These directories are downloaded and git ignores them: `roms/*.rom`, `test-data/` and
-`reference/`.
+`reference/pinned/`. Git also ignores `reference/text/`, the place for text that you extract
+from a PDF reference on your computer.
 
 ## Development
 
@@ -116,8 +121,9 @@ One-time setup:
 ```sh
 make tools      # installs cargo-deny, cargo-hack, cargo-llvm-cov, cargo-machete, taplo, typos
 make hooks      # enables the pre-commit hook in .githooks/
-make roms       # downloads the ROMs, the small test data and the hardware manual
+make roms       # downloads the ROMs and the small test data
 make test-data  # also downloads the SingleStepTests 6502 suite (about 1.1 GB)
+make reference  # optional: downloads the pinned references to reference/pinned/
 ```
 
 Run every gate locally (the same gates as CI):

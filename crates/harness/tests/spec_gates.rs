@@ -17,7 +17,7 @@ mod gates {
     use atari_harness::data::repo_root;
     use atari_harness::spec::{
         self, Baseline, MATRIX, OPEN_ITEM_INDEX, README, REQUIREMENT_INDEX, RULES, STATUS_BEGIN,
-        STATUS_END, Spec, SpecError, Violation,
+        STATUS_END, Spec, SpecError, Storage, Violation,
     };
 
     /// A gate as a function of the specification and the repository root.
@@ -64,6 +64,23 @@ mod gates {
         )
     }
 
+    /// The SHA-256 of `abc` (FIPS 180-4, appendix B.1): the content of the committed reference
+    /// file of the fixture.
+    const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    /// A commit hash for the URL of the pinned reference of the fixture.
+    const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    /// The text of a registry entry of the fixture (REQ-046).
+    fn registry_entry(id: &str, storage: &str, url: &str, file: &str) -> String {
+        format!(
+            "---\nid: {id}\ntitle: Title of {id}\nedition: First edition\nauthor: An author\n\
+             license: none found\nstorage: {storage}\nurl: {url}\nsha256: {ABC_SHA256}\n\
+             file: {file}\n---\n# {id}: Title of {id}\n\n## License\n\nThe reference has no \
+             license text.\n"
+        )
+    }
+
     /// A synthetic repository in a temporary directory. It is removed when dropped.
     struct Fixture {
         /// The root directory.
@@ -99,10 +116,7 @@ mod gates {
                 "docs/spec/vague-words.txt",
                 "# Comment\ncorrect\nas expected\n",
             );
-            self.write(
-                "docs/spec/hrm-sections.txt",
-                "# Header\n1.1\tIntroduction\n3.3\tCycle timing\n",
-            );
+            self.write_registry();
             self.write(
                 &format!("docs/spec/requirements/{one}.md"),
                 &requirement(1, "test", "HRM 3.3 Cycle timing (Clock speed)", ""),
@@ -113,7 +127,12 @@ mod gates {
             );
             self.write(
                 &format!("docs/spec/requirements/{three}.md"),
-                &requirement(3, "test", "HRM 1.1 Introduction; HRM 3.3 Cycle timing", ""),
+                &requirement(
+                    3,
+                    "test",
+                    "HRM 1.1 Introduction; HRM 3.3 Cycle timing; DEMO",
+                    "",
+                ),
             );
             self.write(
                 "docs/spec/open-items/OI-001.md",
@@ -177,6 +196,38 @@ mod gates {
                 "src/cli.rs",
                 "//! The command line.\n\n/// The help text.\npub const USAGE: &str = \"\\\n\
                  Usage: demo [options]\n  --pal       PAL machine\n  -h, --help  Show this text\";\n",
+            );
+        }
+
+        /// Writes the registry of the good repository (REQ-046): the committed reference `HRM`
+        /// with two sections, and the pinned reference `DEMO` without sections.
+        fn write_registry(&self) {
+            self.write(
+                "docs/spec/references/HRM.md",
+                &registry_entry(
+                    "HRM",
+                    "commit",
+                    "https://example.com/hrm.pdf",
+                    "reference/hrm.pdf",
+                ),
+            );
+            self.write(
+                "docs/spec/references/HRM.sections.txt",
+                "# Header\n1.1\tIntroduction\n3.3\tCycle timing\n",
+            );
+            self.write("reference/hrm.pdf", "abc");
+            self.write(
+                "docs/spec/references/DEMO.md",
+                &registry_entry(
+                    "DEMO",
+                    "pin",
+                    &format!("https://github.com/demo/demo/raw/{COMMIT}/demo.bin"),
+                    "reference/pinned/demo.bin",
+                ),
+            );
+            self.write(
+                "docs/spec/references/DEMO.sections.txt",
+                "# A reference without sections.\n",
             );
         }
 
@@ -261,8 +312,8 @@ mod gates {
     }
 
     /// The `sources` gate.
-    fn sources(spec: &Spec, _root: &Path) -> Vec<Violation> {
-        spec::sources(spec)
+    fn sources(spec: &Spec, root: &Path) -> Vec<Violation> {
+        spec::sources(spec, root)
     }
 
     /// The `test_plans` gate.
@@ -491,46 +542,253 @@ mod gates {
         );
     }
 
-    /// Verifies REQ-046: the sources of the repository cite sections of the HRM list, or are
-    /// project decisions with notes.
+    /// Verifies REQ-046: the registry, the section indices, the committed files and the
+    /// sources of the repository pass (criteria 1 to 8). The HRM and the FAQ are committed
+    /// references with section indices.
     #[test]
     fn sources_gate_passes_on_repository() {
         repository_passes(sources, &[46]);
-        let list = fs::read_to_string(repo_root().join("docs/spec/hrm-sections.txt")).unwrap();
-        for section in [
-            "2.5\tPeripheral Interface Adapter (PIA)",
-            "4.9\tWSYNC",
-            "D.2\t",
+        let spec = spec::load(&repo_root()).unwrap();
+        let entry = |id: &str| spec.registry.iter().find(|r| r.id == id).unwrap();
+        for (id, file) in [
+            ("HRM", "reference/altirra-hardware-reference.pdf"),
+            ("FAQ", "reference/atari-8bit-faq.txt"),
         ] {
-            assert!(list.contains(section), "the HRM list has {section:?}");
+            assert_eq!(entry(id).storage, Storage::Commit, "{id} storage");
+            assert_eq!(entry(id).file, file, "{id} file");
+        }
+        for (id, key, title) in [
+            ("HRM", "2.5", "Peripheral Interface Adapter (PIA)"),
+            ("HRM", "4.9", "WSYNC"),
+            ("HRM", "D.2", "NTSC color encoding"),
+            ("FAQ", "1.7", "What is the Atari 65XE?"),
+        ] {
+            assert_eq!(
+                entry(id).sections.get(key).map(String::as_str),
+                Some(title),
+                "{id} {key}"
+            );
         }
     }
 
-    /// Verifies REQ-046: an unknown HRM section, a source that is neither HRM nor `Project
-    /// decision`, and a project decision without notes each fail.
+    /// Verifies REQ-046: a registry entry without a key, with an empty value, a bad
+    /// checksum or storage value, an ID that is not upper case or not the file name, or
+    /// without a `## License` section fails (criterion 1). A section index that is missing or
+    /// has a bad line fails (criterion 2).
+    #[test]
+    fn sources_gate_rejects_bad_registry() {
+        fixture_passes();
+        let hrm = "docs/spec/references/HRM.md";
+        let index = "docs/spec/references/HRM.sections.txt";
+        rejects(sources, 46, "missing key `edition`", |f| {
+            f.replace(hrm, "edition: First edition\n", "");
+        });
+        rejects(sources, 46, "`author` is empty", |f| {
+            f.replace(hrm, "author: An author", "author: \"\"");
+        });
+        rejects(
+            sources,
+            46,
+            "is not 64 lower-case hexadecimal digits",
+            |f| {
+                f.replace(hrm, ABC_SHA256, &ABC_SHA256.to_uppercase());
+            },
+        );
+        rejects(sources, 46, "`storage` is `git`", |f| {
+            f.replace(hrm, "storage: commit", "storage: git");
+        });
+        rejects(sources, 46, "no `## License` section", |f| {
+            f.replace(hrm, "## License", "## Rights");
+        });
+        rejects(sources, 46, "other than upper-case letters", |f| {
+            let text = registry_entry("Demo", "pin", "https://x.org/a", "reference/pinned/a");
+            f.write("docs/spec/references/Demo.md", &text);
+            f.write("docs/spec/references/Demo.sections.txt", "");
+        });
+        rejects(
+            sources,
+            46,
+            "`id` is `DEMO`, but the file is DEMO2.md",
+            |f| {
+                let text = fs::read_to_string(f.root.join("docs/spec/references/DEMO.md")).unwrap();
+                f.write("docs/spec/references/DEMO2.md", &text);
+                f.write("docs/spec/references/DEMO2.sections.txt", "");
+            },
+        );
+        rejects(sources, 46, "the section index does not exist", |f| {
+            fs::remove_file(f.root.join(index)).unwrap();
+        });
+        rejects(sources, 46, "no TAB between the key and the title", |f| {
+            f.replace(index, "1.1\tIntroduction", "1.1 Introduction");
+        });
+        rejects(sources, 46, "the key `1 1` is empty or has a space", |f| {
+            f.replace(index, "1.1\tIntroduction", "1 1\tIntroduction");
+        });
+        rejects(sources, 46, "the key `3.3` is on more than one line", |f| {
+            f.replace(index, "1.1\tIntroduction", "3.3\tIntroduction");
+        });
+    }
+
+    /// Verifies REQ-046: a citation that is not separated by `; `, a wrong section title, a key
+    /// for a reference without sections (criterion 3), an `HRM` citation that is not first
+    /// (criterion 4), an unknown ID, an unknown key or a missing key (criterion 5), and a
+    /// project decision without notes (criterion 6) each fail.
     #[test]
     fn sources_gate_rejects_bad_files() {
         fixture_passes();
         let one = Fixture::req_file(1);
         let two = Fixture::req_file(2);
+        let three = Fixture::req_file(3);
+        let source = "source: HRM 3.3 Cycle timing (Clock speed)";
         rejects(sources, 46, "cites HRM 9.9, which is not in", |f| {
             f.replace(&one, "HRM 3.3", "HRM 9.9");
         });
         rejects(
             sources,
             46,
-            "names no HRM section and is not `Project decision`",
+            "starts with `A`, which has no registry entry",
+            |f| {
+                f.replace(&one, source, "source: A book");
+            },
+        );
+        rejects(sources, 46, "has no section key of", |f| {
+            f.replace(&one, source, "source: HRM");
+        });
+        rejects(sources, 46, "but the title in", |f| {
+            f.replace(&one, source, "source: HRM 3.3 Clock timing");
+        });
+        rejects(sources, 46, "but the title in", |f| {
+            f.replace(&three, "Introduction; HRM", "Introduction, HRM");
+        });
+        rejects(sources, 46, "starts with `Project`, which has no", |f| {
+            f.replace(
+                &one,
+                source,
+                "source: Project decision; HRM 3.3 Cycle timing",
+            );
+        });
+        rejects(
+            sources,
+            46,
+            "has no sections, so the citation is only `DEMO`",
+            |f| {
+                f.replace(&three, "; DEMO", "; DEMO 1.1");
+            },
+        );
+        rejects(
+            sources,
+            46,
+            "the first citation is not an `HRM` citation",
             |f| {
                 f.replace(
-                    &one,
-                    "source: HRM 3.3 Cycle timing (Clock speed)",
-                    "source: A book",
+                    &three,
+                    "HRM 1.1 Introduction; HRM 3.3 Cycle timing; DEMO",
+                    "DEMO; HRM 1.1 Introduction",
                 );
             },
         );
         rejects(sources, 46, "no `Notes` section", |f| {
             f.replace(&two, "\n## Notes\n\nA note.\n", "");
         });
+        let fixture = Fixture::new();
+        fixture.replace(&one, source, "source: DEMO");
+        assert!(
+            fixture.run(sources).is_empty(),
+            "a source with one reference other than the HRM passes"
+        );
+    }
+
+    /// Verifies REQ-046: a `commit` reference whose file has a different SHA-256, is missing,
+    /// is outside `reference/` or is not in git fails (criterion 7).
+    #[test]
+    fn sources_gate_checks_committed_files() {
+        fixture_passes();
+        let hrm = "docs/spec/references/HRM.md";
+        rejects(sources, 46, "the SHA-256 of `reference/hrm.pdf` is", |f| {
+            f.write("reference/hrm.pdf", "abc\n");
+        });
+        rejects(
+            sources,
+            46,
+            "`file` `reference/hrm.pdf` does not exist",
+            |f| {
+                fs::remove_file(f.root.join("reference/hrm.pdf")).unwrap();
+            },
+        );
+        rejects(sources, 46, "is not in reference/ outside", |f| {
+            f.replace(hrm, "file: reference/hrm.pdf", "file: docs/hrm.pdf");
+            f.write("docs/hrm.pdf", "abc");
+        });
+        rejects(sources, 46, "is not in reference/ outside", |f| {
+            f.replace(
+                hrm,
+                "file: reference/hrm.pdf",
+                "file: reference/pinned/hrm.pdf",
+            );
+            f.write("reference/pinned/hrm.pdf", "abc");
+        });
+        let fixture = Fixture::new();
+        let git = |args: &[&str]| {
+            let output = process::Command::new("git")
+                .args(args)
+                .current_dir(&fixture.root)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?}: {output:?}");
+        };
+        git(&["init", "--quiet"]);
+        assert_reports(
+            &fixture.run(sources),
+            46,
+            "`file` `reference/hrm.pdf` is not in git",
+        );
+        git(&["add", "reference/hrm.pdf"]);
+        assert!(fixture.run(sources).is_empty(), "a tracked file passes");
+    }
+
+    /// Verifies REQ-046: a `pin` reference with a file outside `reference/pinned/`, or with a
+    /// URL without a commit hash, an archive.org item path or a Wayback Machine timestamp,
+    /// fails (criterion 8). The three URL forms pass.
+    #[test]
+    fn sources_gate_checks_pinned_urls() {
+        fixture_passes();
+        let demo = "docs/spec/references/DEMO.md";
+        let url = format!("https://github.com/demo/demo/raw/{COMMIT}/demo.bin");
+        rejects(sources, 46, "is not in reference/pinned/", |f| {
+            f.replace(
+                demo,
+                "file: reference/pinned/demo.bin",
+                "file: reference/demo.bin",
+            );
+        });
+        for bad in [
+            "https://example.com/demo.bin",
+            "https://github.com/demo/demo/raw/main/demo.bin",
+            "https://github.com/demo/demo/raw/0123456789abcdef/demo.bin",
+            "https://archive.org/details/demo",
+            "https://archive.org/download/demo",
+            "https://web.archive.org/web/2024/https://example.com/demo.bin",
+            "https://web.archive.org/web/*/https://example.com/demo.bin",
+        ] {
+            rejects(
+                sources,
+                46,
+                "has no commit hash, archive.org item path",
+                |f| {
+                    f.replace(demo, &url, bad);
+                },
+            );
+        }
+        for good in [
+            "https://raw.githubusercontent.com/a/b/0123456789abcdef0123456789abcdef01234567/c.txt",
+            "https://archive.org/download/demo-item/demo.pdf",
+            "https://web.archive.org/web/20240102030405/https://example.com/demo.bin",
+            "https://web.archive.org/web/20240102030405id_/https://example.com/demo.bin",
+        ] {
+            let fixture = Fixture::new();
+            fixture.replace(demo, &url, good);
+            assert!(fixture.run(sources).is_empty(), "{good} passes");
+        }
     }
 
     /// Verifies REQ-047: the references and links of the repository resolve.

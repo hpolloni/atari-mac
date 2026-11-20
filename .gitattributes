@@ -2,3 +2,8 @@
 *.rs text diff=rust
 *.toml text
 Cargo.lock text -diff linguist-generated=true
+# The references are verbatim copies (their licenses require it, REQ-046): git never
+# changes their bytes (no line-end conversion).
+reference/** -text
+# reference/README.md is our own text.
+reference/README.md text

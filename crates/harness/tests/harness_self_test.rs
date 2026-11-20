@@ -1,7 +1,7 @@
 //! Tests of the harness helpers themselves.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 use std::{fs, io};
 
 use atari_core::cpu::Bus as _;
@@ -14,7 +14,7 @@ use atari_harness::single_step::{
     failure_summary, file_path, load_cases, run_case, run_opcodes,
 };
 use atari_harness::system::{BootOptions, boot_program, test_os_rom};
-use atari_harness::{HarnessError, data, system};
+use atari_harness::{HarnessError, data, sha256, system};
 
 /// Verifies REQ-021: a missing file names the file and the fetch command.
 #[test]
@@ -517,9 +517,9 @@ fn is_hex(text: &str, len: usize) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// Verifies REQ-020: each URL in `scripts/fetch-roms.sh` contains a commit hash, except the
-/// HRM URL, which has a SHA-256 checksum (criterion 1). Each `fetch` and `fetch_c_array`
-/// call also has a SHA-256 checksum.
+/// Verifies REQ-020: each URL in `scripts/fetch-roms.sh` contains a commit hash (criterion 1).
+/// Each `fetch` and `fetch_c_array` call has a SHA-256 checksum, except the call for the
+/// pinned references, which takes the `sha256` of the registry entry.
 #[test]
 fn fetch_urls_are_pinned() {
     let script = fetch_script().unwrap().replace("\\\n", " ");
@@ -546,25 +546,12 @@ fn fetch_urls_are_pinned() {
             .unwrap_or(rest.len());
         let url = expand(&rest[..end]);
         urls += 1;
-        if url.contains("virtualdub.org") {
-            let after = &script[index + end..];
-            let checksum = after
-                .split_whitespace()
-                .nth(2)
-                .unwrap_or_default()
-                .trim_matches('"');
-            assert!(is_hex(checksum, 64), "HRM URL {url}: checksum {checksum}");
-        } else {
-            assert!(
-                url.split('/').any(|part| is_hex(part, 40)),
-                "URL without a commit hash: {url}"
-            );
-        }
+        assert!(
+            url.split('/').any(|part| is_hex(part, 40)),
+            "URL without a commit hash: {url}"
+        );
     }
-    assert_eq!(
-        urls, 4,
-        "atari800, Klaus Dormann, HRM and SingleStepTests URLs"
-    );
+    assert_eq!(urls, 3, "atari800, Klaus Dormann and SingleStepTests URLs");
     let calls: Vec<&str> = script
         .lines()
         .map(str::trim_start)
@@ -573,8 +560,30 @@ fn fetch_urls_are_pinned() {
     assert_eq!(calls.len(), 4, "fetch calls: {calls:?}");
     for call in calls {
         let checksum = call.split_whitespace().nth(3).unwrap_or_default();
-        assert!(is_hex(checksum, 64), "no SHA-256 checksum: {call}");
+        assert!(
+            is_hex(checksum, 64) || call == r#"fetch "$url" "$file" "$sha""#,
+            "no SHA-256 checksum: {call}"
+        );
     }
+}
+
+/// A copy of `scripts/fetch-roms.sh` in a new temporary directory `name`.
+fn script_copy(name: &str) -> io::Result<PathBuf> {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    if root.exists() {
+        fs::remove_dir_all(&root)?;
+    }
+    fs::create_dir_all(root.join("scripts"))?;
+    fs::write(root.join("scripts/fetch-roms.sh"), fetch_script()?)?;
+    Ok(root)
+}
+
+/// Runs the script copy in `root` with `args`.
+fn run_script(root: &Path, args: &[&str]) -> io::Result<Output> {
+    Command::new("bash")
+        .arg(root.join("scripts/fetch-roms.sh"))
+        .args(args)
+        .output()
 }
 
 /// Verifies REQ-020: when a downloaded file has a different checksum, the script deletes the
@@ -585,11 +594,7 @@ fn fetch_urls_are_pinned() {
 /// to a file with a wrong checksum.
 #[test]
 fn fetch_rejects_bad_checksum() {
-    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fetch-rejects-bad-checksum");
-    if root.exists() {
-        fs::remove_dir_all(&root).unwrap();
-    }
-    fs::create_dir_all(root.join("scripts")).unwrap();
+    let root = script_copy("fetch-rejects-bad-checksum").unwrap();
     fs::create_dir_all(root.join("roms")).unwrap();
     for rom in ["altirraos-xl.rom", "altirra-basic.rom"] {
         let bytes = data::read_test_file(&format!("roms/{rom}"), data::FETCH_ROMS).unwrap();
@@ -609,10 +614,7 @@ fn fetch_rejects_bad_checksum() {
         &script[end..]
     );
     fs::write(root.join("scripts/fetch-roms.sh"), copy).unwrap();
-    let output = Command::new("bash")
-        .arg(root.join("scripts/fetch-roms.sh"))
-        .output()
-        .expect("bash runs");
+    let output = run_script(&root, &[]).unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "the script failed: {stderr}");
     assert!(stderr.contains("checksum mismatch"), "stderr: {stderr}");
@@ -625,6 +627,226 @@ fn fetch_rejects_bad_checksum() {
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("ok      roms/altirraos-xl.rom"),
         "the valid ROMs are kept"
+    );
+}
+
+/// Verifies REQ-020: `scripts/fetch-roms.sh --single-step` gives 256 files in
+/// `test-data/single-step/6502/`, each with the git blob SHA-1 in
+/// `scripts/single-step-6502.sha1` (criterion 3).
+#[test]
+fn single_step_files_match_blob_list() {
+    let root = data::repo_root();
+    let list = fs::read_to_string(root.join("scripts/single-step-6502.sha1")).unwrap();
+    let entries: Vec<(&str, &str)> = list
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .collect();
+    assert_eq!(entries.len(), 256, "one blob SHA-1 per opcode");
+    let paths: Vec<String> = entries
+        .iter()
+        .map(|(_, file)| format!("test-data/single-step/6502/{file}"))
+        .collect();
+    for path in &paths {
+        assert!(
+            root.join(path).is_file(),
+            "{path} is missing: run `{}`",
+            data::FETCH_TEST_DATA
+        );
+    }
+    let output = Command::new("git")
+        .args(["hash-object", "--stdin-paths"])
+        .current_dir(&root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write as _;
+                stdin.write_all(paths.join("\n").as_bytes())?;
+            }
+            child.wait_with_output()
+        })
+        .expect("git runs");
+    assert!(output.status.success(), "git hash-object failed");
+    let blobs = String::from_utf8_lossy(&output.stdout);
+    for ((blob, file), actual) in entries.iter().zip(blobs.lines()) {
+        assert_eq!(actual, *blob, "blob SHA-1 of {file}");
+    }
+    assert_eq!(blobs.lines().count(), 256, "git hashed each file");
+}
+
+/// Writes a registry entry `docs/spec/references/<id>.md` below `root` for the tests of the
+/// `--references` option. Its `file` is `reference/pinned/<id>.bin` for the storage `pin`,
+/// and `reference/<id>.bin` for the storage `commit`.
+fn write_entry(root: &Path, id: &str, storage: &str, url: &str, sha256: &str) -> io::Result<()> {
+    let file = if storage == "pin" {
+        format!("reference/pinned/{id}.bin")
+    } else {
+        format!("reference/{id}.bin")
+    };
+    let dir = root.join("docs/spec/references");
+    fs::create_dir_all(&dir)?;
+    let text = format!(
+        "---\nid: {id}\ntitle: Title\nedition: One\nauthor: An author\nlicense: none found\n\
+         storage: {storage}\nurl: \"{url}\"\nsha256: {sha256}\nfile: {file}\n---\n\
+         # {id}: Title\n\n## License\n\nNone.\n"
+    );
+    fs::write(dir.join(format!("{id}.md")), text)
+}
+
+/// Verifies REQ-020: the script without `--references` downloads no reference (criterion 4).
+/// With `--references`, it downloads each registry entry with the storage `pin` from its
+/// `url` to its `file` and verifies its `sha256`; a different checksum deletes the file,
+/// prints `checksum mismatch` and exits with a status that is not 0 (criterion 5). A `commit`
+/// entry is not downloaded.
+///
+/// The test runs a copy of the script in a temporary directory, with local `file://` URLs,
+/// so that it uses no network.
+#[test]
+fn fetch_references_only_with_option() {
+    let root = script_copy("fetch-references-only-with-option").unwrap();
+    fs::create_dir_all(root.join("roms")).unwrap();
+    for rom in ["roms/altirraos-xl.rom", "roms/altirra-basic.rom"] {
+        let bytes = data::read_test_file(rom, data::FETCH_ROMS).unwrap();
+        fs::write(root.join(rom), bytes).unwrap();
+    }
+    let klaus = "test-data/klaus/6502_functional_test.bin";
+    let bytes = data::read_test_file(klaus, data::FETCH_ROMS).unwrap();
+    fs::create_dir_all(root.join("test-data/klaus")).unwrap();
+    fs::write(root.join(klaus), bytes).unwrap();
+    let source = root.join("source.bin");
+    fs::write(&source, b"abc").unwrap();
+    let url = format!("file://{}", source.display());
+    let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    write_entry(&root, "PINNED", "pin", &url, abc).unwrap();
+    write_entry(&root, "COMMITTED", "commit", &url, abc).unwrap();
+
+    let output = run_script(&root, &[]).unwrap();
+    assert!(
+        output.status.success(),
+        "the script without options: {output:?}"
+    );
+    assert!(
+        !root.join("reference").exists(),
+        "no reference without --references"
+    );
+
+    let output = run_script(&root, &["--references"]).unwrap();
+    assert!(output.status.success(), "--references: {output:?}");
+    assert_eq!(
+        fs::read(root.join("reference/pinned/PINNED.bin")).unwrap(),
+        b"abc",
+        "the pinned file is downloaded"
+    );
+    assert!(
+        !root.join("reference/COMMITTED.bin").exists(),
+        "a commit entry is not downloaded"
+    );
+    let output = run_script(&root, &["--references"]).unwrap();
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("ok      reference/pinned/PINNED.bin"),
+        "a valid file is kept: {output:?}"
+    );
+
+    fs::remove_file(root.join("reference/pinned/PINNED.bin")).unwrap();
+    let wrong = "0000000000000000000000000000000000000000000000000000000000000000";
+    write_entry(&root, "PINNED", "pin", &url, wrong).unwrap();
+    let output = run_script(&root, &["--references"]).unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "a wrong checksum fails: {stderr}");
+    assert!(stderr.contains("checksum mismatch"), "stderr: {stderr}");
+    assert!(
+        !root.join("reference/pinned/PINNED.bin").exists()
+            && !root.join("reference/pinned/PINNED.bin.part").exists(),
+        "the file is deleted"
+    );
+}
+
+/// Verifies REQ-020: only the `make reference` target runs `--references`, no other target
+/// depends on it, and CI does not download a reference (criterion 4). `make roms`, `make test`
+/// and `make pre-commit` therefore download no reference.
+#[test]
+fn make_and_ci_fetch_no_reference() {
+    let root = data::repo_root();
+    let makefile = fs::read_to_string(root.join("Makefile")).unwrap();
+    let mut target = String::new();
+    for line in makefile.lines() {
+        if !line.starts_with('\t')
+            && !line.starts_with('#')
+            && let Some((name, prerequisites)) = line.split_once(':')
+            && !name.contains('=')
+            && !prerequisites.starts_with('=')
+        {
+            name.trim().clone_into(&mut target);
+            assert!(
+                target == ".PHONY" || !prerequisites.split_whitespace().any(|p| p == "reference"),
+                "target {target} depends on reference"
+            );
+        }
+        if line.starts_with('\t') && line.contains("--references") {
+            assert_eq!(target, "reference", "{line}");
+        }
+    }
+    assert!(
+        makefile.contains("reference:\n\tscripts/fetch-roms.sh --references\n"),
+        "make reference runs the script with --references"
+    );
+    for (file, text) in [
+        ("ci.yml", ".github/workflows/ci.yml"),
+        ("pre-commit", ".githooks/pre-commit"),
+    ] {
+        let text = fs::read_to_string(root.join(text)).unwrap();
+        assert!(
+            !text.contains("--references") && !text.contains("make reference"),
+            "{file} downloads a reference"
+        );
+    }
+}
+
+/// Verifies REQ-046: SHA-256 gives the values of the FIPS 180-4 examples for the empty
+/// message, `abc`, the 56-byte message (the padding needs a second block) and one million
+/// times `a` (the checksum of criterion 7).
+#[test]
+fn sha256_matches_fips_vectors() {
+    assert_eq!(
+        sha256::hex(b""),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "empty message"
+    );
+    assert_eq!(
+        sha256::hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "abc"
+    );
+    assert_eq!(
+        sha256::hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+        "two-block message"
+    );
+    assert_eq!(
+        sha256::hex(&vec![b'a'; 1_000_000]),
+        "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
+        "one million times a"
+    );
+}
+
+/// Verifies REQ-046: git ignores `reference/pinned/`, the place of the `pin` references
+/// (criterion 8), and `reference/text/`, but not the committed references.
+#[test]
+fn pinned_references_are_ignored() {
+    let ignored = |path: &str| {
+        Command::new("git")
+            .args(["check-ignore", "--quiet", "--no-index", path])
+            .current_dir(data::repo_root())
+            .status()
+            .expect("git runs")
+            .success()
+    };
+    assert!(ignored("reference/pinned/a.pdf"), "reference/pinned/");
+    assert!(ignored("reference/text/a.txt"), "reference/text/");
+    assert!(
+        !ignored("reference/altirra-hardware-reference.pdf"),
+        "the committed HRM"
     );
 }
 

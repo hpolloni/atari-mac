@@ -132,7 +132,7 @@ also on small synthetic files in a temporary directory, so that each failure rul
 | `schema` | REQ-043, REQ-053, REQ-054: frontmatter keys, values, IDs, `depends_on`, cycles |
 | `structure` | REQ-044: sections, `shall`, numbered criteria |
 | `vague_words` | REQ-045: the words in `docs/spec/vague-words.txt` |
-| `sources` | REQ-046: `HRM n.m` against `docs/spec/hrm-sections.txt` |
+| `sources` | REQ-046: the registry entries and section indices of `docs/spec/references/`, the SHA-256 and the git status of each `commit` file, the URL of each `pin` entry, and each citation of each `source` |
 | `references` | REQ-047, REQ-056: `REQ-`, `OI-`, `SLICE-` references and relative links, also in `README.md` |
 | `test_plans` | REQ-048: each requirement in exactly one test plan, with tests or evidence |
 | `trace` | REQ-027, REQ-049: test plan to code and code to test plan for all packages; a running test for `done` packages |
@@ -181,9 +181,28 @@ The `indexes` gate compares the committed files with a new generation.
 
 - `docs/spec/vague-words.txt`: one word or phrase per line. Lines that start with `#` are
   comments.
-- `docs/spec/hrm-sections.txt`: one line per HRM section, `n.m<TAB>title`, from the table of
-  contents of the HRM edition of 2026-01-03. The file header names the edition and the
-  command that made the list.
+- `docs/spec/references/<ID>.md`: one registry entry per reference (REQ-046). The gate reads
+  every `.md` file of the directory except `README.md`.
+- `docs/spec/references/<ID>.sections.txt`: the section index of the reference, one line per
+  section, `<key><TAB><title>`. The file header names the edition and the command that made
+  the list. `HRM.sections.txt` has the HRM section numbers from the table of contents of the
+  2026-01-02 edition.
+
+### The `sources` gate
+
+- A source is `Project decision`, or a list of citations separated by `; `. A `;` inside a
+  citation (for example between the parts in parentheses) splits the citation, so a citation
+  uses `,` there.
+- A citation is `<ID>`, `<ID> <key>` or `<ID> <key> <title> ...`. The text after the title,
+  for example `(Clock speed)`, is free.
+- A `commit` file must be below `reference/`, but not in `reference/pinned/` or
+  `reference/text/`, which git ignores. The gate compares the SHA-256 of the file with
+  `sha256`. The module `atari_harness::sha256` computes it: a short own implementation of
+  FIPS 180-4, so that the harness gets no new dependency. When the repository root is a git
+  checkout, the gate also runs `git ls-files` to check that git tracks the file.
+- A `pin` URL passes with a 40-digit commit hash between two characters that are not letters
+  or digits, with `https://archive.org/download/<item>/<file>`, or with
+  `https://web.archive.org/web/<14 digits>[modifier]/<URL>`.
 
 ## Make and CI
 
@@ -211,7 +230,7 @@ frontmatter. The converter is not committed. The migration commit must show that
 | REQ-043 | `spec_gates.rs` `schema_gate_passes_on_repository`, `schema_gate_rejects_bad_files` |
 | REQ-044 | `spec_gates.rs` `structure_gate_passes_on_repository`, `structure_gate_rejects_bad_files` |
 | REQ-045 | `spec_gates.rs` `vague_words_gate_passes_on_repository`, `vague_words_gate_rejects_bad_files` |
-| REQ-046 | `spec_gates.rs` `sources_gate_passes_on_repository`, `sources_gate_rejects_bad_files` |
+| REQ-046 | `spec_gates.rs` `sources_gate_passes_on_repository`, `sources_gate_rejects_bad_registry` (criteria 1, 2), `sources_gate_rejects_bad_files` (criteria 3 to 6), `sources_gate_checks_committed_files` (criterion 7), `sources_gate_checks_pinned_urls` (criterion 8); `harness_self_test.rs` `sha256_matches_fips_vectors` (the checksum of criterion 7), `pinned_references_are_ignored` (criterion 8: git ignores `reference/pinned/`) |
 | REQ-047 | `spec_gates.rs` `references_gate_passes_on_repository`, `references_gate_rejects_bad_files` |
 | REQ-048 | `spec_gates.rs` `test_plans_gate_passes_on_repository`, `test_plans_gate_rejects_bad_files` |
 | REQ-027, REQ-049 | `spec_gates.rs` `trace_gate_passes_on_repository`, `trace_gate_rejects_bad_files` |

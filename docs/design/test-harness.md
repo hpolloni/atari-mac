@@ -7,8 +7,9 @@ data, and the test suites. It covers REQ-020 to REQ-027. REQ-022 is withdrawn; t
 
 ## Test data
 
-`scripts/fetch-roms.sh` downloads all test data. Each source is pinned to a commit, and each
-file has a checksum (REQ-020). Git ignores the output directories.
+`scripts/fetch-roms.sh` downloads all test data and the pinned references. Each source is
+pinned to a commit or an archive snapshot, and each file has a checksum (REQ-020). Git
+ignores the output directories.
 
 | Path | Contents | Source | License | Checksum |
 | --- | --- | --- | --- | --- |
@@ -16,10 +17,16 @@ file has a checksum (REQ-020). Git ignores the output directories.
 | `roms/altirra-basic.rom` | Altirra BASIC 1.59 | atari800 `src/roms/altirra_basic.c` | Permissive (Avery Lee) | SHA-256 |
 | `test-data/klaus/6502_functional_test.bin` | 6502 functional test | Klaus2m5/6502_65C02_functional_tests | GPL-3.0 | SHA-256 |
 | `test-data/single-step/6502/*.json` | 256 files, 10,000 cases each (1.1 GB) | SingleStepTests/65x02 `6502/v1` | MIT | Git blob SHA-1 |
-| `reference/altirra-hardware-reference.pdf` | Hardware specification | virtualdub.org | Copyright Avery Lee | SHA-256 |
+| `reference/pinned/<file>` | The references with `storage: pin` (REQ-046) | The `url` of each registry entry in `docs/spec/references/` | See each registry entry | SHA-256 (`sha256` of the entry) |
 
 `make roms` downloads the small files. `make test-data` also downloads the single-step suite.
 `make test` and CI download the single-step suite, because REQ-023 is a Must requirement.
+
+`make reference` (`scripts/fetch-roms.sh --references`) downloads only the pinned
+references. It reads the `storage`, `url`, `sha256` and `file` of each registry entry and
+uses the same checksum check as the other files. No other `make` target and no CI job
+downloads a reference, so a change at a reference site cannot stop the tests. The HRM and
+the FAQ are in git (`reference/`, storage `commit`), so no download is necessary for them.
 
 ## Crate `atari-harness`
 
@@ -155,7 +162,7 @@ The reference files come from this emulator (`UPDATE_GOLDEN=1 cargo test -p atar
 | `tests/pokey_serial.rs` | OS SIO receive through the POKEY serial port | REQ-526 |
 | `tests/pokey_paddle.rs` | Paddle values read by BASIC | REQ-534 |
 | `tests/antic_cpu.rs` | ANTIC and the real CPU together: the NMI start cycles of REQ-334 with the CPU interrupt polling of REQ-116 to REQ-118 | REQ-334 (OI-017) |
-| `tests/harness_self_test.rs` | Tests of the helpers themselves | REQ-003, REQ-020, REQ-021, REQ-024 |
+| `tests/harness_self_test.rs` | Tests of the helpers themselves | REQ-003, REQ-020, REQ-021, REQ-024, REQ-046 (SHA-256, ignored `reference/pinned/`) |
 
 A test that waits for a chip that is not implemented yet has the attribute
 `#[ignore = "needs <module>: REQ-NNN"]`. The teammate that implements the module removes the
@@ -181,7 +188,7 @@ withdrawn. It writes the matrix to `target/traceability.md`. A work package sets
 
 | Requirement | Test |
 | --- | --- |
-| REQ-020 | `tests/harness_self_test.rs` `fetch_urls_are_pinned`, `fetch_rejects_bad_checksum` (runs the script on a temporary copy with a wrong checksum); CI runs the script |
+| REQ-020 | `tests/harness_self_test.rs` `fetch_urls_are_pinned` (criterion 1), `fetch_rejects_bad_checksum` (criterion 2: runs the script on a temporary copy with a wrong checksum), `single_step_files_match_blob_list` (criterion 3), `fetch_references_only_with_option` (criteria 4 and 5: a temporary copy with local `file://` URLs, no network), `make_and_ci_fetch_no_reference` (criterion 4); CI runs the script |
 | REQ-021 | `tests/harness_self_test.rs` `missing_file_names_fetch_command`; inspection of the test files for early returns; `harness_self_test.rs` `load_cases_errors`, `unreadable_file_gives_read_error` |
 | REQ-023 | `cpu_single_step.rs` `single_step_bus_cycles`. The other single-step tests in that file also use the runner, but they verify CPU requirements (`docs/design/cpu.md`).; `harness_self_test.rs` `failure_summary_lists_failed_opcodes`, `flat_bus_default_is_empty`, `flat_bus_logs_accesses`, `load_cases_errors`, `load_cases_reads_nop_file`, `opcode_lists_are_consistent`, `run_case_fails_impossible_case`, `run_case_passes_and_clears_memory`, `run_case_reports_memory_difference`, `run_case_reports_register_difference`, `run_opcodes_reports_nop_file` |
 | REQ-024 | `tests/harness_self_test.rs` `screen_text_has_24_rows_of_40`, `internal_to_ascii_values`; `harness_self_test.rs` `boot_program_uses_options`, `harness_error_messages`, `hold_console_keys_releases_keys`, `run_frames_counts_frames`, `run_until_counts_frames`, `test_os_rom_layout`; `boot.rs` `boots_to_basic_ready` |

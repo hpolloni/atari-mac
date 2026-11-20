@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Downloads the ROMs and the test data. Every source is pinned to a commit, and every
-# file is verified with a checksum. Files that are present and valid are not downloaded again.
+# Downloads the ROMs, the test data and the pinned references. Every source is pinned to a
+# commit or an archive snapshot, and every file is verified with a checksum (REQ-020). Files
+# that are present and valid are not downloaded again.
 #
 # Usage:
 #   scripts/fetch-roms.sh                 ROMs and the Klaus Dormann 6502 test (small)
 #   scripts/fetch-roms.sh --single-step   also the SingleStepTests 6502 suite (about 1.1 GB)
+#   scripts/fetch-roms.sh --references    only the references with `storage: pin` of
+#                                         docs/spec/references/ (`make reference`)
 #
-# Output (git ignores both directories):
+# Output (git ignores these directories):
 #   roms/altirraos-xl.rom, roms/altirra-basic.rom          see roms/README.md
 #   test-data/klaus/6502_functional_test.bin                GPL-3.0, test use only
 #   test-data/single-step/6502/<opcode>.json                MIT
-#   reference/altirra-hardware-reference.pdf                hardware spec, (C) Avery Lee
+#   reference/pinned/<file>                                 the `file` of each registry entry
+# The HRM and the FAQ are in git (reference/README.md), so no download is necessary for them.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -20,11 +24,13 @@ readonly KLAUS_COMMIT=7954e2dbb49c469ea286070bf46cdd71aeb29e4b
 readonly SINGLE_STEP_COMMIT=2f6980a2d95757486c7bee24355c360e40e2a224
 
 single_step=false
+references=false
 for arg in "$@"; do
     case "$arg" in
         --single-step) single_step=true ;;
+        --references) references=true ;;
         -h | --help)
-            sed -n '2,14p' "$0"
+            sed -n '2,17p' "$0"
             exit 0
             ;;
         *)
@@ -88,6 +94,46 @@ fetch_c_array() {
     echo "fetched $dest"
 }
 
+# frontmatter_value <file> <key>: the value of a top-level key of the YAML frontmatter of a
+# registry entry, without the quotes.
+frontmatter_value() {
+    awk -v key="$2" '
+        NR == 1 && $0 != "---" { exit }
+        NR > 1 && $0 == "---" { exit }
+        NR > 1 && index($0, key ": ") == 1 {
+            value = substr($0, length(key) + 3)
+            gsub(/^"|"$/, "", value)
+            print value
+            exit
+        }' "$1"
+}
+
+# fetch_references: downloads each registry entry with `storage: pin` from its `url` to its
+# `file`, and verifies the file with its `sha256` (REQ-020 criterion 5, REQ-046).
+fetch_references() {
+    local entry url file sha count=0
+    shopt -s nullglob
+    for entry in docs/spec/references/*.md; do
+        [[ "$(basename "$entry")" == README.md ]] && continue
+        [[ "$(frontmatter_value "$entry" storage)" == pin ]] || continue
+        url=$(frontmatter_value "$entry" url)
+        file=$(frontmatter_value "$entry" file)
+        sha=$(frontmatter_value "$entry" sha256)
+        if [[ -z "$url" || -z "$sha" || "$file" != reference/pinned/?* ]]; then
+            echo "bad registry entry (url, sha256, or file in reference/pinned/): $entry" >&2
+            exit 1
+        fi
+        fetch "$url" "$file" "$sha"
+        count=$((count + 1))
+    done
+    echo "references: $count pinned files"
+}
+
+if [[ "$references" == true ]]; then
+    fetch_references
+    exit 0
+fi
+
 fetch_c_array altirraos_xl roms/altirraos-xl.rom \
     9de5a313fe3946f04fe236a8d3ceacb471fbed4ec5fc5db009732e1169946ccf
 fetch_c_array altirra_basic roms/altirra-basic.rom \
@@ -96,12 +142,6 @@ fetch_c_array altirra_basic roms/altirra-basic.rom \
 fetch "https://raw.githubusercontent.com/Klaus2m5/6502_65C02_functional_tests/$KLAUS_COMMIT/bin_files/6502_functional_test.bin" \
     test-data/klaus/6502_functional_test.bin \
     fa12bfc761e6f9057e4cc01a665a7b800ff01ae91f598af1e39a1201d01953fd
-
-# The manual is updated in place at a fixed URL. If the checksum fails after an update,
-# read the new version, then update the checksum here.
-fetch "https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf" \
-    reference/altirra-hardware-reference.pdf \
-    1909927618a7f4a6771d2dc7ef1785ba9b13453edba57122165f57c1504d1c89
 
 if [[ "$single_step" == true ]]; then
     # scripts/single-step-6502.sha1 holds the git blob SHA-1 of each file at the pinned commit.
@@ -121,6 +161,7 @@ if [[ "$single_step" == true ]]; then
         while read -r blob file; do
             if [[ "$(git hash-object "$dir/$file")" != "$blob" ]]; then
                 echo "checksum mismatch: $dir/$file" >&2
+                rm -f "$dir/$file"
                 exit 1
             fi
         done <scripts/single-step-6502.sha1

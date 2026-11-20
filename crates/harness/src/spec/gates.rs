@@ -4,11 +4,14 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
+use super::load::REFERENCE_DIR;
 use super::{
     CodeTest, ItemStatus, OPEN_ITEM_INDEX, Outcome, Priority, REQUIREMENT_INDEX, Requirement,
-    Section, SliceStatus, Spec, Verification, Violation, readme, report, text,
+    Section, SliceStatus, Spec, Storage, Verification, Violation, readme, report, text,
 };
+use crate::sha256;
 
 /// The frontmatter problems of `rules` that [`super::load()`] found.
 fn problems(spec: &Spec, rules: &[u16]) -> Vec<Violation> {
@@ -225,54 +228,179 @@ fn vague_in(
     out
 }
 
-/// The HRM section numbers in a source, for example `3.3` for `HRM 3.3 Cycle timing`.
-fn hrm_sections(source: &str) -> Vec<String> {
-    source
-        .match_indices("HRM ")
-        .filter_map(|(start, _)| {
-            let rest = source.get(start + 4..)?;
-            let end = rest
-                .find(|c: char| !c.is_ascii_alphanumeric() && c != '.')
-                .unwrap_or(rest.len());
-            let token = rest.get(..end)?.trim_end_matches('.');
-            let starts_ok = token.chars().next().is_some_and(|c| c.is_ascii_digit())
-                || token.chars().next().is_some_and(|c| c.is_ascii_uppercase());
-            (starts_ok && token.contains('.')).then(|| token.to_owned())
-        })
-        .collect()
+/// The ID of the main reference (OI-041).
+const MAIN_REFERENCE: &str = "HRM";
+
+/// The source of a requirement without citations.
+const PROJECT_DECISION: &str = "Project decision";
+
+/// The problem of one citation (REQ-046 criteria 3 and 5), if any.
+fn citation_problem(spec: &Spec, citation: &str) -> Option<String> {
+    let (id, rest) = citation.split_once(' ').unwrap_or((citation, ""));
+    let Some(reference) = spec.registry.iter().find(|r| r.id == id) else {
+        return Some(format!(
+            "`source` citation `{citation}` starts with `{id}`, which has no registry entry in \
+             {REFERENCE_DIR}/"
+        ));
+    };
+    let index = reference.path.with_extension("sections.txt");
+    let index = index.display();
+    if reference.sections.is_empty() {
+        return (!rest.is_empty()).then(|| {
+            format!("`source` citation `{citation}`: {index} has no sections, so the citation is only `{id}`")
+        });
+    }
+    let (key, title) = rest.split_once(' ').unwrap_or((rest, ""));
+    let Some(expected) = reference.sections.get(key) else {
+        return Some(if key.is_empty() {
+            format!("`source` citation `{citation}` has no section key of {index}")
+        } else {
+            format!("`source` cites {id} {key}, which is not in {index}")
+        });
+    };
+    let title_ok = title.is_empty()
+        || title
+            .strip_prefix(expected.as_str())
+            .is_some_and(|after| after.is_empty() || after.starts_with(' '));
+    (!title_ok).then(|| {
+        format!("`source` cites {id} {key} `{title}`, but the title in {index} is `{expected}`")
+    })
 }
 
-/// REQ-046: each `HRM n.m` of a source is in `docs/spec/hrm-sections.txt`, a source without
-/// an HRM section is `Project decision`, and a project decision has a `Notes` section.
-#[must_use]
-pub fn sources(spec: &Spec) -> Vec<Violation> {
+/// REQ-046 criteria 3 to 6: the citations of each requirement source.
+fn source_citations(spec: &Spec) -> Vec<Violation> {
     let mut out = Vec::new();
     for r in &spec.requirements {
-        let cited = hrm_sections(&r.source);
-        for section in &cited {
-            if !spec.hrm_sections.contains(section) {
-                let message = format!(
-                    "`source` cites HRM {section}, which is not in docs/spec/hrm-sections.txt"
-                );
+        if r.source == PROJECT_DECISION {
+            if r.section("Notes").is_none() {
+                let message = "`source` is `Project decision`, but there is no `Notes` section";
+                out.push(Violation::new(46, &r.path, None, message));
+            }
+            continue;
+        }
+        let citations: Vec<&str> = r.source.split("; ").collect();
+        for citation in &citations {
+            if let Some(message) = citation_problem(spec, citation) {
                 out.push(Violation::new(46, &r.path, None, message));
             }
         }
-        if cited.is_empty() && r.source != "Project decision" {
-            let message = format!(
-                "`source` `{}` names no HRM section and is not `Project decision`",
-                r.source
-            );
-            out.push(Violation::new(46, &r.path, None, message));
-        }
-        let decision = r
-            .source
-            .split(';')
-            .any(|part| part.trim().to_lowercase().starts_with("project decision"));
-        if decision && r.section("Notes").is_none() {
-            let message = "`source` is a project decision, but there is no `Notes` section";
+        let id = |c: &&str| c.split(' ').next().unwrap_or_default().to_owned();
+        let ids: Vec<String> = citations.iter().map(id).collect();
+        if ids.iter().any(|i| i == MAIN_REFERENCE)
+            && ids.iter().any(|i| i != MAIN_REFERENCE)
+            && ids.first().is_some_and(|i| i != MAIN_REFERENCE)
+        {
+            let message = "`source` cites the HRM and other references, but the first citation \
+                           is not an `HRM` citation";
             out.push(Violation::new(46, &r.path, None, message));
         }
     }
+    out
+}
+
+/// True if `url` has a 40-digit commit hash between two characters that are not letters
+/// or digits.
+fn has_commit_hash(url: &str) -> bool {
+    url.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|part| part.len() == 40 && part.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')))
+}
+
+/// True if `url` is an archive.org item path: `https://archive.org/download/<item>/<file>`.
+fn is_archive_item(url: &str) -> bool {
+    url.strip_prefix("https://archive.org/download/")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(item, file)| !item.is_empty() && !file.is_empty())
+}
+
+/// True if `url` is a Wayback Machine snapshot with a timestamp:
+/// `https://web.archive.org/web/<14 digits>[modifier]/<original URL>`.
+fn is_wayback_snapshot(url: &str) -> bool {
+    url.strip_prefix("https://web.archive.org/web/")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(stamp, original)| {
+            let digits = text::digits(stamp);
+            digits.len() == 14
+                && stamp[digits.len()..]
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_')
+                && !original.is_empty()
+        })
+}
+
+/// True if git tracks `file`. `None` if `root` is not a git checkout or git does not run.
+fn tracked_by_git(root: &Path, file: &str) -> Option<bool> {
+    if !root.join(".git").exists() {
+        return None;
+    }
+    let output = Command::new("git")
+        .args(["ls-files", "--", file])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    output.status.success().then_some(!output.stdout.is_empty())
+}
+
+/// REQ-046 criteria 7 and 8: the file, the checksum and the URL of each registry entry.
+fn registry_files(spec: &Spec, root: &Path) -> Vec<Violation> {
+    let mut out = Vec::new();
+    for reference in &spec.registry {
+        let mut problem = |message: String| {
+            out.push(Violation::new(46, &reference.path, None, message));
+        };
+        let file = reference.file.as_str();
+        match reference.storage {
+            Storage::Commit => {
+                let inside = file.starts_with("reference/")
+                    && !file.starts_with("reference/pinned/")
+                    && !file.starts_with("reference/text/");
+                if !inside {
+                    problem(format!(
+                        "`file` `{file}` of a `commit` reference is not in reference/ outside \
+                         reference/pinned/ and reference/text/"
+                    ));
+                    continue;
+                }
+                let Ok(bytes) = fs::read(root.join(file)) else {
+                    problem(format!("`file` `{file}` does not exist"));
+                    continue;
+                };
+                let actual = sha256::hex(&bytes);
+                if actual != reference.sha256 {
+                    problem(format!(
+                        "the SHA-256 of `{file}` is {actual}, not the `sha256` {}",
+                        reference.sha256
+                    ));
+                }
+                if tracked_by_git(root, file) == Some(false) {
+                    problem(format!("`file` `{file}` is not in git"));
+                }
+            }
+            Storage::Pin => {
+                if !file.starts_with("reference/pinned/") {
+                    problem(format!(
+                        "`file` `{file}` of a `pin` reference is not in reference/pinned/"
+                    ));
+                }
+                let url = reference.url.as_str();
+                if !(has_commit_hash(url) || is_archive_item(url) || is_wayback_snapshot(url)) {
+                    problem(format!(
+                        "`url` `{url}` of a `pin` reference has no commit hash, archive.org item \
+                         path or Wayback Machine timestamp"
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// REQ-046: the registry entries and section indices of `docs/spec/references/`, the
+/// committed and pinned files, and the citations of each requirement source.
+#[must_use]
+pub fn sources(spec: &Spec, root: &Path) -> Vec<Violation> {
+    let mut out = problems(spec, &[46]);
+    out.extend(registry_files(spec, root));
+    out.extend(source_citations(spec));
     out
 }
 
