@@ -130,8 +130,9 @@ and the `UPDATE_GOLDEN` variable). The tests of the comparison itself call `comp
 temporary directories, so that they never change the reference files.
 
 The reference files come from this emulator (`UPDATE_GOLDEN=1 cargo test -p atari-harness
---test golden`). The user reviews each new or changed reference image; an evidence record in
-`docs/verification/` keeps the review.
+--test golden`). The user reviews each new or changed reference image once, and
+`crates/harness/golden/README.md` records the review. An evidence record in
+`docs/verification/` is not used, because REQ-026 has the verification method `test`.
 
 ## Test suites
 
