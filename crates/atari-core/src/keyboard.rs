@@ -5,8 +5,10 @@
 //!
 //! Design: `docs/design/pokey.md`, "Module keyboard". Requirements: REQ-523, REQ-524.
 
-/// Frames that a typed key is held down: the key timing of the harness `type_text`
-/// (REQ-025) and of the frontend `--bas` typing (REQ-080).
+/// Frames that a typed key is held down by the harness `type_text` (REQ-025).
+///
+/// The frontend `--bas` typing (REQ-080) has a shorter timing of its own, which works only
+/// with the OS screen editor.
 pub const KEY_DOWN_FRAMES: u32 = 3;
 
 /// Frames between two typed keys (the key is up), as [`KEY_DOWN_FRAMES`].

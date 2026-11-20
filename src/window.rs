@@ -9,13 +9,14 @@ use std::time::{Duration, Instant};
 use minifb::{Window, WindowOptions};
 
 use crate::error::FrontendError;
-use crate::frontend::{DisplayFilters, Flow, Frontend, Pacer, render, window_size};
+use crate::frontend::{DisplayFilters, Flow, Frontend, Pacing, render, window_size};
 
 /// Shows the machine in a window until the user quits or `frames` frames have run.
 /// Returns the time from the first frame to the end. The time to open the window is not
 /// part of it (REQ-007).
 ///
-/// `filters` are the display filters of the window (REQ-019).
+/// `filters` are the display filters of the window (REQ-019). While a BASIC program is
+/// typed, the frames run in turbo ([`Pacing`], REQ-080).
 ///
 /// # Errors
 ///
@@ -47,22 +48,25 @@ pub fn run(
         .update_with_buffer(&buffer, width, height)
         .map_err(FrontendError::Window)?;
     let start = Instant::now();
-    let mut pacer = Pacer::new(standard, start);
+    let mut pacing = Pacing::new(standard, start);
     while window.is_open()
         && frames.is_none_or(|n| frontend.frames_run() < n)
         && frontend.step(&window.get_keys())? == Flow::Continue
     {
-        render(
-            frontend.machine().frame(),
-            standard,
-            filters,
-            scale,
-            &mut buffer,
-        );
-        window
-            .update_with_buffer(&buffer, width, height)
-            .map_err(FrontendError::Window)?;
-        thread::sleep(pacer.wait(Instant::now()));
+        let after = pacing.after_frame(frontend.typist().is_some(), Instant::now());
+        if after.present {
+            render(
+                frontend.machine().frame(),
+                standard,
+                filters,
+                scale,
+                &mut buffer,
+            );
+            window
+                .update_with_buffer(&buffer, width, height)
+                .map_err(FrontendError::Window)?;
+        }
+        thread::sleep(after.wait);
     }
     Ok(start.elapsed())
 }

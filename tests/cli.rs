@@ -9,9 +9,9 @@ use atari_mac::atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
 use atari_mac::atari_core::keyboard::ascii_to_kbcode;
 use atari_mac::atari_core::screen::{has_row, screen_text};
 use atari_mac::atari_core::{Machine, MachineConfig, VideoStandard, palette};
-use atari_mac::bas::{self, Phase, Typist};
+use atari_mac::bas::{self, KEY_DOWN_FRAMES, KEY_UP_FRAMES, Phase, Typist};
 use atari_mac::cli::Options;
-use atari_mac::frontend::Flow;
+use atari_mac::frontend::{Flow, Frontend};
 use atari_mac::start;
 // The binary uses this dependency; this test does not.
 use minifb as _;
@@ -674,7 +674,7 @@ fn bas_window_shows_typing() {
         "the line grows while it is typed: {parts:?}"
     );
 
-    let frames = frames_to_first_key(&bas) + 6 * 7;
+    let frames = frames_to_first_key(&bas) + u64::from(KEY_DOWN_FRAMES + KEY_UP_FRAMES) * 7;
     let rows = bas_screen(test, &bas, &[], frames);
     assert!(
         rows.iter()
@@ -699,5 +699,79 @@ fn bas_help_and_no_run_alone() {
         stderr(&output).contains("--no-run needs --bas"),
         "{}",
         stderr(&output)
+    );
+}
+
+/// A program with every character that has a key (the letters in upper case), split over
+/// lines that fit in the 38 columns of the screen, and lines with the same character two or
+/// more times in a row.
+const ALL_KEYS_PROGRAM: &str = "10 REM ABCDEFGHIJKLMNOPQRSTUVWXYZ
+20 REM 0123456789 ;+*-=,./<>:\\^_
+30 REM |[]?!\"#$%&'@()
+40 PRINT \"AA11  ;;\"
+50 REM AABBCCDDEEFFGGHHIIJJKKLLMMNN
+60 REM OOPPQQRRSSTTUUVVWWXXYYZZ
+70 REM 00112233445566778899;;++**--
+80 REM ==,,..//<<>>::\\\\^^__||[[]]??
+90 REM !!\"\"##$$%%&&''@@(())
+100 REM AAA111   ;;;:::
+";
+
+/// Runs `frontend` until its typist is done, then for `frames` more frames.
+fn run_until_typed(frontend: &mut Frontend, frames: u64) {
+    while frontend.typist().is_some() {
+        frontend.run_frames(1).expect("run");
+    }
+    frontend.run_frames(frames).expect("run");
+}
+
+/// Verifies REQ-080: with `--no-run`, the typed program is exactly the program of the file:
+/// after `LIST`, the screen shows each line of the file, for a file with every character
+/// that has a key and with lines with the same character two or more times in a row
+/// (criterion 9). `LIST` is typed with a second typist, after the first one is done.
+#[test]
+fn bas_typed_listing_equals_file() {
+    let bas = write_bas(
+        "bas_typed_listing_equals_file",
+        "keys.bas",
+        ALL_KEYS_PROGRAM,
+    );
+    let mut frontend = start(&bas_options(&bas, true)).expect("start");
+    run_until_typed(&mut frontend, 1);
+    let list: Vec<u8> = "LIST\n"
+        .chars()
+        .map(|c| ascii_to_kbcode(c).expect("key"))
+        .collect();
+    let mut frontend = frontend.with_typist(Typist::new(list));
+    run_until_typed(&mut frontend, 120);
+    let rows = screen_rows(frontend.machine());
+    let list_row = rows.iter().rposition(|row| row == "LIST");
+    assert!(list_row.is_some(), "a row LIST: {rows:#?}");
+    let listing: Vec<&str> = rows[list_row.map_or(0, |index| index + 1)..]
+        .iter()
+        .take_while(|row| *row != "Ready")
+        .map(String::as_str)
+        .filter(|row| !row.is_empty())
+        .collect();
+    let file: Vec<&str> = ALL_KEYS_PROGRAM.lines().collect();
+    assert_eq!(listing, file, "the listing on the screen: {rows:#?}");
+}
+
+/// Verifies REQ-080: the typing of `examples/pong.bas` ends within 2,300 frames after the
+/// `Ready` prompt (criterion 10). The typing includes `RUN`; after it, the game shows its
+/// score row.
+#[test]
+fn bas_pong_typing_frames() {
+    let pong = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/pong.bas");
+    let ready = frames_to_first_key(&pong);
+    let mut frontend = start(&bas_options(&pong, false)).expect("start");
+    run_until_typed(&mut frontend, 0);
+    let typing = frontend.frames_run() - ready;
+    assert!(typing <= 2300, "the typing took {typing} frames");
+    frontend.run_frames(120).expect("run");
+    let rows = screen_rows(frontend.machine());
+    assert!(
+        rows.iter().any(|row| row.starts_with("SCORE 0")),
+        "the game runs: {rows:#?}"
     );
 }

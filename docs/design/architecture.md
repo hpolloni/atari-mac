@@ -149,12 +149,65 @@ frontend calls `Typist::before_frame` before each frame, in `Frontend::step` (wi
 | Phase | Before each frame |
 | --- | --- |
 | `WaitReady(n)` | If a screen row is `Ready` (`screen::has_row`), go to `Typing` at key 0 in the same frame. Else, after 600 frames, stop with `FrontendError::BasicNotStarted` (exit status 1). |
-| `Typing { index, tick }` | At tick 0, `key_down(code)`; at tick `KEY_DOWN_FRAMES`, `key_up`. After `KEY_DOWN_FRAMES + KEY_UP_FRAMES` ticks, go to the next key, or to `Done`. |
+| `Typing { index, tick }` | If key `index` is typed (see below), go to key `index + 1` (or to `Done`) at tick 0. At tick 0, `key_down(code)`; at tick `KEY_DOWN_FRAMES`, `key_up`. |
 | `Done` | The frontend drops the typist. |
 
-The key timing is the timing of the harness `type_text` (3 frames down, 3 frames up). While
-the typist is active, `Frontend::step` ignores the host keys except quit (Command + Escape),
-and pause has no effect. With `--bas`, the window title names the program file.
+Key timing (`bas.rs`, criteria 9 and 10). Each key is down for `KEY_DOWN_FRAMES` = 1 frame
+and up for `KEY_UP_FRAMES` = 1 frame, or for `SAME_KEY_UP_FRAMES` = 3 frames when the next
+key code is the same. Then the typist waits until the OS variable `CH` (`$02FC`) is `$FF`
+(the screen editor read the key), at most `KEY_READ_TIMEOUT_FRAMES` = 120 frames. Then the
+key is typed. `examples/pong.bas` with `RUN` takes 1,161 frames after `Ready`.
+
+The timing is measured with `AltirraOS` and Altirra BASIC (2026-11-19): a program with every
+character that has a key, lines with doubled characters, and `examples/pong.bas` were typed
+and compared with `LIST`. Without the `CH` wait:
+
+| Down + up frames | Distinct keys | Same key twice | `pong.bas` |
+| --- | --- | --- | --- |
+| 1 + 1, 1 + 2, 2 + 1, 2 + 2 | correct | second key lost | keys lost |
+| 3 + 3 (the harness timing) | correct | correct | correct, 3,300 frames |
+
+The causes:
+
+- POKEY (REQ-518) registers a press 64 to 128 scanlines after the key goes down, and a
+  release 64 to 128 scanlines after it goes up. One frame (262 or 312 scanlines) is enough
+  for both, so 1 + 1 types each distinct key once.
+- Same key twice: the OS keyboard interrupt ignores the key code of the last key while the
+  debounce counter `KEYDEL` (`$02F1`) is not 0. The OS sets it to 3 when it accepts a key,
+  and the vertical blank interrupt decrements it only when it sees no key down. A frame
+  starts at the vertical blank (scanline 248), so the first VBI after `key_up` still sees
+  the key down. So the key must be up for 3 frames before the same key again (measured: 2
+  frames up lose the key, 3 frames up do not; the key-down time has no effect).
+- `pong.bas`: the OS has no key buffer. The interrupt writes each key to `CH`, also when
+  `CH` still holds a key. After RETURN, BASIC stores the line for up to 7 frames (a long
+  line), and the first digits of the next line number are lost (for example, line `110`
+  became line `10`). A fixed wait after RETURN would depend on the length of the line and
+  the program, so the typist waits for `CH` instead. With the `CH` wait, 1 + 1 (3 up before
+  the same key) types all test programs correctly.
+- The OS key repeat (`SRTIMR`, 48 frames before the first repeat) has no effect at 1 frame
+  down.
+
+The harness `type_text` (REQ-025) keeps its own timing (`keyboard::KEY_DOWN_FRAMES` and
+`KEY_UP_FRAMES` = 3 + 3, without the `CH` wait). The harness tests pass with the `--bas`
+timing, except `type_text_presses_return`, which checks the fixed frame count. But the
+`CH` wait works only when the OS screen editor reads the keys: a program that reads
+`KBCODE` itself never sets `CH` to `$FF`, and each key would wait for the timeout. The
+harness types into such programs too, and tests (REQ-438) depend on its fixed frame count.
+
+While the typist is active, `Frontend::step` ignores the host keys except quit (Command +
+Escape), and pause has no effect. With `--bas`, the window title names the program file.
+
+Turbo (criterion 7). The window loop calls `Pacing::after_frame(turbo, now)` after each
+frame, with `turbo` = `Frontend::typist().is_some()`: from the start of the machine (the
+wait for `Ready`) until the typing is done. In turbo, the wait is 0, and the window shows the
+frame only when `TURBO_PRESENT_INTERVAL` (50 ms) of host time passed since the last shown
+frame. One frame and one window update take much less than 50 ms, so the window shows a
+frame at least every 100 ms. The window reads the host keys (quit) at each shown frame.
+After turbo, `Pacing` starts a new `Pacer` at the current time, shows each frame and waits
+as in REQ-007. Measured on the development Mac (release build, 2026-11-19): `pong.bas`
+with `RUN` (196 frames to `Ready`, then 1,161 frames of typing) takes 2.15 s headless
+(1.83 s for the typing) and 2.27 s in the window (about 1.9 s for the typing), against
+22.6 s for 1,357 frames at real-time speed.
 
 ## Error handling
 
@@ -173,7 +226,7 @@ file error.
 | REQ-006 | `crates/harness/tests/boot.rs` `option_key_disables_basic`, `basic_is_mapped_without_option` |
 | REQ-012 | `tests/cli.rs` `loads_cart_xex_and_disk` (criterion 1), `rejects_bad_cart_xex_and_disk` (criterion 2) |
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
-| REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_turbo_until_typed` (7, frontend unit test), `bas_typed_listing_equals_file` (9), `bas_pong_typing_frames` (10) |
+| REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
 | REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md` |
 | REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md` |
