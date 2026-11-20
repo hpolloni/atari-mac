@@ -30,8 +30,11 @@ macOS frontend is the root crate `atari-mac`. `README.md` gives the layout and t
 - Integration bugs between two designs are not user questions. The lead fixes them.
 - When a requirement is wrong or cannot be met, a teammate reports it and does not weaken the
   test. The lead changes the requirement, or asks the user when the change is a decision.
-- The hardware source is the Altirra Hardware Reference Manual (`reference/`, from
-  `make roms`). Check a claim against the HRM text before you show it to the user.
+- The main hardware source is the Altirra Hardware Reference Manual (HRM,
+  `reference/altirra-hardware-reference.pdf`, in git). The other references are second
+  sources (OI-041), listed in `docs/spec/references/`; `make reference` downloads the pinned
+  ones. The HRM is correct when two references do not agree. Check a claim against the HRM
+  text, and against the second sources that cover it, before you show it to the user.
 
 ## Order of work for each change
 
