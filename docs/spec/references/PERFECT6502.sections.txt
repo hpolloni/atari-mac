@@ -1,0 +1,3 @@
+# perfect6502 at commit 09fc542877a84318291aa42dab143a3e2c3db974. The pinned file is its
+# README.md, which has no numbered sections, so the index has no section lines and a citation
+# is only the ID.

@@ -1,0 +1,46 @@
+# Headings, tables and figures of the Rockwell R6520 Peripheral Interface Adapter (PIA) data
+# sheet (Document No. 29651N30, Order No. 2127, Rev. 4, June 1987). The data sheet has no
+# table of contents and its headings are not numbered. Made by hand from the OCR text of the
+# archive.org item, in the order of the pages.
+# Format: one entry per line, key<TAB>title (page N). N is the page of the PDF.
+# Key rule: a table has the key table-<number> and a figure the key figure-<number>, as the
+# data sheet numbers them. A heading has a key in lower case with "-" between the words,
+# made from the heading.
+description	Description (page 1)
+features	Features (page 1)
+ordering-information	Ordering Information (page 1)
+figure-1	Figure 1. R6520 Pin Configuration (page 1)
+functional-description	Functional Description (page 2)
+figure-2	Figure 2. R6520 PIA Block Diagram (page 2)
+data-input-register	Data Input Register (DIR) (page 3)
+control-registers	Control Registers (CRA and CRB) (page 3)
+data-direction-registers	Data Direction Registers (DDRA, DDRB) (page 3)
+peripheral-output-registers	Peripheral Output Registers (ORA, ORB) (page 3)
+interrupt-status-control	Interrupt Status Control (ISCA, ISCB) (page 3)
+peripheral-io-ports	Peripheral I/O Ports (PA0-PA7, PB0-PB7) (page 3)
+table-1	Table 1. Control Registers Bit Designations (page 3)
+data-bus-buffer	Data Bus Buffer (DBB) (page 4)
+interface-signals	Interface Signals (page 4)
+chip-select	Chip Select (CS0, CS1, CS2) (page 4)
+reset-signal	Reset Signal (RES) (page 4)
+clock-signal	Clock Signal (Phase 2) (page 4)
+read-write-signal	Read/Write Signal (R/W) (page 4)
+register-select	Register Select (RS0, RS1) (page 4)
+figure-3	Figure 3. Interface Signals Relationship (page 4)
+table-2	Table 2. Internal Register Addressing (page 5)
+table-3	Table 3. IRQA and IRQB Control Summary (page 5)
+interrupt-request-lines	Interrupt Request Lines (IRQA, IRQB) (page 5)
+interrupt-input-peripheral-control-lines	Interrupt Input/Peripheral Control Lines (page 5)
+figure-4	Figure 4. Control Line Operations Summary (pages 6 and 7)
+reading-peripheral-a	Reading the Peripheral A I/O Port (page 8)
+reading-peripheral-b	Reading the Peripheral B I/O Port (page 8)
+figure-5	Figure 5. Read Timing Waveforms (page 8)
+figure-6	Figure 6. Write Timing Waveforms (page 9)
+bus-timing-characteristics	Bus Timing Characteristics (page 10)
+read-timing	Read Timing (page 10)
+write-timing	Write Timing (page 10)
+peripheral-interface-timing	Peripheral Interface Timing (page 10)
+absolute-maximum-ratings	Absolute Maximum Ratings (page 11)
+operating-conditions	Operating Conditions (page 11)
+dc-characteristics	DC Characteristics (page 11)
+package-dimensions	Package Dimensions (page 12)

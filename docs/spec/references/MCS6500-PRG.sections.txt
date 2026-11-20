@@ -1,0 +1,170 @@
+# Section numbers and titles of the MCS6500 Microcomputer Family Programming Manual (6500-50A,
+# January 1976, second edition, revision A), from its table of contents (pages i to vi).
+# Made by hand from the OCR text of the archive.org item. A teammate corrected the OCR errors
+# in the titles with the section headings in the body text.
+# Format: one section per line, key<TAB>title. The key is the section number as the manual
+# prints it (for example 3.3). An appendix has the key App-<letter> (for example App-B), and a
+# numbered part of an appendix has the key App-<number> (for example App-E.4).
+1.0	Manual Introduction
+1.1	Microprocessor Architecture
+2.0	The Data Bus
+2.1	The Accumulator
+2.1.1	LDA - Load Accumulator with Memory
+2.1.2	STA - Store Accumulator in Memory
+2.2	The Arithmetic Unit
+2.2.1	ADC - Add Memory with Carry to Accumulator
+2.2.1.0	Multiple Precision Addition
+2.2.1.1	Signed Arithmetic
+2.2.1.2	Decimal Addition
+2.2.1.3	Add Summary
+2.2.2	SBC - Subtract Memory from Accumulator with Borrow
+2.2.2.0	Multiple Precision Subtraction
+2.2.2.1	Signed Arithmetic
+2.2.2.2	Decimal Subtract
+2.2.3	Carry and Overflow During Arithmetic Operations
+2.2.4	Logical Operands
+2.2.4.1	AND - "AND" Memory with Accumulator
+2.2.4.2	ORA - "OR" Memory with Accumulator
+2.2.4.3	EOR - "Exclusive OR" Memory with Accumulator
+3.0	Carry Flag (C)
+3.0.1	SEC - Set Carry Flag
+3.0.2	CLC - Clear Carry Flag
+3.1	Zero Flag (Z)
+3.2	Interrupt Disable (I)
+3.2.1	SEI - Set Interrupt Disable
+3.2.2	CLI - Clear Interrupt Disable
+3.3	Decimal Mode Flag (D)
+3.3.1	SED - Set Decimal Mode
+3.3.2	CLD - Clear Decimal Mode
+3.4	Break Command (B)
+3.5	Expansion Bit
+3.6	Overflow (V)
+3.6.1	CLV - Clear Overflow Flag
+3.6.2	Determination of Overflow
+3.7	Negative Flag (N)
+3.8	Flag Summary
+4.0	Concepts of Program Sequence
+4.0.1	Use of Program Counter to Fetch an Instruction
+4.0.2	JMP - Jump to New Location
+4.1	Branching
+4.1.1	Basic Concept of Relative Addressing
+4.1.2	Branch Instructions
+4.1.2.1	BMI - Branch on Result Minus
+4.1.2.2	BPL - Branch on Result Plus
+4.1.2.3	BCC - Branch on Carry Clear
+4.1.2.4	BCS - Branch on Carry Set
+4.1.2.5	BEQ - Branch on Result Zero
+4.1.2.6	BNE - Branch on Result Not Zero
+4.1.2.7	BVS - Branch on Overflow Set
+4.1.2.8	BVC - Branch on Overflow Clear
+4.1.3	Branch Summary
+4.1.4	Solution to Branch Out of Range
+4.2	Test Instructions
+4.2.1	CMP - Compare Memory and Accumulator
+4.2.2	Bit Testing
+4.2.2.1	BIT - Test Bits in Memory with Accumulator
+5.0	Addressing Techniques
+5.1	Concepts of Pipelining and Program Sequence
+5.2	Memory Utilization
+5.2.1	I/O Control
+5.2.2	Memory Allocation
+5.3	Implied Addressing
+5.4	Immediate Addressing
+5.5	Absolute Addressing
+5.6	Zero Page Addressing
+5.7	Relative Addressing
+6.0	General Concept of Indexing
+6.1	Absolute Indexed
+6.2	Zero Page Indexed
+6.3	Indirect Addressing
+6.4	Indexed Indirect Addressing
+6.5	Indirect Indexed Addressing
+6.6	Indirect Absolute
+6.7	Application of Indexes
+7.0	LDX - Load Index Register X from Memory
+7.1	LDY - Load Index Register Y from Memory
+7.2	STX - Store Index Register X in Memory
+7.3	STY - Store Index Register Y in Memory
+7.4	INX - Increment Index Register X by One
+7.5	INY - Increment Index Register Y by One
+7.6	DEX - Decrement Index Register X by One
+7.7	DEY - Decrement Index Register Y by One
+7.8	CPX - Compare Index Register X to Memory
+7.9	CPY - Compare Index Register Y to Memory
+7.10	Transfers Between the Index Registers and Accumulator
+7.11	TAX - Transfer Accumulator to Index X
+7.12	TXA - Transfer Index X to Accumulator
+7.13	TAY - Transfer Accumulator to Index Y
+7.14	TYA - Transfer Index Y to Accumulator
+7.15	Summary of Index Register Applications and Manipulations
+8.0	Introduction to Stack and to Push Down Stack Concept
+8.1	JSR - Jump to Subroutine
+8.2	RTS - Return from Subroutine
+8.3	Implementation of Stack in MCS6501 Through MCS6505
+8.3.1	Summary of Stack Implementation
+8.4	Use of the Stack by the Programmer
+8.5	PHA - Push Accumulator on Stack
+8.6	PLA - Pull Accumulator from Stack
+8.7	Use of Pushes and Pulls to Communicate Variables Between Subroutine Operations
+8.8	TXS - Transfer Index X to Stack Pointer
+8.9	TSX - Transfer Stack Pointer to Index X
+8.10	Saving of the Processor Status Pointer
+8.11	PHP - Push Processor Status on Stack
+8.12	PLP - Pull Processor Status from Stack
+8.13	Summary on the Stack
+9.0	Vectors
+9.1	Reset or Restart
+9.2	Start Function
+9.3	Programmer Considerations for Initialization Sequences
+9.4	Restart
+9.5	Interrupt Considerations
+9.6	RTI - Return from Interrupt
+9.7	Software Polling for Interrupt Causes
+9.8	Fully Vectored Interrupts
+9.8.1	JMP Indirect
+9.9	Interrupt Summary
+9.10	Non-Maskable Interrupt
+9.11	BRK - Break Command
+9.12	Memory Map
+10.0	Definition of Shift and Rotate
+10.1	LSR - Logical Shift Right
+10.2	ASL - Arithmetic Shift Left
+10.3	ROL - Rotate Left
+10.4	ROR - Rotate Right
+10.5	Accumulator Mode Addressing
+10.6	Read/Modify/Write Instructions
+10.7	INC - Increment Memory by One
+10.8	DEC - Decrement Memory by One
+10.9	General Note on Read/Modify/Write Instructions
+11.0	Review of MCS6520 for I/O Operations
+11.1	MCS6520 Interrupt Control
+11.2	Implementation Tricks for Use of the MCS6520 Peripheral Interface Devices
+11.2.1	Shortcut Polling Sequences
+11.2.2	Bit Organization on MCS6520s
+11.2.3	Use of READ/MODIFY/WRITE Instruction for Keyboard Encoding
+11.3	MCS6530 Programming
+11.3.1	Reading of the Counter Register
+11.4	How to Organize to Implement Coding
+11.4.1	Label Standards
+11.5	Comprehensive I/O Program
+App-A	Instruction List, Alphabetic by Mnemonic, Definition of Instruction Groups
+App-A.1	Introduction
+App-A.2	Group One Instructions
+App-A.3	Group Two Instructions
+App-A.4	Group Three Instructions
+App-B	Instruction List, Alphabetic by Mnemonic, with OP CODEs, Execution Cycles and Memory Requirements
+App-C	Instruction Addressing Modes and Related Execution Times
+App-D	Operation Code Instruction Listing Hexadecimal Sequence
+App-E	Summary of Addressing Modes
+App-E.1	Implied Addressing
+App-E.2	Immediate Addressing
+App-E.3	Absolute Addressing
+App-E.4	Zero Page Addressing
+App-E.5	Relative Addressing
+App-E.6	Absolute Indexed Addressing
+App-E.7	Zero Page Indexed Addressing
+App-E.8	Indexed Indirect Addressing
+App-E.9	Indirect Indexed Addressing
+App-F	MCS650X Programming Model
+App-G	Discussion - Indirect Addressing
+App-H	Review of Binary and Binary Coded Decimal Arithmetic

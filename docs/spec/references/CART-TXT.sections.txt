@@ -1,0 +1,122 @@
+# Cartridge types of Atari800 DOC/cart.txt at commit 98cc2dc749867c9c7317a0271ba062a6c797f886,
+# from its table "Currently supported cartridge types" (the Name column). The file is GPLv2:
+# this index lists only the type numbers and the short names, not the descriptions.
+# Made with this command, in the directory that holds reference/pinned/:
+#   awk -F'|' '/^\| *[0-9]+ *\|/{for(i=2;i<=5;i++){gsub(/^ +| +$/,"",$i)}; print "type-"$2"\t"$5}' \
+#     reference/pinned/atari800-cart.txt
+# Format: one cartridge type per line, key<TAB>title. Key rule: type-<N>, where N is the
+# cartridge type number of the CART header (the Id column).
+type-1	Standard 8 KB cartridge
+type-2	Standard 16 KB cartridge
+type-3	OSS two chip 16 KB cartridge (034M)
+type-4	Standard 32 KB 5200 cartridge
+type-5	DB 32 KB cartridge
+type-6	Two chip 16 KB 5200 cartridge
+type-7	Bounty Bob Strikes Back 40 KB 5200 cartridge
+type-8	64 KB Williams cartridge
+type-9	Express 64 KB cartridge
+type-10	Diamond 64 KB cartridge
+type-11	SpartaDOS X 64 KB cartridge
+type-12	XEGS 32 KB cartridge
+type-13	XEGS 64 KB cartridge (banks 0-7)
+type-14	XEGS 128 KB cartridge
+type-15	OSS one chip 16 KB cartridge
+type-16	One chip 16 KB 5200 cartridge
+type-17	Decoded Atrax 128 KB cartridge
+type-18	Bounty Bob Strikes Back 40 KB cartridge
+type-19	Standard 8 KB 5200 cartridge
+type-20	Standard 4 KB 5200 cartridge
+type-21	Right slot 8 KB cartridge
+type-22	32 KB Williams cartridge
+type-23	XEGS 256 KB cartridge
+type-24	XEGS 512 KB cartridge
+type-25	XEGS 1 MB cartridge
+type-26	MegaCart 16 KB cartridge
+type-27	MegaCart 32 KB cartridge
+type-28	MegaCart 64 KB cartridge
+type-29	MegaCart 128 KB cartridge
+type-30	MegaCart 256 KB cartridge
+type-31	MegaCart 512 KB cartridge
+type-32	MegaCart 1 MB cartridge
+type-33	Switchable XEGS 32 KB cartridge
+type-34	Switchable XEGS 64 KB cartridge
+type-35	Switchable XEGS 128 KB cartridge
+type-36	Switchable XEGS 256 KB cartridge
+type-37	Switchable XEGS 512 KB cartridge
+type-38	Switchable XEGS 1 MB cartridge
+type-39	Phoenix 8 KB cartridge
+type-40	Blizzard 16 KB cartridge
+type-41	Atarimax 128 KB Flash cartridge
+type-42	Atarimax 1 MB Flash cartridge (old)
+type-43	SpartaDOS X 128 KB cartridge
+type-44	OSS 8 KB cartridge
+type-45	OSS two chip 16 KB cartridge (043M)
+type-46	Blizzard 4 KB cartridge
+type-47	AST 32 KB cartridge
+type-48	Atrax SDX 64 KB cartridge
+type-49	Atrax SDX 128 KB cartridge
+type-50	Turbosoft 64 KB cartridge
+type-51	Turbosoft 128 KB cartridge
+type-52	Ultracart 32 KB cartridge
+type-53	Low bank 8 KB cartridge
+type-54	SIC! 128 KB cartridge
+type-55	SIC! 256 KB cartridge
+type-56	SIC! 512 KB cartridge
+type-57	Standard 2 KB cartridge
+type-58	Standard 4 KB cartridge
+type-59	Right slot 4 KB cartridge
+type-60	Blizzard 32 KB cartridge
+type-61	MegaMax 2 MB cartridge
+type-62	The!Cart 128 MB cartridge
+type-63	Flash MegaCart 4 MB cartridge
+type-64	MegaCart 2 MB cartridge
+type-65	The!Cart 32 MB cartridge
+type-66	The!Cart 64 MB cartridge
+type-67	XEGS 64 KB cartridge (banks 8-15)
+type-68	Atrax 128 KB cartridge
+type-69	aDawliah 32 KB cartridge
+type-70	aDawliah 64 KB cartridge
+type-71	Super Cart 64 KB 5200 cartridge (32K banks)
+type-72	Super Cart 128 KB 5200 cartridge (32K banks)
+type-73	Super Cart 256 KB 5200 cartridge (32K banks)
+type-74	Super Cart 512 KB 5200 cartridge (32K banks)
+type-75	Atarimax 1 MB Flash cartridge (new)
+type-76	16 KB Williams cartridge
+type-77	MIO diagnostics 8KB cartridge
+type-78	Telelink II cartridge
+type-79	Pronto cartridge
+type-80	JRC64 cartridge (linear)
+type-81	MDDOS cartridge
+type-82	COS32 cartridge
+type-83	SIC+ 1024 KB cartridge
+type-84	Corina 1M+8K EEPROM
+type-85	Corina 512K + 512K SRAM + 8K EEPROM
+type-86	XE Multicart (8KB)
+type-87	XE Multicart (16KB)
+type-88	XE Multicart (32KB)
+type-89	XE Multicart (64KB)
+type-90	XE Multicart (128KB)
+type-91	XE Multicart (256KB)
+type-92	XE Multicart (512KB)
+type-93	XE Multicart (1024KB)
+type-94	Ram-Cart 64 KB cartridge
+type-95	Ram-Cart 128 KB cartridge
+type-96	Double Ram-Cart 2x128/256 KB cartridge
+type-97	Ram-Cart 1 MB cartridge
+type-98	Ram-Cart 2 MB cartridge
+type-99	Ram-Cart 4 MB cartridge
+type-100	Ram-Cart 8 MB cartridge
+type-101	Ram-Cart 16 MB cartridge
+type-102	Ram-Cart 32 MB cartridge
+type-103	SiDiCar 32 KB cartridge
+type-104	J(atari)Cart8(kB)
+type-105	J(atari)Cart16(kB)
+type-106	J(atari)Cart32(kB)
+type-107	J(atari)Cart64(kB)
+type-108	J(atari)Cart128(kB)
+type-109	J(atari)Cart256(kB)
+type-110	J(atari)Cart512(kB)
+type-111	J(atari)Cart1024(kB)
+type-112	DCart 512 KB
+type-159	Bounty Bob Strikes Back 40 KB 5200 alt.
+type-160	JRC64 cartridge (interleaved)
