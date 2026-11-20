@@ -17,6 +17,9 @@
 # HW-II.A/Cycle-Counting. In HW-III the key after the "/" is the register name, or the
 # first and the last name of a register group: HW-III.B/NMIEN, HW-III.D/COLPF0-COLPF3.
 #
+# Missing pages: chapters 3 and 4 of the OS part (printed pages 25-40) are not in this scan.
+# Their sections are comment lines ("# missing:"), so that no requirement can cite them.
+#
 # How it was made: from the text layer of the PDF (Adobe Paper Capture OCR), with each OCR
 # error corrected against the page image ("1/0" is "I/O", "CIa" is "CIO", "as" is "OS",
 # "Q." is "G.", "~." is "J.").
@@ -37,17 +40,17 @@ OS-2/Input-Output-Subsystem	Input/Output Subsystem
 OS-2/Interrupt-Processing	Interrupt Processing
 OS-2/Initialization	Initialization
 OS-2/Floating-Point-Arithmetic-Package	Floating Point Arithmetic Package
-OS-3	CONFIGURATIONS
+# missing: OS-3	CONFIGURATIONS
 OS-3/Program-Environments	Program Environments
-OS-3/RAM-Expansion	RAM Expansion
-OS-3/Peripheral-Devices	Peripheral Devices
-OS-4	SYSTEM MEMORY UTILIZATION
-OS-4/RAM-Region	RAM Region
+# missing: OS-3/RAM-Expansion	RAM Expansion
+# missing: OS-3/Peripheral-Devices	Peripheral Devices
+# missing: OS-4	SYSTEM MEMORY UTILIZATION
+# missing: OS-4/RAM-Region	RAM Region
 OS-4/Cartridges-A-and-B	Cartridges A and B
-OS-4/Mapped-I-O	Mapped I/O
+# missing: OS-4/Mapped-I-O	Mapped I/O
 OS-4/Resident-OS-and-Floating-Point-Package-ROM	Resident OS and Floating Point Package ROM
 OS-4/Central-Data-Base-Description	Central Data Base Description
-OS-4/Memory-Dynamics	Memory Dynamics
+# missing: OS-4/Memory-Dynamics	Memory Dynamics
 OS-5	I/O SUBSYSTEM
 OS-5/Central-I-O-Utility	Central I/O Utility
 OS-5/CIO-Functions	CIO Functions
