@@ -5,7 +5,6 @@ use core::iter;
 
 use super::{FONT, Rec, Rig, SCREEN, codes, cycles_of, every, on_line};
 use crate::antic::{DmaKind, LINE_BUFFER_SIZE};
-use crate::planned::planned;
 use crate::timing::{VBLANK_START_LINE, VideoStandard};
 
 /// A different byte for each address, with bits 7-6 never `%11`.
@@ -398,12 +397,65 @@ fn hscrol_bit0_mid_line() {
     assert_ne!(written[0x80..0xD0], plain[0x80..0xD0], "the codes move");
 }
 
-/// Verifies REQ-345: a write of `$04` to `HSCROL` on cycle 50 of a `$18` line gives the DMA
-/// clock values of the criterion on that scan line and the next two.
+/// The DMA clock `dma_clock` after the tick of cycle `cycle`, in the bit order of HRM 4.12.
+///
+/// The debug state gives stage `k` in bit `k`. HRM bit `j` is stage `(j + cycle) mod 8`, so
+/// on the cycles 0, 8, 16, ... (the ring phase of the start of the scan line) HRM bit `j` is
+/// stage `j`. The reasons:
+///
+/// - The HRM text does not define its bit order. Its `HSCROL` = `$02` example shows one bit
+///   that stays in bit 6 (the bit of the start event of the scan line) and one abnormal bit
+///   that moves up 2 bit positions on each scan line (1, 3, 5, 7, then 1 again). A scan line
+///   is 114 cycles and 114 mod 8 = 2, so at the same cycle of the next scan line each bit of
+///   the 8-stage ring is 2 stages further. Thus the HRM bit number increases with the stage
+///   number. A reversed order (HRM bit 7 is stage 0) gives the 4 patterns in the opposite
+///   sequence.
+/// - The pattern shifts one stage on each cycle, so it has a fixed form only relative to a
+///   fixed ring phase. The rotation by `cycle mod 8` gives the pattern in the phase of
+///   cycle 0 on each cycle of the scan line.
+fn hrm_order(dma_clock: u8, cycle: u32) -> u8 {
+    dma_clock.rotate_right(cycle % 8)
+}
+
+/// Verifies REQ-345: a `$18` line with `DMACTL` = `$22` starts with `HSCROL` = `$00`, and a
+/// write of `$02` to `HSCROL` on cycle 50 of its first scan line puts the DMA clock in an
+/// abnormal state. On the following scan lines, the DMA clock in the HRM 4.12 bit order
+/// cycles through `%01000010`, `%01001000`, `%01100000`, `%11000000`, and the stop event
+/// never clears the abnormal bit.
 #[test]
-#[ignore = "planned: SLICE-02"]
-fn abnormal_dma_hscrol_0_to_4_mode_8() {
-    planned();
+fn abnormal_dma_hscrol_0_to_2_mode_8() {
+    // The HRM example (HRM 4.12, Abnormal DMA patterns across scan lines) does not say on
+    // which cycle of the scan line its patterns are. At the start of the scan line the stop
+    // event of the previous scan line already removed the start bit (HRM bit 6), so the
+    // 2-bit patterns of the HRM are the clock during playfield DMA: after the start event
+    // (cycle 10: wide fetch width, start 9 + `HSCROL` / 2) and before the stop event
+    // (cycle 106: 105 + `HSCROL` / 2). The test checks each cycle of the scan line: from
+    // cycle 10 to 105 the HRM pattern, on the other cycles the HRM pattern without bit 6.
+    const PATTERNS: [u8; 4] = [0b0100_0010, 0b0100_1000, 0b0110_0000, 0b1100_0000];
+    const START_BIT: u8 = 0b0100_0000;
+    // Three `$18` lines: scan lines 8-31.
+    let mut rig = rig(0x22, &[0x18, 0x18, 0x18, 0x41, 0x00, 0x10]);
+    assert_eq!(rig.antic.debug_state().hscrol, 0x00, "HSCROL at the start");
+    rig.seek_after(8, 50);
+    rig.write(0x04, 0x02);
+    rig.seek(9, 0);
+    // Scan lines 9-24: four periods of four scan lines, over two mode line boundaries.
+    for (index, line) in (9..=24_u32).enumerate() {
+        let pattern = PATTERNS[index % 4];
+        for cycle in 0..114 {
+            rig.skip(1);
+            let expected = if (10..=105).contains(&cycle) {
+                pattern
+            } else {
+                pattern & !START_BIT
+            };
+            let clock = hrm_order(rig.antic.debug_state().dma_clock, cycle);
+            assert_eq!(
+                clock, expected,
+                "line {line}, cycle {cycle}: %{clock:08b}, expected %{expected:08b}"
+            );
+        }
+    }
 }
 
 /// A rig in an abnormal DMA state at scan line 9: the `$5x` line `mode` (mode E or 2) on
