@@ -18,6 +18,7 @@
 //! | Module | Contents |
 //! | --- | --- |
 //! | [`cpu`] | MOS 6502 (NMOS, with undocumented opcodes), one bus access per cycle |
+//! | [`debug`] | The CPU hook types of the trace and the monitor (REQ-086) |
 //! | [`disasm`] | 6502 disassembler: the text and length of each opcode (REQ-087) |
 //! | [`antic`] | ANTIC: display list, DMA, cycle stealing, NMI, `WSYNC`, `VCOUNT` |
 //! | [`gtia`] | GTIA: playfield colors, player/missile graphics, collisions, triggers, `CONSOL` |
@@ -33,6 +34,7 @@
 
 pub mod antic;
 pub mod cpu;
+pub mod debug;
 pub mod disasm;
 mod events;
 pub mod gtia;

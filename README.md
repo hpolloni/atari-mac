@@ -23,10 +23,10 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
 | [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 8 | 0 | 0 | 0 |
 | [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | in-progress | 3 | 0 | 0 | 0 |
-| [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 1 | 1 | 0 | 0 |
+| [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 2 | 0 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
 
-All 288 requirements: 279 tested, 4 pending, 0 missing, 5 not a test requirement. Implemented: 230. Open items with the status `open`: 30.
+All 288 requirements: 280 tested, 3 pending, 0 missing, 5 not a test requirement. Implemented: 231. Open items with the status `open`: 30.
 
 <!-- END GENERATED: status -->
 
@@ -74,6 +74,9 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | `--headless`, `--frames <n>`, `--screenshot <file>` | Run without a window for `n` frames, and save the last frame as a PNG file |
 | `--stats` | Each second, write the speed statistics to standard error (frame rate, speed, emulation time, turbo, tape motor, audio underruns) |
 | `--log <categories>` | Write log records to standard error. Categories, separated by commas: `tape`, `sio`, `reset`, `media`, `frontend`, `all`; add `:debug` for more detail (for example `sio:debug`) |
+| `--trace <file>` | Write one line for each CPU instruction and each interrupt sequence to the file: frame, scan line, horizontal position, cycle, address, bytes, disassembly and registers |
+| `--trace-from <frame>` | With `--trace`: the first frame of the trace (default 0) |
+| `--trace-frames <n>` | With `--trace`: the number of frames of the trace (default 1) |
 
 Keys: F1 inverse, F2 START, F3 SELECT, F4 OPTION, F5 RESET, F6 HELP, F7 BREAK, F9 pause,
 F10 cold reset, the arrow keys and the left Option key for joystick 1, Command+Escape quit.

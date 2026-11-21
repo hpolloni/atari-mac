@@ -61,6 +61,13 @@ pub enum FrontendError {
         /// The frames that the frontend waited.
         frames: u32,
     },
+    /// The trace file of `--trace` cannot be created or written (REQ-086 criterion 6).
+    Trace {
+        /// The trace file.
+        path: PathBuf,
+        /// The cause.
+        source: io::Error,
+    },
     /// The window cannot be opened or updated.
     Window(minifb::Error),
     /// Standard output cannot be written.
@@ -78,7 +85,8 @@ impl FrontendError {
             | Self::Rom { .. }
             | Self::Media { .. }
             | Self::Screenshot { .. }
-            | Self::BasCharacter { .. } => 2,
+            | Self::BasCharacter { .. }
+            | Self::Trace { .. } => 2,
             Self::BasicNotStarted { .. } | Self::Window(_) | Self::Output(_) => 1,
         }
     }
@@ -100,6 +108,7 @@ impl fmt::Display for FrontendError {
                 )
             }
             Self::Screenshot { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::Trace { path, source } => write!(f, "trace file {}: {source}", path.display()),
             Self::BasCharacter {
                 path,
                 line,
@@ -136,7 +145,9 @@ impl Error for FrontendError {
             | Self::Unsupported(_)
             | Self::BasCharacter { .. }
             | Self::BasicNotStarted { .. } => None,
-            Self::Read { source, .. } | Self::Output(source) => Some(source),
+            Self::Read { source, .. } | Self::Trace { source, .. } | Self::Output(source) => {
+                Some(source)
+            }
             Self::Rom { error, .. } => Some(error),
             Self::Media { error, .. } => Some(error),
             Self::Screenshot { source, .. } => Some(source),

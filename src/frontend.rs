@@ -9,6 +9,7 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use atari_core::debug::RunEnd;
 use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
 use atari_core::media::{Cartridge, DiskImage, MediaError, Tape, Xex};
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
@@ -20,6 +21,7 @@ use crate::cli::Options;
 use crate::error::FrontendError;
 use crate::keymap::InputState;
 use crate::logging::FRONTEND_TARGET;
+use crate::trace::TraceWriter;
 
 /// Sends one record of the category `frontend` (REQ-085 criterion 3) with the frame count
 /// and the cycle count of `machine` at the call: the counts at the start of the frame that
@@ -313,6 +315,8 @@ pub struct Frontend {
     tape_turbo: bool,
     /// The turbo cause of the last frame that ran (REQ-085 criterion 3).
     turbo_cause: Option<TurboCause>,
+    /// The trace writer of `--trace` (REQ-086).
+    trace: Option<TraceWriter<BufWriter<File>>>,
 }
 
 impl Frontend {
@@ -329,7 +333,21 @@ impl Frontend {
             audio: Vec::new(),
             tape_turbo: false,
             turbo_cause: None,
+            trace: None,
         }
+    }
+
+    /// Writes the trace of REQ-086 with `writer` in the frames that it wants. The other
+    /// frames run with the plain `Machine::run_frame`.
+    #[must_use]
+    pub fn with_trace(mut self, writer: TraceWriter<BufWriter<File>>) -> Self {
+        self.trace = Some(writer);
+        self
+    }
+
+    /// Takes the trace writer, to finish it at the end of the run.
+    pub const fn take_trace(&mut self) -> Option<TraceWriter<BufWriter<File>>> {
+        self.trace.take()
     }
 
     /// Types `typist`'s keys before the frames that come next (REQ-080). While it types,
@@ -434,7 +452,12 @@ impl Frontend {
             );
         }
         let start = self.machine.cycle_count();
-        self.machine.run_frame();
+        match &mut self.trace {
+            Some(trace) if trace.wants(self.machine.frame_count()) => {
+                let _end: RunEnd = self.machine.run_frame_with(trace);
+            }
+            _ => self.machine.run_frame(),
+        }
         self.last_frame_cycles = self.machine.cycle_count() - start;
         self.frames_run += 1;
         self.audio.clear();

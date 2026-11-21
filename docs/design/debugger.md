@@ -285,9 +285,12 @@ frontend does not save a state while the monitor is open.
 ### Hooked run and the cycle order
 
 `run_frame_with` runs the same steps as `run_cycle` (system.md, "Timing"), and adds the hook
-calls. One generic function holds the steps. `run_cycle` and `run_frame` call it with
-`NoHook`, whose methods are empty and inline. Thus the plain run has no added branch, call or
-memory access in each cycle, and REQ-007 applies without change. The teammate measures the
+calls. One function, `cycle_with(Option<&mut dyn CpuHook>)`, holds the steps. `run_cycle`
+and `run_frame` call it with `None`, and `run_frame_with` with the hook. The plain run thus
+has one predictable branch at each hook point and no call. A generic function with `NoHook`
+was the first design, but its two copies of the cycle stopped the inlining of the chip
+functions into the plain loop, and the plain run became about 10 % slower (SLICE-10 WP-2
+measurement). REQ-007 applies without change. The teammate measures the
 speed of REQ-007 before and after the change (`docs/plan/SLICE-06.md`, WP-3 baseline).
 
 In each cycle of the hooked run, after step 4 "the SIOV shortcut" and before `cpu.tick`:

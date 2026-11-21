@@ -45,7 +45,9 @@ impl_state!(Machine {
     tape_start_until,
     // The next tape mark of the event log: `load_state` calculates it again.
     tape_mark_at,
-    tape_mark
+    tape_mark,
+    // The debugger state of the hooked run (`docs/design/debugger.md`, "State").
+    sequence_start
 });
 
 impl State for Memory {

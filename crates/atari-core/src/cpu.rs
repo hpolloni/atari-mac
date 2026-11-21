@@ -91,6 +91,19 @@ pub enum Tick {
     Stalled,
 }
 
+/// What the next tick starts, at a boundary (`docs/design/debugger.md`, "CPU additions").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Boundary {
+    /// The opcode fetch of an instruction at `PC`.
+    Opcode,
+    /// The first cycle of an IRQ or NMI sequence.
+    Interrupt,
+    /// The first cycle of the reset sequence.
+    Reset,
+    /// A tick in the KIL state (REQ-113).
+    Jammed,
+}
+
 /// What the CPU does in its next tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -384,6 +397,26 @@ impl Cpu {
     #[must_use]
     pub const fn at_opcode_fetch(&self) -> bool {
         matches!(self.mode, Mode::Fetch) && (!self.poll || self.no_poll_next)
+    }
+
+    /// What the next tick starts: `None` inside an instruction or a sequence.
+    /// `Some(Boundary::Opcode)` is the same condition as [`Cpu::at_opcode_fetch`].
+    #[must_use]
+    pub const fn boundary(&self) -> Option<Boundary> {
+        match self.mode {
+            Mode::Fetch if self.poll && !self.no_poll_next => Some(Boundary::Interrupt),
+            Mode::Fetch => Some(Boundary::Opcode),
+            Mode::Reset if self.cycle == 1 => Some(Boundary::Reset),
+            Mode::Jammed => Some(Boundary::Jammed),
+            Mode::Reset | Mode::Execute | Mode::Interrupt => None,
+        }
+    }
+
+    /// The vector of the last interrupt sequence (`$FFFA` or `$FFFE`), after the hijack of
+    /// REQ-122. The reset sequence does not change it.
+    #[must_use]
+    pub const fn vector(&self) -> u16 {
+        self.vector
     }
 
     /// Runs ticks with `rdy = true` until the next boundary. For tests and debuggers. Each

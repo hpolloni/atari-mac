@@ -22,6 +22,7 @@ use core::fmt;
 
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
+use crate::debug::{BusAccess, CpuHook, Position};
 use crate::events::{self, record};
 use crate::gtia::{ConsoleKeys, Gtia};
 use crate::media::{Cartridge, DiskImage, SioBus, Tape, TapeBlock, TapeMark, Xex};
@@ -258,17 +259,6 @@ impl DmaMemory for Memory {
     }
 }
 
-/// One CPU bus access: for the debugger view of the last cycle and the bus log of the tests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct BusAccess {
-    /// The address.
-    addr: u16,
-    /// The byte read or written.
-    value: u8,
-    /// `true` for a write.
-    write: bool,
-}
-
 /// The CPU's view of the machine for one CPU cycle.
 struct CpuBus<'a> {
     /// RAM, ROMs and cartridge.
@@ -387,6 +377,9 @@ pub struct Machine {
     tape_mark_at: u64,
     /// The tape mark at `tape_mark_at`.
     tape_mark: TapeMark,
+    /// The start of the current interrupt or reset sequence, and `true` for reset. Only the
+    /// hooked run sets it (`docs/design/debugger.md`, "State").
+    sequence_start: Option<(Position, bool)>,
 }
 
 impl Machine {
@@ -432,6 +425,7 @@ impl Machine {
             last_access: None,
             tape_mark_at: u64::MAX,
             tape_mark: TapeMark::End,
+            sequence_start: None,
         };
         if let Some(cart) = &machine.mem.cart {
             let kind = cart.kind();
@@ -491,6 +485,7 @@ impl Machine {
         self.last_access = None;
         self.sio.set_log_frame(0);
         self.plan_tape_mark(1);
+        self.sequence_start = None;
     }
 
     /// The System Reset button (REQ-217): resets the CPU, ANTIC and the PIA. RAM, GTIA and
@@ -508,10 +503,18 @@ impl Machine {
         self.pia.reset();
         self.mem.portb = self.pia.port_b_pins();
         self.update_trig3();
+        self.sequence_start = None;
     }
 
     /// Runs one machine cycle, in the order of `docs/design/system.md`, "Timing".
     pub fn run_cycle(&mut self) {
+        self.cycle_with(None);
+    }
+
+    /// One machine cycle with the hook calls of `docs/design/debugger.md`, "Hooked run and
+    /// the cycle order". The plain run and the hooked run share this one copy of the cycle,
+    /// so the chip functions have one call site and stay inlined (REQ-007).
+    fn cycle_with(&mut self, mut hook: Option<&mut dyn CpuHook>) {
         // 1. ANTIC, with the memory map of the end of the last cycle.
         let out = self.antic.tick(&mut self.mem);
         // 2. POKEY before the CPU access, with the SIO DATA IN level of this cycle. The bus
@@ -540,6 +543,9 @@ impl Machine {
             if self.fast_sio && self.cpu.at_opcode_fetch() {
                 siov::shortcut(self);
             }
+            if let Some(hook) = hook.as_deref_mut() {
+                self.before_tick(&out, hook);
+            }
             let mut bus = CpuBus {
                 mem: &mut self.mem,
                 antic: &mut self.antic,
@@ -552,6 +558,11 @@ impl Machine {
             let _tick = self.cpu.tick(&mut bus, out.rdy);
             data = bus.data;
             self.last_access = bus.access;
+            if let Some(hook) = hook
+                && let Some(access) = bus.access
+            {
+                hook.access(access);
+            }
         }
         // 4a. The NMI level of this cycle, after the CPU access, also in a halted cycle: an
         //     `NMIEN` write of this cycle is included (OI-017).
@@ -657,6 +668,7 @@ impl Machine {
 
     /// Runs machine cycles until ANTIC ends the frame.
     pub fn run_frame(&mut self) {
+        self.sequence_start = None;
         let target = self.frames + 1;
         while self.frames < target {
             self.run_cycle();

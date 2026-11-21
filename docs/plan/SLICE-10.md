@@ -10,7 +10,7 @@ packages:
     requirements: [REQ-087]
   - id: WP-2
     title: The --trace option
-    status: planned
+    status: done
     requirements: [REQ-086]
 ---
 # SLICE-10: CPU instruction trace
