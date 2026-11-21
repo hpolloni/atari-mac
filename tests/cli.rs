@@ -888,3 +888,44 @@ fn bas_pong_typing_frames() {
         "the game runs: {rows:#?}"
     );
 }
+
+/// A program with lower case letters: in a `REM` and a string, mixed with upper case
+/// letters in a line and from one line to the next, and doubled.
+const LOWER_CASE_PROGRAM: &str = "10 REM abcdefghijklmnopqrstuvwxyz
+20 PRINT \"Hello, World\"
+30 REM aA bB zZ aa AA
+40 REM x
+50 REM X
+";
+
+/// Verifies REQ-080: with `--no-run`, a program with lower case letters is typed exactly:
+/// after `LIST`, the screen shows each line of the file with its lower case letters
+/// (criterion 9). After the program, the keyboard is in upper case again, so the second
+/// typist types `LIST` with the same key codes as before.
+#[test]
+fn bas_typed_listing_keeps_lower_case() {
+    let bas = write_bas(
+        "bas_typed_listing_keeps_lower_case",
+        "lower.bas",
+        LOWER_CASE_PROGRAM,
+    );
+    let mut frontend = start(&bas_options(&bas, true)).expect("start");
+    run_until_typed(&mut frontend, 1);
+    let list: Vec<u8> = "LIST\n"
+        .chars()
+        .map(|c| ascii_to_kbcode(c).expect("key"))
+        .collect();
+    let mut frontend = frontend.with_typist(Typist::new(list));
+    run_until_typed(&mut frontend, 120);
+    let rows = screen_rows(frontend.machine());
+    let list_row = rows.iter().rposition(|row| row == "LIST");
+    assert!(list_row.is_some(), "a row LIST: {rows:#?}");
+    let listing: Vec<&str> = rows[list_row.map_or(0, |index| index + 1)..]
+        .iter()
+        .take_while(|row| *row != "Ready")
+        .map(String::as_str)
+        .filter(|row| !row.is_empty())
+        .collect();
+    let file: Vec<&str> = LOWER_CASE_PROGRAM.lines().collect();
+    assert_eq!(listing, file, "the listing on the screen: {rows:#?}");
+}

@@ -246,6 +246,15 @@ before the machine starts. `bas::load` splits the text with
 has only spaces, and converts each character with `keyboard::ascii_to_kbcode`. Each line
 ends with RETURN; then `RUN` and RETURN follow, unless `--no-run`.
 
+Lower case letters (criterion 9). A letter key gives the letter in the case mode of the OS
+screen editor (`SHFLOK`, `$02BE`), and the OS starts in upper case. So `bas::load` puts
+CAPS (it toggles to lower case) before a lower case letter in upper case mode, and
+SHIFT + CAPS (it sets upper case) before an upper case letter in lower case mode. After the
+last program line, SHIFT + CAPS follows if the mode is lower case, so `RUN` and later keys
+are in upper case. Other characters do not depend on the mode. Altirra BASIC does not accept
+lower case statement names, so a line such as `10 print 1` is typed exactly and BASIC
+shows an error for it.
+
 `bas::Typist` types the key codes one frame at a time, so the window loop never blocks. The
 frontend calls `Typist::before_frame` before each frame, in `Frontend::step` (window) and in
 `Frontend::run_frames` (headless). The phases:
@@ -363,7 +372,7 @@ file error.
 | REQ-006 | `crates/harness/tests/boot.rs` `option_key_disables_basic`, `basic_is_mapped_without_option` |
 | REQ-012 | `tests/cli.rs` `loads_cart_xex_and_disk` (criterion 1), `rejects_bad_cart_xex_and_disk` (criterion 2) |
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
-| REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
+| REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_typed_listing_keeps_lower_case` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
 | REQ-082 | `src/frontend.rs` unit tests `tape_turbo_follows_motor_line` (1, fake clock), `motor_line_without_tape_keeps_pacing` (2), `tape_turbo_presents_frames` (3), `tape_turbo_keeps_machine_state` (4), `tape_turbo_stops_audio` (5, fake device) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
