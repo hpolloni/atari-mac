@@ -204,5 +204,7 @@ opt-level = 3
 # Keep overflow checks in release too: use `wrapping_*`/`checked_*` explicitly
 # where wrap-around is intended (e.g. emulated CPU registers).
 overflow-checks = true
-lto = "thin"
+# Fat LTO optimizes atari-core and the frontend as one unit. It makes the headless run of
+# REQ-007 about 10 % faster than thin LTO.
+lto = "fat"
 codegen-units = 1

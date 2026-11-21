@@ -71,7 +71,14 @@ pub(super) struct Audio {
     a2: f64,
     /// The samples that are not drained yet.
     samples: Vec<f32>,
+    /// A cache: the `volumes` of the last cycle as little-endian bytes, or `NO_LEVEL`.
+    level_key: u32,
+    /// A cache: the mix level `x` of `level_key`.
+    level: f64,
 }
+
+/// The `level_key` that no `volumes` can give (each volume is 0-15).
+const NO_LEVEL: u32 = u32::MAX;
 
 impl Audio {
     /// The power-on state for the machine clock `clock_hz` and the host rate `sample_rate`.
@@ -89,23 +96,38 @@ impl Audio {
             a1: 1.0 - (-1.0 / (TAU_STAGE1 * rate)).exp(),
             a2: 1.0 - (-1.0 / (TAU_STAGE2 * rate)).exp(),
             samples: Vec::new(),
+            level_key: NO_LEVEL,
+            level: 0.0,
         }
     }
 
     /// Selects the nonlinear DAC model (REQ-541).
     pub(super) const fn set_nonlinear(&mut self, on: bool) {
         self.nonlinear = on;
+        self.level_key = NO_LEVEL;
+    }
+
+    /// The mix level of `volumes` (REQ-539, REQ-541).
+    fn mix(&self, volumes: [u8; 4]) -> f64 {
+        if self.nonlinear {
+            curve(dac_sum(volumes))
+        } else {
+            let level: u8 = volumes.iter().sum();
+            f64::from(level) / FULL_MIX
+        }
     }
 
     /// Adds one machine cycle. `volumes[n]` is the `AUDCx` volume of channel n if its
     /// digital output is 1, else 0. `speaker` is the console speaker line level.
     pub(super) fn cycle(&mut self, volumes: [u8; 4], speaker: bool) {
-        let x = if self.nonlinear {
-            curve(dac_sum(volumes))
-        } else {
-            let level: u8 = volumes.iter().sum();
-            f64::from(level) / FULL_MIX
-        };
+        // The volumes change seldom, so the level of the last cycle is kept. The value is the
+        // same as a new computation.
+        let key = u32::from_le_bytes(volumes);
+        if key != self.level_key {
+            self.level_key = key;
+            self.level = self.mix(volumes);
+        }
+        let x = self.level;
         let s = if speaker { SPEAKER_LEVEL } else { 0.0 };
         self.phase += self.sample_rate;
         if self.phase < self.clock_hz {
@@ -153,7 +175,7 @@ const fn to_f64(value: u64) -> f64 {
 
 impl PartialEq for Audio {
     /// The floating-point state compares bit for bit, so that two instances with the same
-    /// history are equal (REQ-501).
+    /// history are equal (REQ-501). The level cache is not state, so it does not compare.
     fn eq(&self, other: &Self) -> bool {
         self.clock_hz == other.clock_hz
             && self.sample_rate == other.sample_rate

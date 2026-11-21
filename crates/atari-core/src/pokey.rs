@@ -88,6 +88,15 @@ const AUDC_NO_POLY5: u8 = 0x80;
 /// `AUDCx` bits 0-3: the volume.
 const AUDC_VOLUME: u8 = 0x0F;
 
+/// `if condition { yes } else { no }` for bits, as logic operations: no branch.
+#[expect(
+    clippy::needless_bitwise_bool,
+    reason = "bitwise operators on bools give selects without branches in the per-cycle path"
+)]
+const fn select(condition: bool, yes: bool, no: bool) -> bool {
+    (condition & yes) | (!condition & no)
+}
+
 /// The NTSC machine clock rate in Hz for the audio sample count (HRM 3.3, REQ-538).
 const CLOCK_HZ_NTSC: u32 = 1_789_773;
 /// The PAL machine clock rate in Hz (HRM 3.3, REQ-538).
@@ -183,6 +192,12 @@ pub struct Pokey {
     hp_ff: [bool; 2],
     /// The pot scan: `POT0-7`, `ALLPOT` and the paddle inputs.
     pots: PotScan,
+    /// A cache: the channel volumes of the last tick (`channel_volumes`).
+    volumes: [u8; 4],
+    /// A write of `AUDCx`, `AUDCTL` or `STIMER` since the last tick: the channels must update
+    /// in this tick even with no fire. With no fire and no write, `channel_tick` and `channel_volumes` give
+    /// the same result as in the last tick.
+    channels_dirty: bool,
     /// The keys that are down, and the host levels of SHIFT, CONTROL and BREAK.
     keys: ScanInput,
     /// The modifiers that `key_down` pressed (`SHIFT` and `CONTROL` bits of `KBCODE`).
@@ -231,6 +246,8 @@ impl Pokey {
             out_ff: [true; 4],
             hp_ff: [true; 2],
             pots: PotScan::new(),
+            volumes: [0; 4],
+            channels_dirty: true,
             keys: ScanInput {
                 matrix: 0,
                 shift: false,
@@ -256,12 +273,9 @@ impl Pokey {
     pub fn tick(&mut self) {
         self.cycle += 1;
         let now = self.cycle;
-        self.irqen_hist = [
-            self.irqen,
-            self.irqen_hist[0],
-            self.irqen_hist[1],
-            self.irqen_hist[2],
-        ];
+        // `[irqen, hist[0], hist[1], hist[2]]` as one shift.
+        self.irqen_hist =
+            ((u32::from_le_bytes(self.irqen_hist) << 8) | u32::from(self.irqen)).to_le_bytes();
         // The noise counters shift first, so that the fires of this cycle see the noise bits
         // of this cycle (REQ-512).
         self.noise
@@ -273,22 +287,18 @@ impl Pokey {
         ];
         let fired = self.timers.tick(now, clocked, linked, self.audf);
         self.fired = fired;
-        // HRM 5.7: timers 1, 2 and 4 have an IRQ; timer 3 has none.
-        if fired & 0b0001 != 0 {
-            self.latch(IRQ_TIMER1);
+        // HRM 5.7: timers 1, 2 and 4 have an IRQ; timer 3 has none. The `IRQST` bits of
+        // the fires latch together, without a branch for each fire.
+        self.latch((fired & (IRQ_TIMER1 | IRQ_TIMER2)) | ((fired >> 1) & IRQ_TIMER4));
+        if fired != 0 || self.channels_dirty {
+            self.channel_tick(fired);
+            self.volumes = self.channel_volumes();
+            self.channels_dirty = false;
         }
-        if fired & 0b0010 != 0 {
-            self.latch(IRQ_TIMER2);
-        }
-        if fired & 0b1000 != 0 {
-            self.latch(IRQ_TIMER4);
-        }
-        self.channel_tick(fired);
         self.serial_tick();
         self.keyboard_tick();
         self.pot_tick();
-        let volumes = self.channel_volumes();
-        self.audio.cycle(volumes, self.speaker);
+        self.audio.cycle(self.volumes, self.speaker);
     }
 
     /// Reads a register. `reg` is the low byte of the address; POKEY uses `reg & 0x0F`.
@@ -333,17 +343,20 @@ impl Pokey {
                     self.audf[channel] = value;
                 } else {
                     self.audc[channel] = value;
+                    self.channels_dirty = true;
                 }
             }
             0x08 => {
                 self.audctl = value;
                 self.force_high_pass();
+                self.channels_dirty = true;
             }
             0x09 => {
                 // REQ-507: all timers reload, and all output flip-flops go to 1. The write
                 // is not a fire.
                 self.timers.stimer(self.cycle);
                 self.out_ff = [true; 4];
+                self.channels_dirty = true;
             }
             0x0A => self.sk_err = SK_NO_ERRORS,
             0x0E => {
@@ -469,23 +482,25 @@ impl Pokey {
         self.audio.set_nonlinear(on);
     }
 
-    /// The fires of this cycle clock the channels (HRM 5.3). For each fire, in timer order:
-    /// the audio clock of its channel, then the high-pass capture.
+    /// The fires of this cycle clock the channels (HRM 5.3): the audio clock of each fired
+    /// channel, then the high-pass captures of the fires of timers 3 and 4. A capture reads
+    /// the flip-flop of channel 1 or 2, which only the clocks of channels 1 and 2 change, so
+    /// this order gives the same result as one channel after the other.
+    ///
+    /// The steps use selects, not branches: the fires and the noise bits come in patterns
+    /// that a branch predictor does not learn well.
     const fn channel_tick(&mut self, fired: u8) {
         self.force_high_pass();
+        let init = self.init_mode();
         let mut n = 0;
         while n < 4 {
-            if fired & (1 << n) != 0 {
-                self.audio_clock(n);
-                if n == 2 && self.audctl & AUDCTL_HP1 != 0 {
-                    self.hp_ff[0] = self.out_ff[0];
-                }
-                if n == 3 && self.audctl & AUDCTL_HP2 != 0 {
-                    self.hp_ff[1] = self.out_ff[1];
-                }
-            }
+            self.audio_clock(n, fired & (1 << n) != 0, init);
             n += 1;
         }
+        let capture1 = fired & 0b0100 != 0 && self.audctl & AUDCTL_HP1 != 0;
+        self.hp_ff[0] = select(capture1, self.out_ff[0], self.hp_ff[0]);
+        let capture2 = fired & 0b1000 != 0 && self.audctl & AUDCTL_HP2 != 0;
+        self.hp_ff[1] = select(capture2, self.out_ff[1], self.hp_ff[1]);
     }
 
     /// While a high-pass bit of `AUDCTL` is 0, its flip-flop is 1 (HRM 5.3, REQ-511).
@@ -498,35 +513,37 @@ impl Pokey {
         }
     }
 
-    /// An audio clock of channel `n` (REQ-509, HRM 5.3 Table 8).
-    const fn audio_clock(&mut self, n: usize) {
+    /// An audio clock of channel `n` if `clock` (REQ-509, HRM 5.3 Table 8). `init` is
+    /// initialization mode.
+    #[expect(
+        clippy::needless_bitwise_bool,
+        reason = "bitwise operators on bools give selects without branches in the per-cycle path"
+    )]
+    const fn audio_clock(&mut self, n: usize, clock: bool, init: bool) {
         let audc = self.audc[n];
-        let bits = self.noise.bits(n, self.init_mode());
+        let bits = self.noise.bits(n, init);
         // The 5-bit mask: a clock goes through when the 5-bit bit is 1 (project decision,
         // REQ-509).
-        if audc & AUDC_NO_POLY5 == 0 && !bits.poly5 {
-            return;
-        }
-        self.out_ff[n] = if audc & AUDC_TONE != 0 {
-            !self.out_ff[n]
-        } else if audc & AUDC_POLY4 != 0 {
-            bits.poly4
-        } else {
-            bits.poly17
-        };
+        let through = clock & ((audc & AUDC_NO_POLY5 != 0) | bits.poly5);
+        let old = self.out_ff[n];
+        let noise = select(audc & AUDC_POLY4 != 0, bits.poly4, bits.poly17);
+        let new = select(audc & AUDC_TONE != 0, !old, noise);
+        self.out_ff[n] = select(through, new, old);
     }
 
     /// The digital output of channel `n` in this cycle: the high-pass XOR for channels 1
     /// and 2, then the volume-only override (HRM 5.3, REQ-510, REQ-511).
+    /// It has no branches: the outputs change in patterns that a branch predictor does not
+    /// learn well.
+    #[expect(
+        clippy::needless_bitwise_bool,
+        reason = "bitwise operators on bools give selects without branches in the per-cycle path"
+    )]
     const fn channel_output(&self, n: usize) -> bool {
-        if self.audc[n] & AUDC_VOLUME_ONLY != 0 {
-            return true;
-        }
-        if n < 2 {
-            self.out_ff[n] ^ self.hp_ff[n]
-        } else {
-            self.out_ff[n]
-        }
+        let volume_only = self.audc[n] & AUDC_VOLUME_ONLY != 0;
+        // Channels 3 and 4 have no high-pass flip-flop: the XOR is with 0.
+        let hp = n < 2 && self.hp_ff[n & 1];
+        volume_only | (self.out_ff[n] ^ hp)
     }
 
     /// The volume of each channel whose digital output is 1, else 0 (REQ-510).
@@ -534,9 +551,9 @@ impl Pokey {
         let mut volumes = [0; 4];
         let mut n = 0;
         while n < 4 {
-            if self.channel_output(n) {
-                volumes[n] = self.audc[n] & AUDC_VOLUME;
-            }
+            // `0 - 1` is `$FF`: a mask without a branch.
+            let mask = 0_u8.wrapping_sub(self.channel_output(n) as u8);
+            volumes[n] = self.audc[n] & AUDC_VOLUME & mask;
             n += 1;
         }
         volumes
@@ -671,13 +688,12 @@ impl Pokey {
         self.pots.tick(fast, pulse);
     }
 
-    /// An interrupt event on this cycle E. It latches if its bit was enabled at the end of
-    /// cycles E-4 and E-2 (HRM 5.7 Enable/disable timing, REQ-517).
-    const fn latch(&mut self, bit: u8) {
+    /// Interrupt events on this cycle E, one for each bit of `bits`. An event latches if its
+    /// bit was enabled at the end of cycles E-4 and E-2 (HRM 5.7 Enable/disable timing,
+    /// REQ-517).
+    const fn latch(&mut self, bits: u8) {
         let mask = self.irqen_hist[3] & self.irqen_hist[1];
-        if mask & bit != 0 {
-            self.irqst &= !bit;
-        }
+        self.irqst &= !(bits & mask);
     }
 
     /// Test accessor: the write registers as stored.

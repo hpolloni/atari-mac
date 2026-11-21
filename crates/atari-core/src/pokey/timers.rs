@@ -15,18 +15,23 @@ const FIRE_DELAY: u64 = 4;
 /// Cycles from an underflow of the low timer of a linked pair to the count of the high timer.
 const LINK_DELAY: u64 = 3;
 
+/// The cycle value of an event that is not scheduled. `tick` never runs this cycle, so a
+/// slot with this value never matches.
+const NEVER: u64 = u64::MAX;
+
 /// The four timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Timers {
     /// Timer counters.
     counter: [u8; 4],
-    /// Cycle of the next scheduled reload. The counter does not decrement until then.
-    reload_at: [Option<u64>; 4],
-    /// Visible cycles of scheduled fires.
-    fire_at: [[Option<u64>; 2]; 4],
+    /// Cycle of the next scheduled reload, or `NEVER`. The counter does not decrement until
+    /// then.
+    reload_at: [u64; 4],
+    /// Visible cycles of scheduled fires, or `NEVER`.
+    fire_at: [[u64; 2]; 4],
     /// For the high timers 2 and 4 (index 1 and 3) of a linked pair: the cycle of the next
-    /// count, 3 cycles after an underflow of the low timer.
-    link_at: [Option<u64>; 4],
+    /// count, 3 cycles after an underflow of the low timer, or `NEVER`.
+    link_at: [u64; 4],
 }
 
 impl Timers {
@@ -34,9 +39,9 @@ impl Timers {
     pub(super) const fn new() -> Self {
         Self {
             counter: [0; 4],
-            reload_at: [None; 4],
-            fire_at: [[None; 2]; 4],
-            link_at: [None; 4],
+            reload_at: [NEVER; 4],
+            fire_at: [[NEVER; 2]; 4],
+            link_at: [NEVER; 4],
         }
     }
 
@@ -58,30 +63,31 @@ impl Timers {
     ) -> u8 {
         let mut fired = 0;
         for n in 0..4 {
-            for slot in &mut self.fire_at[n] {
-                if *slot == Some(now) {
-                    *slot = None;
-                    fired |= 1 << n;
-                }
+            let [first, second] = &mut self.fire_at[n];
+            if *first == now {
+                *first = NEVER;
+                fired |= 1 << n;
+            }
+            if *second == now {
+                *second = NEVER;
+                fired |= 1 << n;
             }
             let pair_linked = linked[n / 2];
             let high = !n.is_multiple_of(2);
             let pulse = if pair_linked && high {
-                let link = self.link_at[n] == Some(now);
+                let link = self.link_at[n] == now;
                 if link {
-                    self.link_at[n] = None;
+                    self.link_at[n] = NEVER;
                 }
                 link
             } else {
                 clocked[n]
             };
-            match self.reload_at[n] {
-                Some(at) if at == now => {
-                    self.counter[n] = audf[n];
-                    self.reload_at[n] = None;
-                }
-                None if pulse => self.count(n, now, pair_linked),
-                _ => {}
+            if self.reload_at[n] == now {
+                self.counter[n] = audf[n];
+                self.reload_at[n] = NEVER;
+            } else if pulse && self.reload_at[n] == NEVER {
+                self.count(n, now, pair_linked);
             }
         }
         fired
@@ -96,14 +102,14 @@ impl Timers {
         self.counter[n] = 0xFF;
         self.schedule_fire(n, now + FIRE_DELAY);
         if !pair_linked {
-            self.reload_at[n] = Some(now + RELOAD_DELAY);
+            self.reload_at[n] = now + RELOAD_DELAY;
         } else if n.is_multiple_of(2) {
             // The low timer of a linked pair does not reload. It counts the high timer.
-            self.link_at[n + 1] = Some(now + LINK_DELAY);
+            self.link_at[n + 1] = now + LINK_DELAY;
         } else {
             // The high timer underflows: both timers of the pair reload.
-            self.reload_at[n] = Some(now + RELOAD_DELAY);
-            self.reload_at[n - 1] = Some(now + RELOAD_DELAY);
+            self.reload_at[n] = now + RELOAD_DELAY;
+            self.reload_at[n - 1] = now + RELOAD_DELAY;
         }
     }
 
@@ -112,19 +118,20 @@ impl Timers {
     pub(super) fn stimer(&mut self, now: u64) {
         for n in 0..4 {
             for slot in &mut self.fire_at[n] {
-                if slot.is_some_and(|at| at >= now + FIRE_DELAY) {
-                    *slot = None;
+                // `NEVER` is above each cycle, so a free slot stays free.
+                if *slot >= now + FIRE_DELAY {
+                    *slot = NEVER;
                 }
             }
-            self.reload_at[n] = Some(now + RELOAD_DELAY);
-            self.link_at[n] = None;
+            self.reload_at[n] = now + RELOAD_DELAY;
+            self.link_at[n] = NEVER;
         }
     }
 
     /// Schedules a fire of timer `n` with the visible cycle `at`.
     fn schedule_fire(&mut self, n: usize, at: u64) {
-        if let Some(slot) = self.fire_at[n].iter_mut().find(|slot| slot.is_none()) {
-            *slot = Some(at);
+        if let Some(slot) = self.fire_at[n].iter_mut().find(|slot| **slot == NEVER) {
+            *slot = at;
         }
     }
 }

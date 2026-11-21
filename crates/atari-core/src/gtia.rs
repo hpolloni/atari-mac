@@ -326,6 +326,9 @@ impl Gtia {
 
     /// Applies the pending writes up to color clock `now`, in write order.
     fn apply_pending(&mut self, now: u64) {
+        if self.pending_len == 0 {
+            return;
+        }
         let mut kept = 0;
         for i in 0..self.pending_len {
             let write = self.pending[i];
@@ -400,6 +403,11 @@ impl Gtia {
 
     /// Runs the 8 shifters for one color clock. Bits 0-3 are players, bits 4-7 missiles.
     fn shift_objects(&mut self, h: u32) -> u8 {
+        if let Ok(h) = u8::try_from(h)
+            && !self.position_match(h)
+        {
+            return self.shift_unloaded();
+        }
         let mut bits = 0;
         for i in 0..8 {
             let (position, latch, size) = if i < 4 {
@@ -421,6 +429,44 @@ impl Gtia {
                 self.shift[i] <<= 1;
             }
         }
+        bits
+    }
+
+    /// `true` if the horizontal position of a player or a missile is `h`.
+    fn position_match(&self, h: u8) -> bool {
+        /// The low bit of each byte.
+        const LOW: u64 = 0x0101_0101_0101_0101;
+        /// The high bit of each byte.
+        const HIGH: u64 = 0x8080_8080_8080_8080;
+        let [p0, p1, p2, p3] = self.hposp;
+        let [m0, m1, m2, m3] = self.hposm;
+        let positions = u64::from_le_bytes([p0, p1, p2, p3, m0, m1, m2, m3]);
+        // A byte of `diff` is 0 where the position is `h`. The expression is not 0 exactly
+        // when a byte of `diff` is 0.
+        let diff = positions ^ LOW.wrapping_mul(u64::from(h));
+        diff.wrapping_sub(LOW) & !diff & HIGH != 0
+    }
+
+    /// `shift_objects` for a color clock at which no position matches, so that no shifter
+    /// loads: the same steps for the 8 shifters at once, one byte for each shifter.
+    const fn shift_unloaded(&mut self) -> u8 {
+        /// The low bit of each byte.
+        const LOW: u64 = 0x0101_0101_0101_0101;
+        let shift = u64::from_le_bytes(self.shift);
+        // The output bits: bit 7 of each shifter byte, gathered into one byte.
+        let [.., bits] = (((shift >> 7) & LOW).wrapping_mul(0x0102_0408_1020_4080)).to_le_bytes();
+        let [s0, s1, s2, s3] = self.sizep;
+        let m = self.sizem;
+        let sizes = u64::from_le_bytes([s0, s1, s2, s3, m, m >> 2, m >> 4, m >> 6]);
+        let masks = sizes & (LOW * 3);
+        // Each state is 0-3, so the add does not carry into the next byte, and the operations
+        // do not overflow.
+        let state = u64::from_le_bytes(self.shift_state).wrapping_add(LOW) & masks;
+        // 0xFF in each byte whose new state is 0, else 0.
+        let zero = (!(state | (state >> 1)) & LOW).wrapping_mul(0xFF);
+        let shifted = (shift << 1) & !LOW;
+        self.shift = ((shift & !zero) | (shifted & zero)).to_le_bytes();
+        self.shift_state = state.to_le_bytes();
         bits
     }
 
@@ -492,17 +538,15 @@ impl Gtia {
         let objects = self.shift_objects(h);
         let pf = self.decode(code, pixel, odd);
         let visible_line = (FIRST_VISIBLE_LINE..VBLANK_START_LINE).contains(&self.line);
-        let (left, right) = if pf.blank {
-            (0, 0)
-        } else {
-            if visible_line && VISIBLE.contains(&h) {
-                self.collide(objects, pf.collide);
-            }
-            self.color(objects, pf, pixel)
-        };
+        let visible = visible_line && VISIBLE.contains(&h);
+        if visible && !pf.blank {
+            self.collide(objects, pf.collide);
+        }
         if visible_line && (FIRST_FRAME_HPOS..=LAST_FRAME_HPOS).contains(&h) {
-            let (left, right) = if VISIBLE.contains(&h) {
-                (left, right)
+            // `color` has no side effects, so it runs only for a color clock that the frame
+            // stores.
+            let (left, right) = if visible && !pf.blank {
+                self.color(objects, pf, pixel)
             } else {
                 (0, 0)
             };
@@ -516,6 +560,9 @@ impl Gtia {
 
     /// Sets the collision bits of one color clock (REQ-420, REQ-421).
     fn collide(&mut self, objects: u8, playfield: u8) {
+        if objects == 0 {
+            return;
+        }
         let players = objects & 0x0F;
         for n in 0..4 {
             if players & (1 << n) != 0 {
@@ -542,17 +589,12 @@ impl Gtia {
             3 => self.colbk | (pixel << 4),
             _ => self.colbk,
         };
-        let mut color = 0;
+        // A select for each mask bit, without branches: `0 - bit` is `$FF` for a bit of 1.
+        let select = |bit: u16| 0_u8.wrapping_sub(u8::from(mask & bit != 0));
+        let mut color = bak & select(priority::BAK);
         for n in 0..4 {
-            if mask & (1 << n) != 0 {
-                color |= self.colpm[n];
-            }
-            if mask & (0x10 << n) != 0 {
-                color |= self.colpf[n];
-            }
-        }
-        if mask & priority::BAK != 0 {
-            color |= bak;
+            color |= self.colpm[n] & select(1 << n);
+            color |= self.colpf[n] & select(0x10 << n);
         }
         let lum = (color & 0xF0) | (self.colpf[1] & 0x0E);
         pf.hires.map_or((color, color), |pair| {

@@ -349,6 +349,16 @@ const fn stop_cycle(width: u8) -> u32 {
     }
 }
 
+/// The address of two DMA requests: the bitwise AND of the addresses that are present
+/// (REQ-345).
+const fn and_requests(left: Option<u16>, right: Option<u16>) -> Option<u16> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left & right),
+        (Some(addr), None) | (None, Some(addr)) => Some(addr),
+        (None, None) => None,
+    }
+}
+
 /// The display window for a `DMACTL` width (REQ-308). Wide is clipped at `$2C`.
 const fn window(width: u8) -> (usize, usize) {
     match width {
@@ -514,7 +524,7 @@ impl Antic {
         self.nmi(&mut out);
         out.halt = out.dma != DmaKind::None;
         let first = (2 * self.cycle as usize + 226) % 228;
-        out.video = [self.code_at(first), self.code_at(first + 1)];
+        out.video = self.codes_at(first);
         self.advance();
         out
     }
@@ -715,10 +725,8 @@ impl Antic {
         {
             self.requests = requests;
         };
-        let addr = requests
-            .into_iter()
-            .flatten()
-            .reduce(|left, right| left & right);
+        let [special_addr, ..] = requests;
+        let addr = and_requests(and_requests(special_addr, name_addr), font_addr);
         let value = addr.map(|addr| mem.dma_read(addr));
         if let Some(byte) = value {
             out.dma = match (special, name_addr.is_some()) {
@@ -974,7 +982,7 @@ impl Antic {
     }
 
     /// Puts the codes of one byte at `position`. The odd `HSCROL` delay is in the output
-    /// (`code_at`, HRM 4.7).
+    /// (`codes_at`, HRM 4.7).
     fn place(&mut self, position: usize, codes: &[AnCode]) {
         for (slot, code) in self.pixels.iter_mut().skip(position).zip(codes) {
             *slot = *code;
@@ -1027,33 +1035,31 @@ impl Antic {
         }
     }
 
-    /// The code for horizontal position `x` of the last tick (REQ-306 to REQ-308).
-    fn code_at(&self, x: usize) -> AnCode {
-        let visible = (FIRST_VISIBLE..=LAST_VISIBLE).contains(&x);
+    /// The codes for the horizontal positions `first` and `first + 1` of the last tick
+    /// (REQ-306 to REQ-308). The checks that do not depend on the position are made once
+    /// for the two positions.
+    fn codes_at(&self, first: usize) -> [AnCode; 2] {
+        let positions = [first, first + 1];
+        let width = self.pf_width();
         // REQ-346, OI-015: the bogus codes cover the playfield window of the `DMACTL` width.
-        let (left, right) = window(self.pf_width());
-        let bug = self.hires_bug && self.pf_width() != 0 && (left..=right).contains(&x);
+        let (left, right) = window(width);
+        let bug = |x: usize| self.hires_bug && width != 0 && (left..=right).contains(&x);
         let hblank = if is_hires(mode(self.ir)) {
             AnCode::HBLANK_HIRES
         } else {
             AnCode::HBLANK_LORES
         };
         if self.in_vsync() {
-            return if bug {
-                AnCode::VSYNC.with_an2()
-            } else {
-                AnCode::VSYNC
-            };
+            return positions.map(|x| {
+                if bug(x) {
+                    AnCode::VSYNC.with_an2()
+                } else {
+                    AnCode::VSYNC
+                }
+            });
         }
         if !self.in_display() {
-            return if bug { hblank.with_an2() } else { hblank };
-        }
-        if !visible {
-            return hblank;
-        }
-        let in_window = self.pf_started && x >= self.win_left && x <= self.win_right;
-        if self.pf_width() == 0 || !in_window {
-            return AnCode::BACKGROUND;
+            return positions.map(|x| if bug(x) { hblank.with_an2() } else { hblank });
         }
         // HRM 4.7: odd `HSCROL` values delay the playfield encoder by one color clock.
         let odd = if self.ir & 0x10 == 0 {
@@ -1061,7 +1067,16 @@ impl Antic {
         } else {
             usize::from(self.hscrol & 1)
         };
-        self.pixels.get(x - odd).copied().unwrap_or_default()
+        positions.map(|x| {
+            if !(FIRST_VISIBLE..=LAST_VISIBLE).contains(&x) {
+                return hblank;
+            }
+            let in_window = self.pf_started && x >= self.win_left && x <= self.win_right;
+            if width == 0 || !in_window {
+                return AnCode::BACKGROUND;
+            }
+            self.pixels.get(x - odd).copied().unwrap_or_default()
+        })
     }
 
     /// Advances the counters to the next cycle.
