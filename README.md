@@ -21,12 +21,12 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | in-progress | 41 | 0 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
-| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 10 | 0 | 1 | 0 |
+| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 11 | 0 | 0 | 0 |
 | [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | in-progress | 3 | 0 | 0 | 0 |
 | [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 2 | 0 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
 
-All 291 requirements: 282 tested, 3 pending, 1 missing, 5 not a test requirement. Implemented: 233. Open items with the status `open`: 29.
+All 291 requirements: 283 tested, 3 pending, 0 missing, 5 not a test requirement. Implemented: 234. Open items with the status `open`: 29.
 
 <!-- END GENERATED: status -->
 
@@ -66,6 +66,7 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | `--disk <file>` | Insert an ATR disk image in drive D1: (the OS boots it at power-on) |
 | `--cas <file>` | Boot a CAS tape image (holds START at power-on; press RETURN after the tone) |
 | `--no-fast-tape` | Read the tape records at the real speed, with no tape shortcut (REQ-644) |
+| `--auto-return` | With `--cas`: press RETURN after the prompt tone, so the tape boots with no key press (also headless) |
 | `--pal` | PAL machine (default: NTSC) |
 | `--scale <n>` | Window scale, 1 to 8 (default: 2) |
 | `--artifacting` | NTSC artifacting filter: false colors for hi-res pixel patterns |

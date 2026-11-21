@@ -342,6 +342,20 @@ After WP-3 adds the option to `--help`, the README options table gets the row
 `` | `--cas <file>` | Boot a CAS tape image (holds START at power-on; press RETURN after the tone) | ``.
 Before that, the README gate (REQ-056 criterion 6) rejects the row.
 
+### Automatic RETURN for a tape boot (REQ-092)
+
+`--auto-return` sets `Options::auto_return`. It needs `--cas`: without it, the parser gives
+the usage error `--auto-return needs --cas: it presses RETURN for a tape boot` (exit status
+2). `start_at` then calls `Frontend::with_auto_return`. Before each frame,
+`Frontend::run_frame` presses RETURN (`Machine::key_down(keyboard::RETURN)`) when
+`Machine::frame_count` is `auto_return_frame(standard)` (180 NTSC, 150 PAL), and releases it
+(`key_up`) when the count is `AUTO_RETURN_FRAMES` (6) frames later. Then the frontend stops
+the check. These are the frames of REQ-081 criterion 4, so RETURN is down in frames 180-185
+(NTSC) or 150-155 (PAL). The press is in `run_frame`, so it works in the window and in the
+headless run (`run_frames`). A host key change in `Frontend::step` can release RETURN early,
+as on the real keyboard. The help line is
+`--auto-return        With --cas: press RETURN after the prompt tone`.
+
 ### Tape shortcut option (REQ-091)
 
 `Options::fast_tape` is `true` by default, and `--no-fast-tape` sets it to `false`.
@@ -784,9 +798,10 @@ The rows for REQ-083 to REQ-085 are in "Test plan" below.
 - `tests/cli.rs`: the binary, in a child process. `no_log_without_option` also calls
   `atari_mac::run` in the test process and checks that `log::max_level()` is `Off` after it.
 - `crates/harness/tests/event_log.rs`: the core records, with the free ROMs.
-- `log_writes_tape_lines`: the headless binary presses no key, so the test runs its own test
-  binary as the child process. The child parses `--headless --frames 2400 --log tape --cas`,
-  installs the logger of `--log`, and presses RETURN in frames 180-186. The test checks the
+- `log_writes_tape_lines`: the test runs the headless binary with `--headless --frames 2400
+  --log tape --no-fast-tape --auto-return --cas`: `--auto-return` (REQ-092) presses RETURN
+  in frames 180-186, and `--no-fast-tape` keeps the serial path, so that each record start
+  has a line. The test checks the
   lines that come: `motor on`, the three record lines and `tape ends`, with counts that
   increase. The OS does not stop the motor after this boot, so no `motor off` line comes;
   `event_log.rs` `tape_records` presses RESET to get it.
@@ -810,11 +825,12 @@ file error.
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_typed_listing_keeps_lower_case` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
+| REQ-092 | `tests/cli.rs` `auto_return_presses_return` (1, NTSC and PAL), `auto_return_headless_boot` (2, NTSC and PAL), `auto_return_needs_cas` (3), `cas_without_auto_return` (4), `auto_return_help` (5) |
 | REQ-091 | `tests/cli.rs` `fast_tape_default_on` (1), `no_fast_tape_option` (2), `no_fast_tape_help` (3); `src/cli.rs` unit test `no_fast_tape_parses` |
 | REQ-082 | `src/frontend.rs` unit tests `tape_turbo_follows_motor_line` (1, fake clock), `motor_line_without_tape_keeps_pacing` (2), `tape_turbo_presents_frames` (3), `tape_turbo_keeps_machine_state` (4), `tape_turbo_stops_audio` (5, fake device) |
 | REQ-083 | `src/stats.rs` unit tests `stats_line_each_second` (1, fake clock), `stats_frame_rate_and_speed` (2, 3), `stats_shown_and_underruns` (4, 7), `stats_emulation_time` (5), `stats_turbo_and_motor` (6); `tests/cli.rs` `stats_headless_lines` (1, 4, 7), `no_stats_without_option` (8), `stats_help_lists_option` (9) |
 | REQ-084 | `crates/harness/tests/event_log.rs` `tape_records` (1, 2, 3), `sio_records` (1, 2, 3, the serial path and the SIOV shortcut), `reset_records` (1, 2, 3), `media_records` (1, 2, 3), `log_keeps_machine_state` (4), `no_logger_calls_when_off` (5) |
-| REQ-085 | `src/logging.rs` unit tests `log_categories_parse` (1, 4), `logger_filters_category_and_level` (1), `log_line_format` (2); `tests/frontend_log.rs` `frontend_records` (2, 3); `tests/cli.rs` `log_writes_tape_lines` (2, the tape lines in a child process), `log_rejects_unknown_category` (4), `no_log_without_option` (5), `log_help_lists_option` (6) |
+| REQ-085 | `src/logging.rs` unit tests `log_categories_parse` (1, 4), `logger_filters_category_and_level` (1), `log_line_format` (2); `tests/frontend_log.rs` `frontend_records` (2, 3); `tests/cli.rs` `log_writes_tape_lines` (2, the tape lines of the headless binary), `log_rejects_unknown_category` (4), `no_log_without_option` (5), `log_help_lists_option` (6) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
 | REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md`. The pacing logic: `src/frontend.rs` unit tests `paced_frames_keep_the_frame_rate` (1, fake clock), `pacer_keeps_the_frame_rate` |
 | REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md`. The ring and the wait correction: `src/audio.rs` unit tests `ring_plays_samples_in_order`, `ring_without_samples_is_silent`, `ring_counts_underruns`, `ring_drops_oldest_when_full`, `correction_follows_the_level`; `src/frontend.rs` unit tests `audio_ring_has_no_underruns` (1, fake clock and device), `step_hands_over_the_frame_audio` |

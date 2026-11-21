@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use atari_core::debug::RunEnd;
 use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
+use atari_core::keyboard::RETURN;
 use atari_core::media::{Cartridge, DiskImage, MediaError, Tape, Xex};
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
 use minifb::Key;
@@ -318,7 +319,23 @@ pub struct Frontend {
     turbo_cause: Option<TurboCause>,
     /// The trace writer of `--trace` (REQ-086).
     trace: Option<TraceWriter<BufWriter<File>>>,
+    /// `--auto-return` (REQ-092): the frontend presses RETURN for the tape boot, until it
+    /// releases the key.
+    auto_return: bool,
 }
+
+/// The first frame of the RETURN press of `--auto-return` (REQ-092 criterion 1, the frames
+/// of REQ-081 criterion 4): 180 (NTSC) or 150 (PAL).
+#[must_use]
+pub const fn auto_return_frame(standard: VideoStandard) -> u64 {
+    match standard {
+        VideoStandard::Ntsc => 180,
+        VideoStandard::Pal => 150,
+    }
+}
+
+/// The frames that `--auto-return` holds RETURN (REQ-092 criterion 1).
+pub const AUTO_RETURN_FRAMES: u64 = 6;
 
 impl Frontend {
     /// Wraps a machine.
@@ -335,6 +352,27 @@ impl Frontend {
             tape_turbo: false,
             turbo_cause: None,
             trace: None,
+            auto_return: false,
+        }
+    }
+
+    /// Presses RETURN from frame [`auto_return_frame`] for [`AUTO_RETURN_FRAMES`] frames
+    /// (`--auto-return`, REQ-092), counted from the cold reset of the tape boot.
+    #[must_use]
+    pub const fn with_auto_return(mut self) -> Self {
+        self.auto_return = true;
+        self
+    }
+
+    /// Presses or releases RETURN before the frame for `--auto-return` (REQ-092).
+    const fn auto_return_key(&mut self) {
+        let press = auto_return_frame(self.machine.standard());
+        let frame = self.machine.frame_count();
+        if frame == press {
+            self.machine.key_down(RETURN);
+        } else if frame >= press + AUTO_RETURN_FRAMES {
+            self.machine.key_up();
+            self.auto_return = false;
         }
     }
 
@@ -423,6 +461,9 @@ impl Frontend {
     /// so that they do not collect in headless mode. When the turbo cause changes, a record
     /// of the category `frontend` goes out before the frame (REQ-085 criterion 3).
     fn run_frame(&mut self) -> Result<(), FrontendError> {
+        if self.auto_return {
+            self.auto_return_key();
+        }
         if let Some(typist) = &mut self.typist {
             typist.before_frame(&mut self.machine).map_err(|NotReady| {
                 FrontendError::BasicNotStarted {

@@ -85,7 +85,10 @@ pub fn start_at(options: &Options, sample_rate: u32) -> Result<Frontend, Fronten
         .as_deref()
         .map(|path| bas::load(path, !options.no_run))
         .transpose()?;
-    let frontend = Frontend::new(load_machine(options, sample_rate)?);
+    let mut frontend = Frontend::new(load_machine(options, sample_rate)?);
+    if options.auto_return {
+        frontend = frontend.with_auto_return();
+    }
     Ok(match codes {
         Some(codes) => frontend.with_typist(Typist::new(codes)),
         None => frontend,

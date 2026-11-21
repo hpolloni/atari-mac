@@ -37,6 +37,7 @@ Options:
   --disk <file>        ATR disk image in drive D1: (the OS boots it)
   --cas <file>         CAS tape image: boot it (holds START at power-on)
   --no-fast-tape       Read the tape records at the real speed (no tape shortcut)
+  --auto-return        With --cas: press RETURN after the prompt tone
   --bas <file>         Type a BASIC program from a text file at Ready, then RUN it
   --no-run             With --bas: type the program, but do not RUN it
   --pal                PAL machine (default: NTSC)
@@ -78,6 +79,9 @@ pub struct Options {
     pub cas: Option<PathBuf>,
     /// The tape shortcut (REQ-644) is on: `true` unless `--no-fast-tape` (REQ-091).
     pub fast_tape: bool,
+    /// With `--cas`: the frontend presses RETURN after the prompt tone (`--auto-return`,
+    /// REQ-092).
+    pub auto_return: bool,
     /// Run without a window.
     pub headless: bool,
     /// The number of frames to run. `None` runs until the user quits.
@@ -115,6 +119,7 @@ impl Default for Options {
             disk: None,
             cas: None,
             fast_tape: true,
+            auto_return: false,
             headless: false,
             frames: None,
             screenshot: None,
@@ -224,6 +229,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--disk" => options.disk = Some(value(&mut args, "--disk")?.into()),
             "--cas" => options.cas = Some(value(&mut args, "--cas")?.into()),
             "--no-fast-tape" => options.fast_tape = false,
+            "--auto-return" => options.auto_return = true,
             "--headless" => options.headless = true,
             "--pal" => options.standard = VideoStandard::Pal,
             "--frames" => options.frames = Some(number(&mut args, "--frames")?),
@@ -286,6 +292,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
         return Err(usage(
             "--cas and --bas cannot be used together: both make key presses at the start"
                 .to_owned(),
+        ));
+    }
+    if options.auto_return && options.cas.is_none() {
+        return Err(usage(
+            "--auto-return needs --cas: it presses RETURN for a tape boot".to_owned(),
         ));
     }
     if options.cas.is_some() && options.xex.is_some() {
@@ -412,6 +423,7 @@ mod tests {
                 disk: Some("d.atr".into()),
                 cas: None,
                 fast_tape: true,
+                auto_return: false,
                 headless: true,
                 frames: Some(180),
                 screenshot: Some("out.png".into()),

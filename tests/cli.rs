@@ -16,7 +16,6 @@ use atari_mac::atari_core::{Machine, MachineConfig, VideoStandard, palette};
 use atari_mac::bas::{self, KEY_DOWN_FRAMES, KEY_UP_FRAMES, Phase, Typist};
 use atari_mac::cli::{self, Options};
 use atari_mac::frontend::{Flow, Frontend};
-use atari_mac::logging;
 use atari_mac::start;
 use atari_mac::trace::{InstructionLine, SequenceLine, TraceWriter};
 // The binary uses this dependency; this test does not.
@@ -597,6 +596,130 @@ fn no_fast_tape_option() {
     assert!(
         fast_done < slow_done,
         "2: with the shortcut {fast_done} frames, without {slow_done} frames"
+    );
+}
+
+/// The KBCODE of RETURN.
+const RETURN_KEY: u8 = 0x0C;
+
+/// The key that is down after the frame (`SKSTAT` bit 2 = 0), as its `KBCODE`, or `None`.
+fn key_down(frontend: &Frontend) -> Option<u8> {
+    let machine = frontend.machine();
+    (machine.peek(0xD20F) & 0x04 == 0).then(|| machine.peek(0xD209))
+}
+
+/// Verifies REQ-092: with `--cas` and `--auto-return`, RETURN is down in frames 180-185
+/// (NTSC) or 150-155 (PAL), and no key is down in the other frames up to frame 300
+/// (criterion 1).
+#[test]
+fn auto_return_presses_return() {
+    let tape = boot_tape_file("auto_return_presses_return");
+    for (standard, press, pal) in [
+        (VideoStandard::Ntsc, 180, &[][..]),
+        (VideoStandard::Pal, 150, &["--pal"][..]),
+    ] {
+        let mut extra = vec!["--auto-return"];
+        extra.extend(pal);
+        let options = parse_cas(&tape, &extra);
+        assert!(options.auto_return, "the option");
+        assert_eq!(options.standard, standard, "the standard");
+        let mut frontend = start(&options).expect("start");
+        for frame in 0..300 {
+            frontend.run_frames(1).expect("run");
+            let expected = (press..press + 6).contains(&frame).then_some(RETURN_KEY);
+            assert_eq!(
+                key_down(&frontend),
+                expected,
+                "{standard:?}: the key down in frame {frame}"
+            );
+        }
+    }
+}
+
+/// The path of the boot test tape and the `$0600` byte after the headless run
+/// `--headless --frames 2400 --cas <file>` with `extra`: the run of `run_machine` (the
+/// frontend runs the frames with no input). The binary also exits with status 0.
+fn headless_tape_marker(test: &str, extra: &[&str]) -> u8 {
+    let tape = boot_tape_file(test);
+    let mut args = vec![
+        "--headless",
+        "--frames",
+        "2400",
+        "--cas",
+        tape.to_str().expect("UTF-8 path"),
+    ];
+    args.extend(extra);
+    let output = run(&args);
+    assert!(output.status.success(), "{extra:?}: {}", stderr(&output));
+    let mut cli_args = vec!["--os", OS_ROM, "--basic", BASIC_ROM];
+    cli_args.extend(&args);
+    let options = match cli::parse(cli_args.into_iter().map(OsString::from)) {
+        Ok(cli::Command::Run(options)) => options,
+        other => panic!("the command line: {other:?}"),
+    };
+    let mut frontend = start(&options).expect("start");
+    frontend
+        .run_frames(options.frames.expect("--frames"))
+        .expect("run");
+    frontend.machine().peek_ram(0x0600)
+}
+
+/// Verifies REQ-092: `--headless --frames 2400 --cas <file> --auto-return` boots the boot
+/// test tape (`$0600` holds `$A5` at the end) for NTSC and PAL; without `--auto-return`,
+/// the same run does not boot it (criterion 2).
+#[test]
+fn auto_return_headless_boot() {
+    for (name, pal) in [("ntsc", &[][..]), ("pal", &["--pal"][..])] {
+        let mut extra = vec!["--auto-return"];
+        extra.extend(pal);
+        assert_eq!(
+            headless_tape_marker(&format!("auto_return_headless_boot_{name}"), &extra),
+            0xA5,
+            "{name}: the tape boots"
+        );
+        assert_ne!(
+            headless_tape_marker(&format!("auto_return_headless_none_{name}"), pal),
+            0xA5,
+            "{name}: no boot without --auto-return"
+        );
+    }
+}
+
+/// Verifies REQ-092: `--auto-return` without `--cas` gives exit code 2 and a message that
+/// names both options (criterion 3).
+#[test]
+fn auto_return_needs_cas() {
+    let output = run(&["--headless", "--frames", "1", "--auto-return"]);
+    let message = stderr(&output);
+    assert_eq!(output.status.code(), Some(2), "exit status: {message}");
+    assert!(
+        message.contains("--auto-return") && message.contains("--cas"),
+        "the message names both options: {message}"
+    );
+}
+
+/// Verifies REQ-092: without `--auto-return`, `--cas` presses no key: no key is down in the
+/// first 300 frames, as REQ-081 criterion 3 gives (criterion 4).
+#[test]
+fn cas_without_auto_return() {
+    let tape = boot_tape_file("cas_without_auto_return");
+    let options = parse_cas(&tape, &[]);
+    assert!(!options.auto_return, "off by default");
+    let mut frontend = start(&options).expect("start");
+    for frame in 0..300 {
+        frontend.run_frames(1).expect("run");
+        assert_eq!(key_down(&frontend), None, "no key down in frame {frame}");
+    }
+}
+
+/// Verifies REQ-092: `--help` lists `--auto-return` (criterion 5).
+#[test]
+fn auto_return_help() {
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--auto-return"),
+        "--help lists --auto-return"
     );
 }
 
@@ -1372,58 +1495,6 @@ fn stats_help_lists_option() {
     );
 }
 
-/// The environment variable that makes `log_writes_tape_lines` the child process. Its value
-/// is the path of the tape.
-const LOG_CHILD: &str = "ATARI_MAC_LOG_TAPE_CHILD";
-
-/// The child process of `log_writes_tape_lines`: parses `--headless --frames 2400 --log tape
-/// --no-fast-tape --cas <tape>` with the free ROMs (the serial path, so that each record
-/// start has a line), installs the logger of `--log` as `run` does, and boots
-/// the tape with RETURN in frames 180-186 (as `cas_boots_tape`). The headless binary presses
-/// no key, so the test process itself is the child. It stops 5 frames after the boot code
-/// wrote `$A5` to `$0600`.
-fn log_tape_child(tape: &str) {
-    let args = [
-        "--os",
-        OS_ROM,
-        "--basic",
-        BASIC_ROM,
-        "--headless",
-        "--frames",
-        "2400",
-        "--log",
-        "tape",
-        "--no-fast-tape",
-        "--cas",
-        tape,
-    ];
-    let options = match cli::parse(args.map(OsString::from)) {
-        Ok(cli::Command::Run(options)) => options,
-        other => panic!("the command line: {other:?}"),
-    };
-    logging::install(options.log.expect("--log tape"));
-    let mut frontend = start(&options).expect("start");
-    let mut after = None;
-    for frame in 0..2_400 {
-        if frame == 180 {
-            frontend
-                .machine_mut()
-                .key_down(ascii_to_kbcode('\n').expect("RETURN"));
-        }
-        if frame == 186 {
-            frontend.machine_mut().key_up();
-        }
-        frontend.run_frames(1).expect("run");
-        if after.is_none() && frontend.machine().peek_ram(0x0600) == 0xA5 {
-            after = Some(frame + 5);
-        }
-        if after == Some(frame) {
-            return;
-        }
-    }
-    panic!("no $A5 at $0600 after 2,400 frames");
-}
-
 /// Verifies REQ-085: `--log tape --cas` with the tape of `boot_tape_file` and RETURN after
 /// the prompt tone writes lines `[frame <f> cycle <c>] tape: <message>` to standard error:
 /// the motor on line, the three record lines and the tape ends line, with frame and cycle
@@ -1431,23 +1502,24 @@ fn log_tape_child(tape: &str) {
 /// no motor off line comes (`crates/harness/tests/event_log.rs` `tape_records` presses
 /// RESET to get it).
 ///
-/// The headless binary presses no key, so the test runs its own test binary as the child
-/// process (`log_tape_child`, with the variable `LOG_CHILD`). The child installs the logger
-/// of `--log` in its own process, so the level of this process stays `Off`.
+/// The headless binary presses RETURN with `--auto-return` (REQ-092), and reads the tape on
+/// the serial path with `--no-fast-tape`, so that each record start has a line.
 #[test]
 fn log_writes_tape_lines() {
-    if let Some(tape) = env::var_os(LOG_CHILD) {
-        log_tape_child(tape.to_str().expect("UTF-8 path"));
-        return;
-    }
     let tape = boot_tape_file("log_writes_tape_lines");
-    let output = Command::new(env::current_exe().expect("the test binary"))
-        .args(["--exact", "log_writes_tape_lines", "--nocapture"])
-        .env(LOG_CHILD, &tape)
-        .output()
-        .expect("run the child process");
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "2400",
+        "--log",
+        "tape",
+        "--no-fast-tape",
+        "--auto-return",
+        "--cas",
+        tape.to_str().expect("UTF-8 path"),
+    ]);
     let message = stderr(&output);
-    assert!(output.status.success(), "the child: {message}");
+    assert!(output.status.success(), "the run: {message}");
     let mut lines = Vec::new();
     for line in message.lines().filter(|line| line.starts_with("[frame")) {
         let rest = line.strip_prefix("[frame ").expect("the prefix");
