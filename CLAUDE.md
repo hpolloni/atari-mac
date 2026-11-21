@@ -22,6 +22,25 @@ macOS frontend is the root crate `atari-mac`. `README.md` gives the layout and t
 - The lead may make small fixes during a merge (for example a conflict or a broken link), and
   edits to the specification, the plan, `README.md` and this file.
 
+### Parallel work
+
+- Keep three to five teammates working. Keep a list of packages that can start, and start
+  the next one when a teammate finishes. Do not wait for one teammate when other work is ready.
+- Start a package when the interfaces that it needs are in the design. Do not wait until the
+  slice before it is `done`. A criterion that needs work that is not merged stays an ignored
+  stub with the reason `planned: SLICE-NN`. The brief names that criterion and the work that
+  it waits for.
+- Give parallel teammates different files. When two teammates must change the same file, say
+  so in both briefs, keep each change small, and merge the one that the other needs first.
+  Split a large shared file into submodules (for example `pokey/pot.rs`) when it causes
+  conflicts.
+- While teammates run, review and merge the finished branches, edit the specification, and
+  write the next briefs.
+- A merge conflict in a generated block (the status block of `README.md`,
+  `docs/spec/requirements/INDEX.md`) needs no review: take either side, then run
+  `cargo run -p atari-harness --bin spec-index`.
+- Collect the open items that block packages, and show them to the user in one batch.
+
 ## Decisions
 
 - Hardware questions and scope questions belong to the user. Record each one as an open item
