@@ -1,7 +1,7 @@
 ---
 id: SLICE-10
 title: CPU instruction trace
-status: in-progress
+status: done
 depends_on: "SLICE-09"
 packages:
   - id: WP-1
