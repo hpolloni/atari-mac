@@ -93,10 +93,6 @@ pub enum RunEnd {
 
 /// The calls of the hooked run (`Machine::run_frame_with`). The default methods do nothing.
 pub trait CpuHook {
-    /// `false` only for [`NoHook`]: the machine then has no hook work in a cycle, so the
-    /// plain run has no added branch, call or memory access (REQ-007).
-    const ACTIVE: bool = true;
-
     /// Before the opcode fetch of each instruction. `Control::Stop` holds the cycle: the
     /// machine stops before the CPU access of this cycle (SLICE-11).
     fn instruction(&mut self, _start: &InstructionStart) -> Control {
@@ -115,6 +111,4 @@ pub trait CpuHook {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct NoHook;
 
-impl CpuHook for NoHook {
-    const ACTIVE: bool = false;
-}
+impl CpuHook for NoHook {}

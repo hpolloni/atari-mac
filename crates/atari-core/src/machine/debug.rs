@@ -45,7 +45,7 @@ impl Machine {
     pub fn run_frame_with<H: CpuHook>(&mut self, hook: &mut H) -> RunEnd {
         let target = self.frames + 1;
         while self.frames < target {
-            self.cycle_with(hook);
+            self.cycle_with(Some(&mut *hook));
         }
         RunEnd::FrameDone
     }
@@ -53,7 +53,7 @@ impl Machine {
     /// The hook calls of one cycle before the CPU tick, after the SIOV shortcut
     /// (`docs/design/debugger.md`, "Hooked run and the cycle order", steps 1 and 2). In a
     /// halted cycle or with RDY low the instruction or the sequence does not start.
-    pub(super) fn before_tick<H: CpuHook>(&mut self, out: &CycleOutput, hook: &mut H) {
+    pub(super) fn before_tick(&mut self, out: &CycleOutput, hook: &mut dyn CpuHook) {
         if !out.rdy {
             return;
         }

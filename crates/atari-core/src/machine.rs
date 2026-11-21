@@ -22,7 +22,7 @@ use core::fmt;
 
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
-use crate::debug::{BusAccess, CpuHook, NoHook, Position};
+use crate::debug::{BusAccess, CpuHook, Position};
 use crate::gtia::{ConsoleKeys, Gtia};
 use crate::media::{Cartridge, DiskImage, SioBus, Tape, Xex};
 use crate::pia::Pia;
@@ -478,13 +478,13 @@ impl Machine {
 
     /// Runs one machine cycle, in the order of `docs/design/system.md`, "Timing".
     pub fn run_cycle(&mut self) {
-        self.cycle_with(&mut NoHook);
+        self.cycle_with(None);
     }
 
     /// One machine cycle with the hook calls of `docs/design/debugger.md`, "Hooked run and
-    /// the cycle order". With [`NoHook`] the hook code is not compiled in (REQ-007).
-    #[inline]
-    fn cycle_with<H: CpuHook>(&mut self, hook: &mut H) {
+    /// the cycle order". The plain run and the hooked run share this one copy of the cycle,
+    /// so the chip functions have one call site and stay inlined (REQ-007).
+    fn cycle_with(&mut self, mut hook: Option<&mut dyn CpuHook>) {
         // 1. ANTIC, with the memory map of the end of the last cycle.
         let out = self.antic.tick(&mut self.mem);
         // 2. POKEY before the CPU access, with the SIO DATA IN level of this cycle. The bus
@@ -508,7 +508,7 @@ impl Machine {
             if self.fast_sio && self.cpu.at_opcode_fetch() {
                 siov::shortcut(self);
             }
-            if H::ACTIVE {
+            if let Some(hook) = hook.as_deref_mut() {
                 self.before_tick(&out, hook);
             }
             let mut bus = CpuBus {
@@ -523,7 +523,7 @@ impl Machine {
             let _tick = self.cpu.tick(&mut bus, out.rdy);
             data = bus.data;
             self.last_access = bus.access;
-            if H::ACTIVE
+            if let Some(hook) = hook
                 && let Some(access) = bus.access
             {
                 hook.access(access);
