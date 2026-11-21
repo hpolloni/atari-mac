@@ -21,7 +21,7 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | in-progress | 41 | 0 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
-| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 12 | 0 | 0 | 0 |
+| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | done | 12 | 0 | 0 | 0 |
 | [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | in-progress | 3 | 0 | 0 | 0 |
 | [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 2 | 0 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
