@@ -4,6 +4,8 @@
 //! (input), REQ-527 (clock modes), REQ-528 (asynchronous receive), REQ-529 (input errors),
 //! REQ-531 (reset), REQ-532 (force break).
 
+use crate::state::impl_state;
+
 /// The number of bits in one output frame: start bit, 8 data bits, stop bit.
 const FRAME_BITS: u8 = 10;
 
@@ -93,6 +95,17 @@ pub(super) struct SerialOut {
     /// `SKCTL` bit 7 (force break) was 1 in a cycle of the current frame (OI-029).
     break_seen: bool,
 }
+
+impl_state!(SerialOut {
+    serout,
+    pending,
+    shift,
+    bits,
+    level,
+    clock,
+    start_cycle,
+    break_seen,
+});
 
 impl SerialOut {
     /// The power-on state.

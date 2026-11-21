@@ -5,6 +5,8 @@
 //! All inputs share one charge time: the dump transistors drain all capacitors together,
 //! and all capacitors charge from the same moment. Each input has its own threshold.
 
+use crate::state::{impl_state, impl_state_enum};
+
 /// The count at which the scan counter stops (HRM 5.9 Polling mechanism).
 const SCAN_END: u8 = 228;
 /// Machine cycles of charge per slow-scan count (one scanline).
@@ -25,6 +27,13 @@ enum Phase {
     Stopping,
 }
 
+impl_state_enum!(Phase {
+    Idle,
+    Reset,
+    Counting,
+    Stopping
+});
+
 /// The pot scan counter, the pot registers, `ALLPOT` and the capacitor charge model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PotScan {
@@ -41,6 +50,15 @@ pub(super) struct PotScan {
     /// The charge in cycles that input n must pass to reach threshold; `None` = never.
     threshold: [Option<u32>; CONNECTED],
 }
+
+impl_state!(PotScan {
+    phase,
+    counter,
+    pot,
+    allpot,
+    charge,
+    threshold
+});
 
 impl PotScan {
     /// The power-on state: no scan, all registers 0, no paddle (REQ-501).

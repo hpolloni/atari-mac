@@ -91,6 +91,10 @@ pub fn start_at(options: &Options, sample_rate: u32) -> Result<Frontend, Fronten
 /// The window opens the audio stream on the default output device before it creates the
 /// machine, so that the machine makes samples at the rate of the stream. Without a device,
 /// a warning goes to standard error and the emulator runs without sound (REQ-011).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the frontend owns the host clock; the core reads no clock (REQ-014)"
+)]
 fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendError> {
     let audio = if options.headless {
         AudioOutput::off("--headless")

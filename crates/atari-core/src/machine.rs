@@ -26,6 +26,7 @@ use crate::gtia::{ConsoleKeys, Gtia};
 use crate::media::{Cartridge, SioBus};
 use crate::pia::Pia;
 use crate::pokey::Pokey;
+use crate::state::StateError;
 use crate::timing::VideoStandard;
 
 /// Size of the OS ROM.
@@ -233,7 +234,7 @@ impl DmaMemory for Memory {
 }
 
 /// One CPU bus access: for the debugger view of the last cycle and the bus log of the tests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct BusAccess {
     /// The address.
     addr: u16,
@@ -640,7 +641,28 @@ impl Machine {
     pub fn drain_audio(&mut self, out: &mut Vec<f32>) {
         self.pokey.drain_samples(out);
     }
+
+    /// The complete machine state as bytes (REQ-018). The ROMs are not in the state:
+    /// [`Machine::load_state`] needs a machine with the same [`MachineConfig`].
+    #[must_use]
+    pub fn save_state(&self) -> Vec<u8> {
+        save::save(self)
+    }
+
+    /// Restores a state from [`Machine::save_state`] (REQ-018). After it, the machine runs
+    /// as the saved machine did. The audio samples that were not drained are part of the
+    /// state.
+    ///
+    /// # Errors
+    ///
+    /// A [`StateError`] if the bytes are not a save state of this format, or if the state is
+    /// from a machine with another configuration. Then the machine does not change.
+    pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
+        save::load(self, bytes)
+    }
 }
+
+mod save;
 
 #[cfg(test)]
 mod tests {

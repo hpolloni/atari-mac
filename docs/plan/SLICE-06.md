@@ -1,7 +1,7 @@
 ---
 id: SLICE-06
 title: Exact timing and product qualities
-status: planned
+status: in-progress
 depends_on: "SLICE-01"
 packages:
   - id: WP-1
@@ -14,7 +14,7 @@ packages:
     requirements: [REQ-200, REQ-212, REQ-214, REQ-215, REQ-223, REQ-225, REQ-226, REQ-228, REQ-231, REQ-520, REQ-521]
   - id: WP-3
     title: Product qualities and save states
-    status: planned
+    status: in-progress
     requirements: [REQ-001, REQ-007, REQ-014, REQ-015, REQ-018, REQ-040, REQ-041, REQ-042]
 ---
 # SLICE-06: Exact timing and product qualities
