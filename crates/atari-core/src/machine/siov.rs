@@ -6,6 +6,7 @@
 
 use super::{CpuBus, Machine, PORTB_OS_ROM};
 use crate::cpu::Bus as _;
+use crate::events::{self, record};
 use crate::media::{CommandFrame, SioData, SioOutcome, SioRequest};
 
 /// The OS SIO entry point (TRN OS-APP-J).
@@ -83,10 +84,32 @@ pub(super) fn shortcut(machine: &mut Machine) {
     } else {
         SioData::None
     };
-    let SioOutcome::Done { status, data } = machine.sio.transact(&SioRequest { frame, data })
-    else {
+    let outcome = machine.sio.transact(&SioRequest { frame, data });
+    // The shortcut runs in the cycle in progress, number `cycles + 1` (REQ-084).
+    let (log_frame, now) = (machine.frames, machine.cycles + 1);
+    let CommandFrame {
+        device,
+        command,
+        aux1,
+        aux2,
+    } = frame;
+    let SioOutcome::Done { status, data } = outcome else {
+        record!(
+            info,
+            events::SIO,
+            log_frame,
+            now,
+            "SIOV device ${device:02X} command ${command:02X} aux1 ${aux1:02X} aux2 ${aux2:02X} no device"
+        );
         return;
     };
+    record!(
+        info,
+        events::SIO,
+        log_frame,
+        now,
+        "SIOV device ${device:02X} command ${command:02X} aux1 ${aux1:02X} aux2 ${aux2:02X} status ${status:02X}"
+    );
     // D1: got a command: `start_xex` releases OPTION (REQ-612).
     if machine.xex_option_until.is_some() {
         machine.release_xex_option();

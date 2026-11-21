@@ -17,7 +17,7 @@ mod sio;
 mod tape;
 mod xex;
 
-pub use deck::TapeDeck;
+pub use deck::{TapeDeck, TapeMark};
 pub use disk::{DiskImage, Geometry};
 pub use drive::{Accept, Completion, DiskDrive};
 pub use sio::{CommandFrame, SioBus, SioData, SioOutcome, SioRequest, sio_checksum};
@@ -204,6 +204,17 @@ impl CartKind {
             41 => Some(Self::MaxFlash1Mbit),
             42 => Some(Self::MaxFlash8Mbit),
             _ => None,
+        }
+    }
+
+    /// The CAR type number: 1, 2, 41, 42 (the inverse of [`CartKind::from_car_type`]).
+    #[must_use]
+    pub const fn car_type(self) -> u32 {
+        match self {
+            Self::Standard8k => 1,
+            Self::Standard16k => 2,
+            Self::MaxFlash1Mbit => 41,
+            Self::MaxFlash8Mbit => 42,
         }
     }
 

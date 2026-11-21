@@ -26,6 +26,22 @@ struct BlockTimes {
     edges: Vec<u64>,
 }
 
+/// A point of the tape that the machine event log reports (REQ-084).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapeMark {
+    /// A data block starts its first start bit (after its gap).
+    Record {
+        /// The index of the block in [`Tape::blocks`], from 0.
+        index: usize,
+        /// The length of the block in bytes.
+        len: usize,
+        /// The baud rate of the block.
+        baud: u16,
+    },
+    /// The end of the last block.
+    End,
+}
+
 /// The cassette deck with its tape (REQ-641, REQ-642).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TapeDeck {
@@ -177,6 +193,56 @@ impl TapeDeck {
                 signal % 2 == 0
             }
         }
+    }
+
+    /// The block and the data byte at tape time `p`, for the event log (REQ-084): the index
+    /// of the block in [`Tape::blocks`] and the index of the data byte (bit index / 10). The
+    /// byte is 0 in the gap of a block and in a signal block. `None` with no tape. After the
+    /// end of the tape: the number of blocks and 0.
+    #[must_use]
+    pub fn locate(&self, p: u64) -> Option<(usize, usize)> {
+        let tape = self.tape.as_ref()?;
+        let index = self.times.partition_point(|times| times.end <= p);
+        let (Some(times), Some(block)) = (self.times.get(index), tape.blocks().get(index)) else {
+            return Some((tape.blocks().len(), 0));
+        };
+        let byte = match block {
+            TapeBlock::Data { baud, .. } if p >= times.data => {
+                usize::try_from(self.bit_index(p - times.data, *baud) / BITS_PER_BYTE)
+                    .unwrap_or(usize::MAX)
+            }
+            TapeBlock::Data { .. } | TapeBlock::Signal { .. } => 0,
+        };
+        Some((index, byte))
+    }
+
+    /// The first mark at tape time `p` or later, with its tape time, for the event log
+    /// (REQ-084). `None` with no tape and after the end.
+    #[must_use]
+    pub fn next_mark(&self, p: u64) -> Option<(u64, TapeMark)> {
+        let tape = self.tape.as_ref()?;
+        let first = self.times.partition_point(|times| times.data < p);
+        let record = self
+            .times
+            .iter()
+            .zip(tape.blocks())
+            .enumerate()
+            .skip(first)
+            .find_map(|(index, (times, block))| match block {
+                TapeBlock::Data { baud, bytes, .. } if times.data >= p => Some((
+                    times.data,
+                    TapeMark::Record {
+                        index,
+                        len: bytes.len(),
+                        baud: *baud,
+                    },
+                )),
+                TapeBlock::Data { .. } | TapeBlock::Signal { .. } => None,
+            });
+        record.or_else(|| {
+            let end = self.times.last()?.end;
+            (end >= p).then_some((end, TapeMark::End))
+        })
     }
 
     /// The bit `k` of a data block at the baud rate `baud` that holds the tape time `offset`

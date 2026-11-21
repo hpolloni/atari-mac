@@ -42,7 +42,10 @@ impl_state!(Machine {
     // frontend start.
     console_keys,
     xex_option_until,
-    tape_start_until
+    tape_start_until,
+    // The next tape mark of the event log: `load_state` calculates it again.
+    tape_mark_at,
+    tape_mark
 });
 
 impl State for Memory {

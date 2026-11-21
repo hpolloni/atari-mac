@@ -15,5 +15,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 yaml-rust2 = { version = "0.13", default-features = false }
 
+[dev-dependencies]
+# The capture logger of the machine event log tests (REQ-084).
+log = { version = "0.4.35", default-features = false, features = ["kv"] }
+
 [lints]
 workspace = true
