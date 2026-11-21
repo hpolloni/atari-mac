@@ -371,6 +371,16 @@ impl AudioSink {
         }
         lock(&self.ring).correction(self.sample_rate)
     }
+
+    /// The number of underruns of the ring since the start (REQ-083), or 0 without a
+    /// stream. The frame loop reads it with `FrameAudio::underruns`.
+    #[must_use]
+    pub fn underrun_count(&self) -> u64 {
+        if !self.active {
+            return 0;
+        }
+        lock(&self.ring).underruns()
+    }
 }
 
 /// Builds and starts the output stream with samples of type `T`. Each channel of a frame

@@ -9,8 +9,9 @@
 //! emulation keeps the frame rate (REQ-007) and gives the audio samples in time (REQ-011)
 //! while the window waits.
 
+use std::io::{self, Write as _};
 use std::panic;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,7 +21,8 @@ use minifb::{Key, Window, WindowOptions};
 use crate::audio::{AudioOutput, AudioSink};
 use crate::cli::Options;
 use crate::error::FrontendError;
-use crate::frontend::{Flow, Frontend, Pacing, after_step, render, window_size};
+use crate::frontend::{Flow, FrameAudio as _, Frontend, Pacing, after_step, render, window_size};
+use crate::stats::{Counters, FrameStats, Motor, Stats};
 
 /// The time that the window loop waits when it has no new frame to show.
 const IDLE: Duration = Duration::from_millis(2);
@@ -34,6 +36,8 @@ struct Shared {
     frame: Mutex<Option<Vec<u8>>>,
     /// The window is closed or failed: the emulation thread stops.
     stop: AtomicBool,
+    /// The number of new frames that the window showed (REQ-083).
+    shown: AtomicU64,
 }
 
 /// Locks `mutex`. The data stays valid when the other thread panics.
@@ -51,7 +55,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// After each frame, the audio samples of the frame go to `audio`, and the level of its
 /// ring corrects the wait (REQ-011). While the emulation is paused or in turbo, the sound
-/// stops.
+/// stops. With `options.stats`, the emulation thread writes a statistics line to standard
+/// error after each second of host time (REQ-083).
 ///
 /// # Errors
 ///
@@ -67,6 +72,7 @@ pub fn run(
         scale,
         filters,
         frames,
+        stats,
         ..
     } = *options;
     let (width, height) = window_size(scale);
@@ -91,13 +97,17 @@ pub fn run(
     *lock(&shared.keys) = window.get_keys();
     let sink = audio.sink();
     thread::scope(|scope| {
-        let emulation = scope.spawn(|| emulate(frontend, &shared, &sink, frames));
+        let emulation = scope.spawn(|| emulate(frontend, &shared, &sink, frames, stats));
         let mut shown = Ok(());
         while window.is_open() && !emulation.is_finished() {
             let frame = lock(&shared.frame).take();
             shown = if let Some(frame) = frame {
                 render(&frame, standard, filters, scale, &mut buffer);
-                window.update_with_buffer(&buffer, width, height)
+                let update = window.update_with_buffer(&buffer, width, height);
+                if update.is_ok() {
+                    let _shown = shared.shown.fetch_add(1, Ordering::Relaxed);
+                }
+                update
             } else {
                 window.update();
                 thread::sleep(IDLE);
@@ -119,7 +129,8 @@ pub fn run(
 
 /// The emulation thread: runs the frames at real-time speed (or in turbo while a BASIC
 /// program is typed or the tape motor runs) until the user quits, `frames` frames have run
-/// or the window stops. Returns the time from the first frame to the end.
+/// or the window stops. Returns the time from the first frame to the end. With `stats`,
+/// it writes a statistics line to standard error after each second (REQ-083).
 #[expect(
     clippy::disallowed_methods,
     reason = "the frontend owns the host clock; the core reads no clock (REQ-014)"
@@ -129,17 +140,46 @@ fn emulate(
     shared: &Shared,
     audio: &AudioSink,
     frames: Option<u64>,
+    stats: bool,
 ) -> Result<Duration, FrontendError> {
     let mut audio = audio.clone();
     let start = Instant::now();
     let mut pacing = Pacing::new(frontend.machine().standard(), start);
+    let counters = |audio: &AudioSink| Counters {
+        shown: shared.shown.load(Ordering::Relaxed),
+        underruns: audio.underruns(),
+    };
+    let mut stats = stats.then(|| {
+        let machine = frontend.machine();
+        Stats::new(
+            machine.standard(),
+            start,
+            counters(&audio),
+            Motor::of(machine),
+        )
+    });
     let mut keys = Vec::new();
     while !shared.stop.load(Ordering::Relaxed) && frames.is_none_or(|n| frontend.frames_run() < n) {
         keys.clone_from(&lock(&shared.keys));
+        let frames_before = frontend.frames_run();
+        let t0 = Instant::now();
         if frontend.step(&keys)? == Flow::Quit {
             break;
         }
-        let after = after_step(frontend, &mut pacing, &mut audio, Instant::now());
+        let t1 = Instant::now();
+        let after = after_step(frontend, &mut pacing, &mut audio, t1);
+        if let Some(stats) = &mut stats {
+            if frontend.frames_run() > frames_before {
+                stats.frame(FrameStats {
+                    emulation: t1 - t0,
+                    turbo: frontend.turbo(),
+                    motor: Motor::of(frontend.machine()),
+                });
+            }
+            if let Some(line) = stats.tick(t1, counters(&audio)) {
+                writeln!(io::stderr(), "{line}").map_err(FrontendError::Output)?;
+            }
+        }
         if after.present {
             let mut frame = Vec::with_capacity(frontend.machine().frame().len());
             frame.extend_from_slice(frontend.machine().frame());

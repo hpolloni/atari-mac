@@ -57,6 +57,7 @@ version = "0.1.0"
 dependencies = [
  "atari-core",
  "cpal",
+ "log",
  "minifb",
  "png",
 ]

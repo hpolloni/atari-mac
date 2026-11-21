@@ -8,6 +8,7 @@ use atari_core::VideoStandard;
 
 use crate::error::FrontendError;
 use crate::frontend::DisplayFilters;
+use crate::logging::Categories;
 
 /// The default OS ROM file (the free Altirra OS, see `roms/README.md`).
 pub const DEFAULT_OS_ROM: &str = "roms/altirraos-xl.rom";
@@ -41,6 +42,8 @@ Options:
   --frames <n>         Run n frames, then print the elapsed time and exit
   --headless           No window and no audio (needs --frames)
   --audio-stats        At exit, print the audio sample rate and the underrun count
+  --stats              Each second, write the speed statistics to standard error
+  --log <categories>   Write log records to standard error: tape,sio,reset,media,frontend,all
   --screenshot <file>  At exit, save the last frame as a PNG file
   --artifacting        NTSC artifacting filter: false colors for hires pixel patterns
   --pal-blending       PAL chroma blending filter (needs a PAL machine)
@@ -50,6 +53,10 @@ Keys: F1 inverse, F2 START, F3 SELECT, F4 OPTION, F5 RESET, F6 HELP, F7 BREAK,
 F9 pause, F10 cold reset, arrow keys and Left Option joystick 1, Command+Escape quit.";
 
 /// The settings of one run.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one flag of the command line"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
     /// The OS ROM file.
@@ -82,6 +89,11 @@ pub struct Options {
     pub no_run: bool,
     /// At exit, print the audio numbers (`--audio-stats`, REQ-011).
     pub audio_stats: bool,
+    /// Each second, write the speed statistics to standard error (`--stats`, REQ-083).
+    pub stats: bool,
+    /// The log categories to write to standard error (`--log`, REQ-085). A second `--log`
+    /// replaces the first.
+    pub log: Option<Categories>,
 }
 
 impl Default for Options {
@@ -102,6 +114,8 @@ impl Default for Options {
             bas: None,
             no_run: false,
             audio_stats: false,
+            stats: false,
+            log: None,
         }
     }
 }
@@ -170,6 +184,17 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--bas" => options.bas = Some(value(&mut args, "--bas")?.into()),
             "--no-run" => options.no_run = true,
             "--audio-stats" => options.audio_stats = true,
+            "--stats" => options.stats = true,
+            "--log" => {
+                let text = value(&mut args, "--log")?;
+                let text = text.to_str().ok_or_else(|| {
+                    usage(format!(
+                        "unknown --log category {:?}",
+                        text.display().to_string()
+                    ))
+                })?;
+                options.log = Some(Categories::parse(text)?);
+            }
             "--scale" => {
                 let scale = number(&mut args, "--scale")?;
                 if !(1..=MAX_SCALE).contains(&scale) {
@@ -258,6 +283,7 @@ mod tests {
 
     use super::{Command, Options, check_filters, parse};
     use crate::frontend::DisplayFilters;
+    use crate::logging::Categories;
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
@@ -317,6 +343,11 @@ mod tests {
             "game.bas",
             "--no-run",
             "--audio-stats",
+            "--stats",
+            "--log",
+            "tape",
+            "--log",
+            "sio:debug,frontend",
         ]);
         assert_eq!(
             options,
@@ -336,6 +367,8 @@ mod tests {
                 bas: Some("game.bas".into()),
                 no_run: true,
                 audio_stats: true,
+                stats: true,
+                log: Categories::parse("sio:debug,frontend").ok(),
             },
             "all options"
         );
@@ -362,6 +395,8 @@ mod tests {
             (&["--disk"], "--disk needs a value"),
             (&["--cas"], "--cas needs a value"),
             (&["--no-run"], "--no-run needs --bas"),
+            (&["--log"], "--log needs a value"),
+            (&["--log", "disk"], "unknown --log category \"disk\""),
         ] {
             let error = parse_err(list);
             assert!(error.starts_with(message), "{list:?}: {error}");

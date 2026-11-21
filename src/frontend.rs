@@ -19,6 +19,28 @@ use crate::bas::{NotReady, READY_TIMEOUT_FRAMES, Typist};
 use crate::cli::Options;
 use crate::error::FrontendError;
 use crate::keymap::InputState;
+use crate::logging::FRONTEND_TARGET;
+
+/// Sends one record of the category `frontend` (REQ-085 criterion 3) with the frame count
+/// and the cycle count of `machine` at the call: the counts at the start of the frame that
+/// comes next.
+fn record(machine: &Machine, message: &str) {
+    log::info!(
+        target: FRONTEND_TARGET,
+        frame = machine.frame_count(),
+        cycle = machine.cycle_count();
+        "{message}"
+    );
+}
+
+/// Why the frames run in turbo ([`Frontend::turbo_cause`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurboCause {
+    /// The typist types the BASIC program (REQ-080 criterion 7).
+    Typing,
+    /// A tape is inserted and the motor line is low (REQ-082).
+    TapeMotor,
+}
 
 /// Reads a whole file.
 fn read(path: &Path) -> Result<Vec<u8>, FrontendError> {
@@ -289,6 +311,8 @@ pub struct Frontend {
     /// The last frame that ran started with a tape inserted and the motor line low
     /// (REQ-082). `false` when the last step ran no frame.
     tape_turbo: bool,
+    /// The turbo cause of the last frame that ran (REQ-085 criterion 3).
+    turbo_cause: Option<TurboCause>,
 }
 
 impl Frontend {
@@ -304,6 +328,7 @@ impl Frontend {
             typist: None,
             audio: Vec::new(),
             tape_turbo: false,
+            turbo_cause: None,
         }
     }
 
@@ -340,6 +365,13 @@ impl Frontend {
         self.typist.is_some() || self.tape_turbo
     }
 
+    /// The turbo cause of the last frame that ran, or `None` for real-time speed. A step
+    /// that runs no frame (pause) does not change it.
+    #[must_use]
+    pub const fn turbo_cause(&self) -> Option<TurboCause> {
+        self.turbo_cause
+    }
+
     /// The emulation is paused.
     #[must_use]
     pub const fn paused(&self) -> bool {
@@ -369,7 +401,8 @@ impl Frontend {
 
     /// Runs one frame and counts it. Before the frame, the typist presses or releases a key.
     /// After the frame, the audio samples of the frame replace the samples of the last frame,
-    /// so that they do not collect in headless mode.
+    /// so that they do not collect in headless mode. When the turbo cause changes, a record
+    /// of the category `frontend` goes out before the frame (REQ-085 criterion 3).
     fn run_frame(&mut self) -> Result<(), FrontendError> {
         if let Some(typist) = &mut self.typist {
             typist.before_frame(&mut self.machine).map_err(|NotReady| {
@@ -382,6 +415,24 @@ impl Frontend {
             }
         }
         self.tape_turbo = self.machine.tape_motor_on();
+        let cause = if self.typist.is_some() {
+            Some(TurboCause::Typing)
+        } else if self.tape_turbo {
+            Some(TurboCause::TapeMotor)
+        } else {
+            None
+        };
+        if cause != self.turbo_cause {
+            self.turbo_cause = cause;
+            record(
+                &self.machine,
+                match cause {
+                    Some(TurboCause::Typing) => "turbo on (BASIC typing)",
+                    Some(TurboCause::TapeMotor) => "turbo on (tape motor)",
+                    None => "turbo off",
+                },
+            );
+        }
         let start = self.machine.cycle_count();
         self.machine.run_frame();
         self.last_frame_cycles = self.machine.cycle_count() - start;
@@ -450,10 +501,15 @@ impl Frontend {
             machine.press_reset();
         }
         if input.cold_reset && !previous.cold_reset {
+            record(machine, "cold reset (F10)");
             machine.power_on();
         }
         if input.pause && !previous.pause {
             self.paused = !self.paused;
+            record(
+                &self.machine,
+                if self.paused { "paused" } else { "continued" },
+            );
         }
     }
 }
@@ -626,6 +682,8 @@ pub trait FrameAudio {
     fn stop_sound(&mut self);
     /// The correction of the next frame wait in seconds ([`AudioSink::correction`]).
     fn wait_correction(&self) -> f64;
+    /// The number of underruns since the start ([`AudioSink::underrun_count`], REQ-083).
+    fn underruns(&self) -> u64;
 }
 
 impl FrameAudio for AudioSink {
@@ -639,6 +697,10 @@ impl FrameAudio for AudioSink {
 
     fn wait_correction(&self) -> f64 {
         Self::correction(self)
+    }
+
+    fn underruns(&self) -> u64 {
+        Self::underrun_count(self)
     }
 }
 
@@ -1402,6 +1464,10 @@ mod tests {
 
         fn wait_correction(&self) -> f64 {
             self.ring.correction(self.rate)
+        }
+
+        fn underruns(&self) -> u64 {
+            self.ring.underruns()
         }
     }
 
