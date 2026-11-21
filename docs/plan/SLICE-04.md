@@ -10,7 +10,7 @@ packages:
     requirements: [REQ-209, REQ-210, REQ-232, REQ-600, REQ-604, REQ-605, REQ-606, REQ-607, REQ-608, REQ-609, REQ-610, REQ-611, REQ-612, REQ-613, REQ-614]
   - id: WP-2
     title: Joysticks, paddles and console keys
-    status: planned
+    status: done
     requirements: [REQ-006, REQ-010, REQ-017, REQ-436, REQ-439, REQ-440, REQ-534, REQ-535, REQ-536, REQ-537]
   - id: WP-3
     title: Command line and robust input

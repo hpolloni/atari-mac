@@ -202,11 +202,11 @@ All state is in `Pokey`. Power-on values are the values after `new` and `reset` 
 | `kb_key_down` | `bool` | `false` | `SKSTAT` bit 2 is 0 |
 | `brk_prev` | `bool` | `false` | BREAK level at the last check |
 | `pot_counter` | `u8` | 228 | Pot scan counter |
-| `pot_active` | `bool` | `false` | A pot scan runs |
+| `pot_phase` | `Idle`, `Reset`, `Counting`, `Stopping` | `Idle` | Scan phase; a pot scan runs in each phase but `Idle` |
 | `pot` | `[u8; 8]` | 0 | `POT0-7` |
 | `allpot` | `u8` | 0 | `ALLPOT` |
-| `pot_threshold` | `[Option<u32>; 8]` | `None` | Charge time in cycles to threshold; `None` = never |
-| `pot_charge` | `[u32; 8]` | 0 | Charge time in cycles since the last dump |
+| `pot_threshold` | `[Option<u32>; 4]` | `None` | Charge time in cycles to threshold of inputs 0-3; `None` = never. Inputs 4-7 never reach threshold |
+| `pot_charge` | `u32` | 0 | Charge time in cycles since the last dump. The dump transistors drain all inputs together, so one value serves all inputs |
 | `serout`, `serout_pending` | `u8`, `bool` | 0, `false` | `SEROUT` and its pending flag |
 | `out_shift`, `out_bits` | `u16`, `u8` | 0, 0 | Output shift register; bits left (0 = idle) |
 | `out_level` | `bool` | `true` | SIO DATA OUT from the shift register |
@@ -477,7 +477,12 @@ With `>` in step 2, a slow scan from an empty capacitor gives exactly the count 
 `set_pot`: the window from the counter reset to the threshold cycle holds exactly c pot
 pulses, for each phase of the 15 kHz clock.
 
-`POTGO` written on cycle G: `pot_active = true`; on cycle G+1 the counter is 0. Each input
+The code is in `crates/atari-core/src/pokey/pot.rs` (`PotScan`). `pot_active` above is
+`pot_phase != Idle`.
+
+`POTGO` written on cycle G: `pot_active = true`; on cycle G+1 the counter is 0 and does not
+count, also when a pot pulse falls on G+1 (phase `Reset`). So the first increment P is the
+first pulse after G+1. Each input
 below threshold gets `ALLPOT` bit = 1 and `pot[i] = 0`. An input above threshold keeps its
 `pot[i]` value and gets bit = 0.
 
@@ -705,3 +710,8 @@ model of REQ-600 and later.
     before T+4 (HRM 5.3 STIMER preemption). So a timer that ran before the write can still
     fire on T+1 to T+3. The tests of REQ-507 criteria 2 and 4, REQ-508 criterion 2 and
     REQ-510 criterion 5 start the timers so that no fire is scheduled at T.
+20. SLICE-04 WP-2 (2026-11-20): HRM 5.9 Polling status says that an input that "dips back
+    below input threshold during the scan" sets its `ALLPOT` bit to 1 again and its `POTn`
+    follows the counter again. The model has no such case: the charge only grows during a
+    scan. A `set_pot` call with a higher count during a scan does not set the bit again. No
+    requirement covers it.

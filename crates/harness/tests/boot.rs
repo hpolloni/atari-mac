@@ -94,7 +94,11 @@ fn boots_to_basic_ready() {
     assert!(frames.is_some(), "no Ready row after {BOOT_FRAMES} frames");
 }
 
-/// Verifies REQ-006: OPTION held at power-on disables BASIC.
+/// The frames of REQ-006: OPTION is held from power-on for this many frames.
+const OPTION_FRAMES: u32 = 180;
+
+/// Verifies REQ-006: with OPTION held from power-on for 180 frames, `poke_ram($A000, $5A)`
+/// followed by `peek($A000)` gives `$5A` (RAM is visible) (criterion 1).
 #[test]
 fn option_key_disables_basic() {
     let mut machine = boot(BootOptions::default()).unwrap();
@@ -104,18 +108,23 @@ fn option_key_disables_basic() {
             option: true,
             ..ConsoleKeys::default()
         },
-        BOOT_FRAMES,
+        OPTION_FRAMES,
     );
     machine.poke_ram(0xA000, 0x5A);
     assert_eq!(machine.peek(0xA000), 0x5A, "RAM shows at $A000");
 }
 
-/// Verifies REQ-006: without OPTION, BASIC is mapped at `$A000`.
+/// Verifies REQ-006: without OPTION, after 180 frames, `peek($A000)` gives byte `$0000` of
+/// the BASIC ROM (criterion 2).
 #[test]
 fn basic_is_mapped_without_option() {
     let basic = data::basic_rom().unwrap();
     let mut machine = boot(BootOptions::default()).unwrap();
-    run_frames(&mut machine, BOOT_FRAMES);
+    run_frames(&mut machine, OPTION_FRAMES);
+    assert_ne!(
+        basic[0], 0x00,
+        "the check needs a BASIC byte that is not RAM"
+    );
     assert_eq!(machine.peek(0xA000), basic[0], "BASIC byte $0000 at $A000");
 }
 

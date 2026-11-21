@@ -7,12 +7,14 @@
 //! (REQ-518 to REQ-522), the unlinked and linked timers (REQ-504, REQ-505) and the serial
 //! output (REQ-525) that the OS SIO code needs to send its command frames. SLICE-03 adds the
 //! audio channels, the noise generators, `RANDOM` and the host audio output (REQ-503 to
-//! REQ-514, REQ-538 to REQ-541). The serial input and the pot scan come in later slices.
-//! Their registers are stored, and their inputs and outputs keep the idle levels.
+//! REQ-514, REQ-538 to REQ-541). SLICE-04 adds the pot scan (REQ-534 to REQ-537). The
+//! serial input comes in a later slice. Its registers are stored, and its inputs and outputs
+//! keep the idle levels.
 
 mod audio;
 mod kbscan;
 mod noise;
+mod pot;
 mod serial;
 mod timers;
 
@@ -23,6 +25,7 @@ use crate::timing::{CYCLES_PER_LINE, VideoStandard};
 use audio::Audio;
 use kbscan::{KeyboardScan, ScanInput};
 use noise::Noise;
+use pot::PotScan;
 use serial::{OutputClock, SerialOut};
 use timers::Timers;
 
@@ -101,6 +104,11 @@ const OFFSET_15KHZ: u64 = 79;
 /// Cycles from the exit of initialization mode to the first keyboard scan pulse (design
 /// open issue 5: the pot counter pulse of HRM 5.9 Scan timing).
 const OFFSET_KEY_SCAN: u64 = 81;
+/// Cycles from the exit of initialization mode to the first pot counter pulse (HRM 5.9 Scan
+/// timing).
+const OFFSET_POT_SCAN: u64 = 81;
+/// `SKCTL` bit 2: fast pot scan.
+const SKCTL_FAST_POT: u8 = 0x04;
 
 /// The number of bytes that the `take_serial_byte` FIFO holds.
 const SERIAL_FIFO: usize = 64;
@@ -173,10 +181,8 @@ pub struct Pokey {
     out_ff: [bool; 4],
     /// The high-pass flip-flops of channels 1 and 2 (1 while the filter is off).
     hp_ff: [bool; 2],
-    /// `POT0-7`.
-    pot: [u8; 8],
-    /// `ALLPOT`.
-    allpot: u8,
+    /// The pot scan: `POT0-7`, `ALLPOT` and the paddle inputs.
+    pots: PotScan,
     /// The keys that are down, and the host levels of SHIFT, CONTROL and BREAK.
     keys: ScanInput,
     /// The modifiers that `key_down` pressed (`SHIFT` and `CONTROL` bits of `KBCODE`).
@@ -224,8 +230,7 @@ impl Pokey {
             noise: Noise::new(),
             out_ff: [true; 4],
             hp_ff: [true; 2],
-            pot: [0; 8],
-            allpot: 0,
+            pots: PotScan::new(),
             keys: ScanInput {
                 matrix: 0,
                 shift: false,
@@ -281,6 +286,7 @@ impl Pokey {
         self.channel_tick(fired);
         self.serial_tick();
         self.keyboard_tick();
+        self.pot_tick();
         let volumes = self.channel_volumes();
         self.audio.cycle(volumes, self.speaker);
     }
@@ -299,8 +305,8 @@ impl Pokey {
     #[must_use]
     pub const fn peek(&self, reg: u8) -> u8 {
         match reg & 0x0F {
-            index @ 0x00..=0x07 => self.pot[index as usize],
-            0x08 => self.allpot,
+            index @ 0x00..=0x07 => self.pots.pot(index as usize),
+            0x08 => self.pots.allpot(),
             0x09 => self.kbcode,
             0x0A => self.noise.random(),
             0x0D => self.serin,
@@ -346,8 +352,8 @@ impl Pokey {
             }
             0x0D => self.serial.write(value),
             0x0F => self.write_skctl(value),
-            // `$B` (`POTGO`) starts the pot scan, which is not in SLICE-01. `$C` has no write
-            // register.
+            0x0B => self.pots.potgo(),
+            // `$C` has no write register.
             _ => {}
         }
     }
@@ -409,13 +415,12 @@ impl Pokey {
         self.release_all_keys();
     }
 
-    /// Paddle input `index` 0..=3 reaches threshold at slow-scan count `count` (REQ-535).
-    #[expect(
-        clippy::unused_self,
-        clippy::needless_pass_by_ref_mut,
-        reason = "the pot scan is not in SLICE-01; the interface of pokey.md is kept"
-    )]
-    pub const fn set_pot(&mut self, _index: usize, _count: u8) {}
+    /// Paddle input `index` 0..=3 reaches threshold at slow-scan count `count` (REQ-535). A
+    /// count of 228 or more means never (no paddle). Inputs 4-7 are grounded, so the call
+    /// ignores them.
+    pub const fn set_pot(&mut self, index: usize, count: u8) {
+        self.pots.set_threshold(index, count);
+    }
 
     /// The SIO DATA IN level. `true` = high (mark).
     pub const fn set_serial_in(&mut self, high: bool) {
@@ -656,6 +661,14 @@ impl Pokey {
         if event.brk {
             self.latch(IRQ_BREAK);
         }
+    }
+
+    /// The pot scan for this cycle (HRM 5.9). The slow counter counts on the 15 kHz pot
+    /// pulse, which stops in initialization mode.
+    const fn pot_tick(&mut self) {
+        let fast = self.skctl & SKCTL_FAST_POT != 0;
+        let pulse = !fast && self.pots.counting() && self.slow_pulse(OFFSET_POT_SCAN, PERIOD_15KHZ);
+        self.pots.tick(fast, pulse);
     }
 
     /// An interrupt event on this cycle E. It latches if its bit was enabled at the end of

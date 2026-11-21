@@ -596,6 +596,12 @@ impl Machine {
         self.gtia.set_trigger(port, state.fire);
     }
 
+    /// Sets paddle input `index` (0-3, `POT0-POT3`): the input reaches threshold at slow-scan
+    /// count `count`. A count of 228 or more means no paddle (REQ-535).
+    pub const fn set_paddle(&mut self, index: usize, count: u8) {
+        self.pokey.set_pot(index, count);
+    }
+
     /// Moves all audio samples produced since the last call into `out`.
     pub fn drain_audio(&mut self, out: &mut Vec<f32>) {
         self.pokey.drain_samples(out);
