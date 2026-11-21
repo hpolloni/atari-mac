@@ -302,8 +302,9 @@ pub struct Evidence {
     pub result: Outcome,
     /// The `by` value.
     pub by: String,
-    /// The number of subsection headings (`##` or `###`) in the body.
-    pub subsections: usize,
+    /// The criterion numbers N of the subsection headings (`##` or `###`) in the body whose
+    /// text starts with `Criterion N` (REQ-051 criterion 2).
+    pub criterion_sections: BTreeSet<usize>,
     /// The path relative to the repository root.
     pub path: PathBuf,
 }
@@ -319,14 +320,15 @@ pub struct TestRef {
 
 impl TestRef {
     /// True if `test` is this test: the same function, in a file of the module that `file`
-    /// names (if a file is given). See [`file_matches`].
+    /// names. An entry without a file matches no test (REQ-049 criterion 4). See
+    /// [`file_matches`].
     #[must_use]
     pub fn matches(&self, test: &CodeTest) -> bool {
         test.function == self.function
             && self
                 .file
                 .as_ref()
-                .is_none_or(|file| file_matches(file, &test.file))
+                .is_some_and(|file| file_matches(file, &test.file))
     }
 }
 

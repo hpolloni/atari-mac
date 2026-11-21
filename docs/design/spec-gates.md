@@ -73,7 +73,11 @@ by: lead                 # a role, not a person's name
 ---
 ```
 
-The body has one subsection for each acceptance criterion: the steps and what was seen.
+The body has one subsection (`##` or `###`) for each acceptance criterion: the steps and
+what was seen. The heading of the subsection for criterion N starts with `Criterion N`, for
+example `## Criterion 2: scale 3`. The `evidence` gate checks each criterion of the
+requirement for this heading (REQ-051 criterion 2). Other subsections, for example the slice
+acceptance, are permitted.
 
 ## Parser
 
@@ -112,7 +116,9 @@ pub fn check(spec: &Spec, root: &Path) -> Vec<Violation>;
 Test plan rows are the table rows in the `## Test plan` section of each design document whose
 first cell names requirement IDs. A test in backticks, for example
 `` `antic.rs` `nmist_visible_from_cycle_7` ``, is a `TestRef`: the file is the nearest
-`.rs` name in backticks before it in the same cell, if any.
+`.rs` name in backticks before it in the same cell. A test without a `.rs` name before it
+in its cell fails the `trace` gate, because the gate identifies a test by its file and its
+function name (REQ-049 criterion 4).
 
 A file name in a test plan names a Rust module, not one file: `antic.rs` matches
 `antic.rs` and every file below the directory `antic/` of the same crate (for example
@@ -142,6 +148,18 @@ also on small synthetic files in a temporary directory, so that each failure rul
 | `readme` | REQ-056: `make` targets and command-line options that `README.md` names exist |
 
 `tests/traceability.rs` moves into this design: its rules become the `trace` gate.
+
+### Exact rules of some gates
+
+- `structure`: each section heading appears at most once. A second `## Requirement` (or any
+  other section) fails, also when the first occurrences are in the correct order (REQ-044).
+- `references`: a line says that a requirement is withdrawn or merged when it has the whole
+  word `withdrawn` or `merged` (in any case), and the word before it is not `not`. So
+  `emerged`, `unmerged`, `not withdrawn` and `not merged` do not permit a withdrawn ID on the
+  line (REQ-047 criterion 3).
+- `open_items`: an `affects` path is relative to the repository root. An absolute path, or a
+  path whose `..` components leave the root, fails, also when the path exists on the host
+  (REQ-053 criterion 1).
 
 ### Planned test stubs
 
@@ -228,18 +246,18 @@ frontmatter. The converter is not committed. The migration commit must show that
 | Requirement | Test |
 | --- | --- |
 | REQ-043 | `spec_gates.rs` `schema_gate_passes_on_repository`, `schema_gate_rejects_bad_files` |
-| REQ-044 | `spec_gates.rs` `structure_gate_passes_on_repository`, `structure_gate_rejects_bad_files` |
+| REQ-044 | `spec_gates.rs` `structure_gate_passes_on_repository`, `structure_gate_rejects_bad_files`, `structure_gate_rejects_duplicate_sections` (criterion 1) |
 | REQ-045 | `spec_gates.rs` `vague_words_gate_passes_on_repository`, `vague_words_gate_rejects_bad_files` |
 | REQ-046 | `spec_gates.rs` `sources_gate_passes_on_repository`, `sources_gate_rejects_bad_registry` (criteria 1, 2), `sources_gate_rejects_bad_files` (criteria 3 to 6), `sources_gate_checks_committed_files` (criterion 7), `sources_gate_checks_pinned_urls` (criterion 8); `harness_self_test.rs` `sha256_matches_fips_vectors` (the checksum of criterion 7), `pinned_references_are_ignored` (criterion 8: git ignores `reference/pinned/`) |
-| REQ-047 | `spec_gates.rs` `references_gate_passes_on_repository`, `references_gate_rejects_bad_files` |
+| REQ-047 | `spec_gates.rs` `references_gate_passes_on_repository`, `references_gate_rejects_bad_files`, `references_gate_matches_whole_words` (criterion 3) |
 | REQ-048 | `spec_gates.rs` `test_plans_gate_passes_on_repository`, `test_plans_gate_rejects_bad_files` |
 | REQ-027, REQ-049 | `spec_gates.rs` `trace_gate_passes_on_repository`, `trace_gate_rejects_bad_files` |
 | REQ-027 | `spec_gates.rs` `trace_gate_requires_a_test_for_each_test_requirement`, `trace_gate_rejects_bad_ignore_reasons` (the planned test stubs); `traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests` |
-| REQ-049 | `spec_gates.rs` `trace_gate_matches_submodule_files`, `trace_gate_rejects_other_modules`, `trace_gate_matches_paths_exactly` (the module rule for file names), `trace_gate_checks_test_plans_of_all_packages` |
+| REQ-049 | `spec_gates.rs` `trace_gate_matches_submodule_files`, `trace_gate_rejects_other_modules`, `trace_gate_matches_paths_exactly` (the module rule for file names), `trace_gate_checks_test_plans_of_all_packages`, `trace_gate_needs_a_file_for_each_test` (criterion 4) |
 | REQ-050 | `spec_gates.rs` `unplanned_requirements_are_reported`, `slices_gate_rejects_unplanned_requirements`, `product_complete_needs_must_planned` |
-| REQ-051 | `spec_gates.rs` `evidence_gate_passes_on_repository`, `evidence_gate_rejects_bad_files` |
+| REQ-051 | `spec_gates.rs` `evidence_gate_passes_on_repository`, `evidence_gate_rejects_bad_files`, `evidence_gate_checks_each_criterion` (criterion 2) |
 | REQ-052 | `spec_gates.rs` `matrix_has_one_row_per_requirement`; CI job `Specification` (artifact and summary) |
-| REQ-053 | `spec_gates.rs` `open_item_gate_rejects_bad_files`, `indexes_are_up_to_date` |
+| REQ-053 | `spec_gates.rs` `open_item_gate_rejects_bad_files`, `open_item_gate_rejects_paths_outside_the_repository` (criterion 1), `indexes_are_up_to_date` |
 | REQ-054 | `spec_gates.rs` `slice_gate_rejects_bad_files` |
 | REQ-055 | `spec_gates.rs` `gates_run_within_10_seconds`; CI job `Specification` |
 | REQ-056 | `spec_gates.rs` `readme_status_block_is_current` (1-3), `readme_status_block_rejects_bad_markers` (1), `readme_links_and_ids_are_checked` (4), `readme_make_targets_exist` (5), `readme_options_exist` (6) |

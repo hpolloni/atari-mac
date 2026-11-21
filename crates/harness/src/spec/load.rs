@@ -495,6 +495,15 @@ fn is_iso_date(date: &str) -> bool {
             && [y, m, d].iter().all(|p| text::digits(p) == **p))
 }
 
+/// The number N of a subsection heading that starts with `Criterion N`, where N is followed
+/// by the end of the heading or a character that is not a digit (`Criterion 2: scale 3`
+/// gives 2).
+fn criterion_number(heading: &str) -> Option<usize> {
+    let rest = heading.trim_start().strip_prefix("Criterion ")?;
+    let number = text::digits(rest);
+    number.parse().ok()
+}
+
 /// Reads one evidence record.
 fn evidence(root: &Path, path: &Path) -> Result<(Evidence, Vec<Violation>), SpecError> {
     let text = read(path)?;
@@ -517,11 +526,14 @@ fn evidence(root: &Path, path: &Path) -> Result<(Evidence, Vec<Violation>), Spec
         }),
         result: front.keyword("result", Outcome::VALUES, Outcome::parse),
         by: front.string("by"),
-        subsections: parts
+        criterion_sections: parts
             .body
             .iter()
-            .filter(|(_, l)| l.starts_with("## ") || l.starts_with("### "))
-            .count(),
+            .filter_map(|(_, l)| {
+                let heading = l.strip_prefix("## ").or_else(|| l.strip_prefix("### "))?;
+                criterion_number(heading)
+            })
+            .collect(),
         path: rel.clone(),
     };
     if record.requirement.is_none() || stem(path) != requirement {

@@ -20,7 +20,11 @@ ignores the output directories.
 | `reference/pinned/<file>` | The references with `storage: pin` (REQ-046) | The `url` of each registry entry in `docs/spec/references/` | See each registry entry | SHA-256 (`sha256` of the entry) |
 
 `make roms` downloads the small files. `make test-data` also downloads the single-step suite.
-`make test` and CI download the single-step suite, because REQ-023 is a Must requirement.
+`make test` and `make coverage` depend on `roms` only, so they do not download the
+single-step suite. Run `make test-data` once before them: without the suite, the
+single-step tests fail with a message that names `make test-data`. The CI jobs `test` and
+`coverage` run `scripts/fetch-roms.sh --single-step` before the tests, because REQ-023 is a
+Must requirement.
 
 `make reference` (`scripts/fetch-roms.sh --references`) downloads only the pinned
 references. It reads the `storage`, `url`, `sha256` and `file` of each registry entry and
