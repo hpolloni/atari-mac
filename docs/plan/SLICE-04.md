@@ -1,7 +1,7 @@
 ---
 id: SLICE-04
 title: Cartridges, executables and controllers
-status: planned
+status: in-progress
 depends_on: "SLICE-01"
 packages:
   - id: WP-1
@@ -14,7 +14,7 @@ packages:
     requirements: [REQ-006, REQ-010, REQ-017, REQ-436, REQ-439, REQ-440, REQ-534, REQ-535, REQ-536, REQ-537]
   - id: WP-3
     title: Command line and robust input
-    status: planned
+    status: in-progress
     requirements: [REQ-004, REQ-012, REQ-016]
 ---
 # SLICE-04: Cartridges, executables and controllers
