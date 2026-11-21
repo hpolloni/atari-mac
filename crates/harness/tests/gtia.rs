@@ -1,4 +1,4 @@
-//! GTIA system tests on the full machine (REQ-400, REQ-402, REQ-408, REQ-435).
+//! GTIA system tests on the full machine (REQ-400, REQ-402, REQ-408, REQ-435, REQ-438).
 //!
 //! A test runs a small 6502 program from a synthetic OS ROM ([`test_os_rom`]) and checks the
 //! frame buffer or memory (`docs/design/gtia.md`, "Test plan").
@@ -12,7 +12,11 @@ mod system {
     use atari_core::gtia::{ConsoleKeys, FRAME_WIDTH};
     use atari_core::media::{CartKind, Cartridge};
     use atari_core::{JoystickState, Machine, MachineConfig, VideoStandard};
-    use atari_harness::system::{TEST_SAMPLE_RATE, test_os_rom};
+    use atari_harness::input::{KEY_DOWN_FRAMES, type_text};
+    use atari_harness::screen::has_row;
+    use atari_harness::system::{
+        BOOT_FRAMES, BootOptions, TEST_SAMPLE_RATE, boot, run_until, test_os_rom,
+    };
 
     /// The display list address.
     const DLIST: u16 = 0x3000;
@@ -325,12 +329,6 @@ mod system {
         assert_eq!(pixel(&m, row - 1, 0x30), [0x02; 2], "the blank line above");
     }
 
-    /// Fails the test: the test is a planned stub that a package replaces with the real test
-    /// (`docs/design/spec-gates.md`, "Planned test stubs").
-    fn planned() {
-        panic!("planned test: a package replaces this stub with the real test");
-    }
-
     /// Verifies REQ-407: with `COLBK` = `$02`, `COLPF0-3` = `$14`, `$26`, `$38`, `$4A`,
     /// `PRIOR` = `$00`, `HSCROL` = 0 and an ANTIC mode E line at normal width with first byte
     /// `$1B`, HPOS `$30`, `$31`, `$32`, `$33` show `$02`, `$14`, `$26`, `$38` (criterion 2).
@@ -505,8 +503,43 @@ mod system {
     /// audio samples of the 3 frames in which `type_text("A")` presses the key contain at
     /// least two different values (criterion 3).
     #[test]
-    #[ignore = "planned: SLICE-03"]
     fn key_click_makes_audio() {
-        planned();
+        let mut m = boot(BootOptions::default()).unwrap();
+        let ready = run_until(&mut m, BOOT_FRAMES, |m| has_row(m, "Ready"));
+        assert!(ready.is_some(), "no BASIC prompt");
+        // At the prompt, all POKEY channels are silent and the speaker does not change.
+        run_frames(&mut m, 30);
+        let mut idle = Vec::new();
+        m.drain_audio(&mut idle);
+        idle.clear();
+        run_frames(&mut m, 3);
+        m.drain_audio(&mut idle);
+        let spread = |s: &[f32]| {
+            let max = s.iter().copied().fold(f32::MIN, f32::max);
+            let min = s.iter().copied().fold(f32::MAX, f32::min);
+            max - min
+        };
+        assert!(spread(&idle) < 0.001, "idle audio spread {}", spread(&idle));
+        // The samples of the 3 frames in which `type_text` holds the key down.
+        let start = m.cycle_count();
+        let frame = u64::from(VideoStandard::Ntsc.cycles_per_frame());
+        let count = |cycles: u64| cycles * u64::from(TEST_SAMPLE_RATE) / 1_789_773;
+        let down =
+            usize::try_from(count(start + u64::from(KEY_DOWN_FRAMES) * frame) - count(start))
+                .unwrap();
+        let mut audio = Vec::new();
+        type_text(&mut m, "A").unwrap();
+        m.drain_audio(&mut audio);
+        let pressed = &audio[..down];
+        let first = pressed[0];
+        assert!(
+            pressed.iter().any(|s| s.to_bits() != first.to_bits()),
+            "the samples of the key press are all equal"
+        );
+        assert!(
+            spread(pressed) > 0.1,
+            "key click spread {}",
+            spread(pressed)
+        );
     }
 }

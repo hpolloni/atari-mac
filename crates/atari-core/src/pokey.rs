@@ -5,11 +5,14 @@
 //! SLICE-01 implements the register map (REQ-500), the power-on state (REQ-501), `IRQEN`
 //! and `IRQST` (REQ-515 to REQ-517), the keyboard scan with SHIFT, CONTROL and BREAK
 //! (REQ-518 to REQ-522), the unlinked and linked timers (REQ-504, REQ-505) and the serial
-//! output (REQ-525) that the OS SIO code needs to send its command frames. Audio, the noise
-//! generators, the serial input and the pot scan come in later slices. Their registers are
-//! stored, and their inputs and outputs keep the idle levels.
+//! output (REQ-525) that the OS SIO code needs to send its command frames. SLICE-03 adds the
+//! audio channels, the noise generators, `RANDOM` and the host audio output (REQ-503 to
+//! REQ-514, REQ-538 to REQ-541). The serial input and the pot scan come in later slices.
+//! Their registers are stored, and their inputs and outputs keep the idle levels.
 
+mod audio;
 mod kbscan;
+mod noise;
 mod serial;
 mod timers;
 
@@ -17,7 +20,9 @@ use std::collections::VecDeque;
 
 use crate::keyboard::{CONTROL, SHIFT};
 use crate::timing::{CYCLES_PER_LINE, VideoStandard};
+use audio::Audio;
 use kbscan::{KeyboardScan, ScanInput};
+use noise::Noise;
 use serial::{OutputClock, SerialOut};
 use timers::Timers;
 
@@ -54,6 +59,10 @@ const SKCTL_FORCE_BREAK: u8 = 0x80;
 
 /// `AUDCTL` bit 0: the slow timers count on the 15 kHz clock.
 const AUDCTL_15KHZ: u8 = 0x01;
+/// `AUDCTL` bit 1: the high-pass filter of channel 2, clocked by timer 4.
+const AUDCTL_HP2: u8 = 0x02;
+/// `AUDCTL` bit 2: the high-pass filter of channel 1, clocked by timer 3.
+const AUDCTL_HP1: u8 = 0x04;
 /// `AUDCTL` bit 3: timers 3 and 4 are linked.
 const AUDCTL_LINK34: u8 = 0x08;
 /// `AUDCTL` bit 4: timers 1 and 2 are linked.
@@ -62,6 +71,24 @@ const AUDCTL_LINK12: u8 = 0x10;
 const AUDCTL_FAST3: u8 = 0x20;
 /// `AUDCTL` bit 6: timer 1 counts on the 1.79 MHz clock.
 const AUDCTL_FAST1: u8 = 0x40;
+/// `AUDCTL` bit 7: the 9-bit polynomial counter instead of the 17-bit one.
+const AUDCTL_POLY9: u8 = 0x80;
+
+/// `AUDCx` bit 4: volume-only mode.
+const AUDC_VOLUME_ONLY: u8 = 0x10;
+/// `AUDCx` bit 5: square wave (toggle) instead of noise.
+const AUDC_TONE: u8 = 0x20;
+/// `AUDCx` bit 6: the 4-bit noise instead of the 9/17-bit noise.
+const AUDC_POLY4: u8 = 0x40;
+/// `AUDCx` bit 7: no 5-bit mask of the audio clock.
+const AUDC_NO_POLY5: u8 = 0x80;
+/// `AUDCx` bits 0-3: the volume.
+const AUDC_VOLUME: u8 = 0x0F;
+
+/// The NTSC machine clock rate in Hz for the audio sample count (HRM 3.3, REQ-538).
+const CLOCK_HZ_NTSC: u32 = 1_789_773;
+/// The PAL machine clock rate in Hz (HRM 3.3, REQ-538).
+const CLOCK_HZ_PAL: u32 = 1_773_447;
 
 /// The period of the 64 kHz clock in machine cycles.
 const PERIOD_64KHZ: u64 = 28;
@@ -140,9 +167,12 @@ pub struct Pokey {
     timers: Timers,
     /// The timers that fired on the last tick (bit n = timer n + 1).
     fired: u8,
-    /// The 17-bit polynomial counter (bits 16-0). It stays 0 until the noise generators
-    /// are implemented.
-    poly17: u32,
+    /// The polynomial counters (HRM 5.5).
+    noise: Noise,
+    /// The output flip-flops of the four channels.
+    out_ff: [bool; 4],
+    /// The high-pass flip-flops of channels 1 and 2 (1 while the filter is off).
+    hp_ff: [bool; 2],
     /// `POT0-7`.
     pot: [u8; 8],
     /// `ALLPOT`.
@@ -161,13 +191,19 @@ pub struct Pokey {
     sent: VecDeque<SerialByte>,
     /// The console speaker level.
     speaker: bool,
+    /// The host audio output.
+    audio: Audio,
 }
 
 impl Pokey {
     /// Creates POKEY in the power-on state (REQ-501). `sample_rate` is the host audio rate
     /// in Hz, 8000..=192000 (REQ-538).
     #[must_use]
-    pub const fn new(standard: VideoStandard, sample_rate: u32) -> Self {
+    pub fn new(standard: VideoStandard, sample_rate: u32) -> Self {
+        let clock_hz = match standard {
+            VideoStandard::Ntsc => CLOCK_HZ_NTSC,
+            VideoStandard::Pal => CLOCK_HZ_PAL,
+        };
         Self {
             standard,
             sample_rate,
@@ -185,7 +221,9 @@ impl Pokey {
             exit_cycle: 0,
             timers: Timers::new(),
             fired: 0,
-            poly17: 0,
+            noise: Noise::new(),
+            out_ff: [true; 4],
+            hp_ff: [true; 2],
             pot: [0; 8],
             allpot: 0,
             keys: ScanInput {
@@ -200,6 +238,7 @@ impl Pokey {
             in_level: true,
             sent: VecDeque::new(),
             speaker: false,
+            audio: Audio::new(clock_hz, sample_rate),
         }
     }
 
@@ -218,6 +257,10 @@ impl Pokey {
             self.irqen_hist[1],
             self.irqen_hist[2],
         ];
+        // The noise counters shift first, so that the fires of this cycle see the noise bits
+        // of this cycle (REQ-512).
+        self.noise
+            .tick(self.init_mode(), self.audctl & AUDCTL_POLY9 != 0);
         let clocked = self.timer_clocks();
         let linked = [
             self.audctl & AUDCTL_LINK12 != 0,
@@ -235,8 +278,11 @@ impl Pokey {
         if fired & 0b1000 != 0 {
             self.latch(IRQ_TIMER4);
         }
+        self.channel_tick(fired);
         self.serial_tick();
         self.keyboard_tick();
+        let volumes = self.channel_volumes();
+        self.audio.cycle(volumes, self.speaker);
     }
 
     /// Reads a register. `reg` is the low byte of the address; POKEY uses `reg & 0x0F`.
@@ -256,10 +302,7 @@ impl Pokey {
             index @ 0x00..=0x07 => self.pot[index as usize],
             0x08 => self.allpot,
             0x09 => self.kbcode,
-            0x0A => {
-                let [low, ..] = (self.poly17 >> 8).to_le_bytes();
-                !low
-            }
+            0x0A => self.noise.random(),
             0x0D => self.serin,
             0x0E => {
                 let busy = if self.serial.busy() {
@@ -286,8 +329,16 @@ impl Pokey {
                     self.audc[channel] = value;
                 }
             }
-            0x08 => self.audctl = value,
-            0x09 => self.timers.stimer(self.cycle),
+            0x08 => {
+                self.audctl = value;
+                self.force_high_pass();
+            }
+            0x09 => {
+                // REQ-507: all timers reload, and all output flip-flops go to 1. The write
+                // is not a fire.
+                self.timers.stimer(self.cycle);
+                self.out_ff = [true; 4];
+            }
             0x0A => self.sk_err = SK_NO_ERRORS,
             0x0E => {
                 self.irqen = value;
@@ -377,6 +428,13 @@ impl Pokey {
         self.skctl & SKCTL_FORCE_BREAK == 0 && self.serial.level()
     }
 
+    /// The SIO CLOCK OUT level: the serial output clock flip-flop (HRM 5.6). The external
+    /// clock modes have no edges yet (`docs/design/pokey.md`, open issue 17).
+    #[must_use]
+    pub const fn serial_clock_out(&self) -> bool {
+        self.serial.clock()
+    }
+
     /// Removes and returns the oldest byte that was sent completely. The FIFO holds
     /// 64 bytes; when it is full, the oldest byte is lost.
     pub fn take_serial_byte(&mut self) -> Option<SerialByte> {
@@ -384,8 +442,8 @@ impl Pokey {
         self.sent.pop_front()
     }
 
-    /// The level of the GTIA console speaker line (`true` = high). Audio is not in SLICE-01,
-    /// so POKEY only stores the level.
+    /// The level of the GTIA console speaker line. `true` = line pulled up (`CONSOL` bit 3
+    /// written as 0). The new level applies from the next `tick` (REQ-539).
     pub const fn set_speaker(&mut self, high: bool) {
         self.speaker = high;
     }
@@ -396,14 +454,88 @@ impl Pokey {
         self.speaker
     }
 
-    /// Moves all samples made since the last call to the end of `out`.
-    #[expect(
-        clippy::unused_self,
-        clippy::needless_pass_by_ref_mut,
-        reason = "audio is not in SLICE-01, so there are no samples; `Machine::drain_audio` \
-                  is a const fn"
-    )]
-    pub const fn drain_samples(&mut self, _out: &mut Vec<f32>) {}
+    /// Moves all samples made since the last call to the end of `out` (REQ-538).
+    pub fn drain_samples(&mut self, out: &mut Vec<f32>) {
+        self.audio.drain(out);
+    }
+
+    /// Selects the nonlinear DAC model (REQ-541). Off at power-on.
+    pub const fn set_nonlinear_audio(&mut self, on: bool) {
+        self.audio.set_nonlinear(on);
+    }
+
+    /// The fires of this cycle clock the channels (HRM 5.3). For each fire, in timer order:
+    /// the audio clock of its channel, then the high-pass capture.
+    const fn channel_tick(&mut self, fired: u8) {
+        self.force_high_pass();
+        let mut n = 0;
+        while n < 4 {
+            if fired & (1 << n) != 0 {
+                self.audio_clock(n);
+                if n == 2 && self.audctl & AUDCTL_HP1 != 0 {
+                    self.hp_ff[0] = self.out_ff[0];
+                }
+                if n == 3 && self.audctl & AUDCTL_HP2 != 0 {
+                    self.hp_ff[1] = self.out_ff[1];
+                }
+            }
+            n += 1;
+        }
+    }
+
+    /// While a high-pass bit of `AUDCTL` is 0, its flip-flop is 1 (HRM 5.3, REQ-511).
+    const fn force_high_pass(&mut self) {
+        if self.audctl & AUDCTL_HP1 == 0 {
+            self.hp_ff[0] = true;
+        }
+        if self.audctl & AUDCTL_HP2 == 0 {
+            self.hp_ff[1] = true;
+        }
+    }
+
+    /// An audio clock of channel `n` (REQ-509, HRM 5.3 Table 8).
+    const fn audio_clock(&mut self, n: usize) {
+        let audc = self.audc[n];
+        let bits = self.noise.bits(n, self.init_mode());
+        // The 5-bit mask: a clock goes through when the 5-bit bit is 1 (project decision,
+        // REQ-509).
+        if audc & AUDC_NO_POLY5 == 0 && !bits.poly5 {
+            return;
+        }
+        self.out_ff[n] = if audc & AUDC_TONE != 0 {
+            !self.out_ff[n]
+        } else if audc & AUDC_POLY4 != 0 {
+            bits.poly4
+        } else {
+            bits.poly17
+        };
+    }
+
+    /// The digital output of channel `n` in this cycle: the high-pass XOR for channels 1
+    /// and 2, then the volume-only override (HRM 5.3, REQ-510, REQ-511).
+    const fn channel_output(&self, n: usize) -> bool {
+        if self.audc[n] & AUDC_VOLUME_ONLY != 0 {
+            return true;
+        }
+        if n < 2 {
+            self.out_ff[n] ^ self.hp_ff[n]
+        } else {
+            self.out_ff[n]
+        }
+    }
+
+    /// The volume of each channel whose digital output is 1, else 0 (REQ-510).
+    const fn channel_volumes(&self) -> [u8; 4] {
+        let mut volumes = [0; 4];
+        let mut n = 0;
+        while n < 4 {
+            if self.channel_output(n) {
+                volumes[n] = self.audc[n] & AUDC_VOLUME;
+            }
+            n += 1;
+        }
+        volumes
+    }
 
     /// `SKSTAT` (HRM 14.4).
     const fn skstat(&self) -> u8 {
@@ -558,6 +690,45 @@ impl Pokey {
     #[cfg(test)]
     const fn test_fired(&self) -> u8 {
         self.fired
+    }
+
+    /// Test accessor: the output flip-flops of the four channels.
+    #[cfg(test)]
+    const fn test_flip_flops(&self) -> [bool; 4] {
+        self.out_ff
+    }
+
+    /// Test accessor: the digital output of channel `n` (0-3) in this cycle, after the
+    /// high-pass XOR and the volume-only override.
+    #[cfg(test)]
+    const fn test_channel_output(&self, n: usize) -> bool {
+        self.channel_output(n)
+    }
+
+    /// Test accessor: the 4-bit, 5-bit and 9/17-bit noise bits that channel `n` (0-3) sees
+    /// in this cycle.
+    #[cfg(test)]
+    const fn test_noise_bits(&self, n: usize) -> noise::NoiseBits {
+        self.noise.bits(n, self.init_mode())
+    }
+
+    /// Test accessor: the sum of the four channel levels, 0-60.
+    #[cfg(test)]
+    const fn test_mix_level(&self) -> u8 {
+        let [a, b, c, d] = self.channel_volumes();
+        a + b + c + d
+    }
+
+    /// Test accessor: the normalized nonlinear DAC sum before the curve (REQ-541).
+    #[cfg(test)]
+    fn test_dac_sum(&self) -> f64 {
+        audio::dac_sum(self.channel_volumes())
+    }
+
+    /// Test accessor: the saturation curve of HRM E.2 for input `x` (REQ-541).
+    #[cfg(test)]
+    fn test_curve(x: f64) -> f64 {
+        audio::curve(x)
     }
 }
 
@@ -849,7 +1020,9 @@ mod tests {
         assert_eq!(reads[..8], [0; 8], "POT0-7");
         assert_eq!(reads[8], 0x00, "ALLPOT");
         assert_eq!(reads[9], 0xFF, "KBCODE");
-        assert_eq!(reads[0xA], 0xFF, "RANDOM");
+        // RANDOM: three cycles after the end of initialization mode, three 1 bits entered the
+        // 17-bit counter, and RANDOM shows two of them inverted (REQ-514).
+        assert_eq!(reads[0xA], 0x3F, "RANDOM");
         assert_eq!(reads[0xB..=0xC], [0xFF, 0xFF], "no registers");
         assert_eq!(reads[0xD], 0x00, "SERIN");
         assert_eq!(reads[0xE], 0xF7, "IRQST");
