@@ -271,16 +271,31 @@ with `RUN` (196 frames to `Ready`, then 1,161 frames of typing) takes 2.15 s hea
 (`FrontendError::Read`) or a bad image (the `MediaError` of REQ-640, with the file name) gives
 exit status 2 before the machine starts. `--cas` together with `--bas` is a usage error
 (exit status 2), because both make key presses at the start. The help line is
-`--cas <file>         CAS tape image: boot it (holds START and OPTION, presses RETURN)`.
+`--cas <file>         CAS tape image: boot it (holds START at power-on)`.
 
-The frontend then calls `Machine::start_tape` (`media.md`, "Tape boot"), which makes the key
-presses of criterion 3 (OI-050). The frontend does not make key presses itself. The host keys
-work as usual, but a host console key or key during frames 0 to 186 (NTSC) can change the
-boot. The tape loads at real-time speed (OI-051 is open).
+The frontend then calls `Machine::start_tape` (`media.md`, "Tape boot"), which holds START
+from the power-on cold reset until frame 60 (criterion 3, OI-050). It presses no OPTION and
+no RETURN, so BASIC stays on. The user presses RETURN after the prompt tone, as on the real
+computer. The frontend does not make key presses itself, and the host keys work as usual.
 
 After WP-3 adds the option to `--help`, the README options table gets the row
-`` | `--cas <file>` | Boot a CAS tape image (holds START and OPTION, then presses RETURN) | ``.
+`` | `--cas <file>` | Boot a CAS tape image (holds START at power-on; press RETURN after the tone) | ``.
 Before that, the README gate (REQ-056 criterion 6) rejects the row.
+
+### Turbo while the tape motor runs (REQ-082)
+
+The window loop calls `Pacing::after_frame(turbo, now)` with `turbo` =
+`Frontend::turbo()`: the typist is active (REQ-080 criterion 7), or
+`Machine::tape_motor_on()` (`media.md`: a tape is inserted and the motor line, PIA CA2, is
+low, REQ-641) at the start of the frame.
+The value is taken before the frame, so a frame that starts while the motor line is low runs
+in turbo, and a frame that starts while it is high runs at real-time speed. Without a tape,
+the motor line has no effect. Turbo is the same as for `--bas`: no wait, a frame shown each
+`TURBO_PRESENT_INTERVAL` (so at least every 100 ms of host time), the host keys read at each
+shown frame, and a new `Pacer` from `now` after turbo. In turbo the frame loop calls
+`AudioSink::stop` (no audio, not an underrun); the ring fills and plays again after turbo.
+Turbo changes only the host pacing, so the emulated machine gives the same frames and RAM
+(criterion 4).
 
 ## Error handling
 
@@ -301,6 +316,7 @@ file error.
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
+| REQ-082 | `src/frontend.rs` unit tests `tape_turbo_follows_motor_line` (1, fake clock), `motor_line_without_tape_keeps_pacing` (2), `tape_turbo_presents_frames` (3), `tape_turbo_keeps_machine_state` (4), `tape_turbo_stops_audio` (5, fake device) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
 | REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md`. The pacing logic: `src/frontend.rs` unit tests `paced_frames_keep_the_frame_rate` (1, fake clock), `pacer_keeps_the_frame_rate` |
 | REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md`. The ring and the wait correction: `src/audio.rs` unit tests `ring_plays_samples_in_order`, `ring_without_samples_is_silent`, `ring_counts_underruns`, `ring_drops_oldest_when_full`, `correction_follows_the_level`; `src/frontend.rs` unit tests `audio_ring_has_no_underruns` (1, fake clock and device), `step_hands_over_the_frame_audio` |

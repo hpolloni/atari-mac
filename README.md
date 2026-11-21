@@ -21,9 +21,9 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 8 | 33 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | planned | 22 | 2 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
-| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | planned | 1 | 6 | 1 | 0 |
+| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | planned | 1 | 7 | 0 | 0 |
 
-All 280 requirements: 233 tested, 41 pending, 1 missing, 5 not a test requirement. Implemented: 201. Open items with the status `open`: 27.
+All 280 requirements: 233 tested, 42 pending, 0 missing, 5 not a test requirement. Implemented: 201. Open items with the status `open`: 27.
 
 <!-- END GENERATED: status -->
 

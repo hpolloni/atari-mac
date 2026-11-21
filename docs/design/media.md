@@ -429,9 +429,11 @@ pub fn insert_tape(&mut self, tape: Tape);
 pub fn eject_tape(&mut self) -> Option<Tape>;
 /// The tape position (REQ-641), for tests and the frontend.
 pub fn tape_position(&self) -> Option<u64>;
-/// Inserts `tape`, does a cold reset, and makes the key presses of REQ-081 criterion 3
-/// (OI-050): START and OPTION until frame 60, RETURN in frames 180-186 (NTSC) or
-/// 150-156 (PAL). The frame count starts at 0 at the cold reset.
+/// A tape is inserted and the motor line is low (REQ-641), for the turbo of REQ-082.
+pub fn tape_motor_on(&self) -> bool;
+/// Inserts `tape`, does a cold reset, and holds START from the cold reset until frame 60
+/// (REQ-081 criterion 3, OI-050). It presses no other key. The frame count starts at 0 at
+/// the cold reset.
 pub fn start_tape(&mut self, tape: Tape);
 ```
 
@@ -785,12 +787,11 @@ The deck has no start or stop time (a project decision, REQ-641 Notes).
 `Machine::start_tape(tape)`:
 
 1. `insert_tape(tape)`, then `power_on` (the tape position is 0).
-2. `set_console_keys` with START and OPTION from frame 0 until frame 60. Then no console key.
-3. `key_down($0C)` (RETURN) in frame 180 and `key_up` in frame 186 (NTSC). PAL: frames 150
-   and 156.
+2. `set_console_keys` with START from frame 0 until frame 60. Then no console key.
 
-The machine counts the frames from the cold reset and does each step at the first cycle of
-the frame. The OS does the rest: the prompt tone, the motor start, the baud rate measurement
+The machine counts the frames from the cold reset and does step 2 at the first cycle of the
+frame. The user presses RETURN after the prompt tone (OI-050); the tests of REQ-643 and
+REQ-081 criterion 4 press it in frames 180-186 (NTSC) or 150-156 (PAL). The OS does the rest: the prompt tone, the motor start, the baud rate measurement
 with `SKSTAT` bit 4, and the record reads through `SERIN`.
 
 ### Seek and verify timing (REQ-638)
@@ -997,9 +998,9 @@ The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model i
 14. To decide: REQ-632 uses a kept Percom geometry for Format `$21` only if it is DD. REQ-635
     says that the drive keeps the SD, ED or DD geometry for the next Format `$21`. The result
     of an ED block is not agreed.
-15. Open for the cassette deck: the chunk types (OI-048), tape writing (OI-049), the key
-    presses of `start_tape` (OI-050), the load speed (OI-051) and the tape position at a cold
-    reset (OI-052). The design follows the recommended option of each item.
+15. Open for the cassette deck: tape writing (OI-049). The chunk types (OI-048), the key
+    presses of `start_tape` (OI-050), the load speed (OI-051, REQ-082) and the tape position
+    at a cold reset (OI-052) are decided.
 16. To verify: the AltirraOS cassette boot. The waits of REQ-643 (Notes) are from the 400/800
     OS listing (TRN SRC-CASORG). AltirraOS can use other waits or another prompt tone time.
     The boot tests will show it.
