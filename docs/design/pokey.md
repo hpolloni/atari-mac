@@ -185,13 +185,16 @@ All state is in `Pokey`. Power-on values are the values after `new` and `reset` 
 | `exit_cycle` | `u64` | 0 | Cycle of the last write that ended initialization mode |
 | `div64`, `div15` | `u8` | 0 | Slow clock dividers (held at 0 in initialization mode) |
 | `counter` | `[u8; 4]` | 0 | Timer counters |
-| `reload_at` | `[Option<u64>; 4]` | `None` | Cycle of the next scheduled reload |
-| `fire_at` | `[[Option<u64>; 2]; 4]` | `None` | Visible cycles of scheduled fires |
+| `reload_at` | `[u64; 4]` | `u64::MAX` | Cycle of the next scheduled reload (`u64::MAX` = none) |
+| `fire_at` | `[[u64; 2]; 4]` | `u64::MAX` | Visible cycles of scheduled fires (`u64::MAX` = none) |
+| `link_at` | `[u64; 4]` | `u64::MAX` | High timer of a linked pair: cycle of its next count (`u64::MAX` = none) |
 | `poly4`, `poly5` | `u8` | 0 | 4-bit and 5-bit counters |
 | `poly17` | `u32` | 0 | 17-bit register (bits 16-0) |
 | `noise_hist` | `[u8; 2]` | 0 | Last 4 output bits of `poly4` and `poly5`, for the channel delays |
 | `out_ff` | `[bool; 4]` | `true` | Channel output flip-flops |
 | `hp_ff` | `[bool; 2]` | `true` | High-pass flip-flops of channels 1 and 2 |
+| `volumes` | `[u8; 4]` | 0 | Cache: the channel volumes of the last tick. A tick with no fire and no `AUDCx`, `AUDCTL` or `STIMER` write keeps them. |
+| `channels_dirty` | `bool` | `true` | An `AUDCx`, `AUDCTL` or `STIMER` write since the last tick |
 | `matrix` | `u64` | 0 | Keys that are down (bit n = key code n) |
 | `shift`, `control`, `brk` | `bool` | `false` | Modifier keys that are down |
 | `typed_mods` | `u8` | 0 | Modifiers that `key_down` pressed |
@@ -223,6 +226,7 @@ All state is in `Pokey`. Power-on values are the values after `new` and `reset` 
 | `clock_hz`, `sample_rate` | `u32` | from `new` | 1789773 (NTSC) or 1773447 (PAL); host rate |
 | `phase` | `u64` | 0 | Resampler phase, in units of 1 / (`clock_hz` x `sample_rate`) s |
 | `acc_pokey`, `acc_spk` | `f64` | 0 | Sums for the current sample |
+| `level_key`, `level` | `u32`, `f64` | `u32::MAX`, 0 | Cache: the `volumes` of the last cycle and their mix level `x`. Not compared by `PartialEq`. |
 | `hp1`, `hp2` | `f64` | 0 | Capacitor states of the two high-pass stages (the sample is `f32`) |
 | `samples` | `Vec<f32>` | empty | Samples not yet drained |
 

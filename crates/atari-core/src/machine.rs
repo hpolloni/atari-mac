@@ -177,6 +177,10 @@ impl Memory {
 
     /// A read outside `$D000-$D7FF`, with cartridge read side effects.
     fn read(&mut self, addr: u16) -> u8 {
+        // Fast path: below `$8000`, only the self-test ROM at `$5000-$57FF` is not RAM.
+        if addr < 0x5000 || (0x5800..0x8000).contains(&addr) {
+            return self.ram_byte(addr);
+        }
         if (0x8000..=0xBFFF).contains(&addr)
             && let Some(byte) = self.cart.as_mut().and_then(|cart| cart.read(addr))
         {
