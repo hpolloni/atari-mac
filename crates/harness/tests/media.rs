@@ -691,6 +691,7 @@ mod executables {
             basic_rom: Some(basic_rom().unwrap()),
             cartridge: None,
             disk: None,
+            tape: None,
             fast_sio,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
