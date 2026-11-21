@@ -42,7 +42,9 @@ impl_state!(Machine {
     // frontend start.
     console_keys,
     xex_option_until,
-    tape_start_until
+    tape_start_until,
+    // The debugger state of the hooked run (`docs/design/debugger.md`, "State").
+    sequence_start
 });
 
 impl State for Memory {

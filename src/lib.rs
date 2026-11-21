@@ -9,6 +9,7 @@
 //! | [`bas`] | A BASIC program from a text file, typed at the `Ready` prompt (REQ-080) |
 //! | [`keymap`] | Host key to Atari key (REQ-009, REQ-010, REQ-017) |
 //! | [`logging`] | The log output of `--log` (REQ-085) |
+//! | [`trace`] | The CPU instruction trace of `--trace` (REQ-086) |
 //! | [`stats`] | The speed statistics of `--stats` (REQ-083) |
 //! | [`frontend`] | Machine setup, input, pause, frame conversion, pacing, PNG screenshot |
 //! | [`window`] | The `minifb` window loop (REQ-008) |
@@ -27,10 +28,12 @@ pub mod frontend;
 pub mod keymap;
 pub mod logging;
 pub mod stats;
+pub mod trace;
 pub mod window;
 
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::time::{Duration, Instant};
 
 pub use atari_core;
@@ -41,6 +44,7 @@ use crate::cli::{Command, Options, USAGE};
 use crate::error::FrontendError;
 use crate::frontend::{Frontend, load_machine, load_xex, window_title, write_png, xex_warnings};
 use crate::stats::{Counters, FrameStats, Motor, Stats};
+use crate::trace::TraceWriter;
 
 /// Runs the frontend with the command line arguments `args` (without the program name).
 /// Normal output goes to `out`.
@@ -126,6 +130,17 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
         }
     }
     let mut frontend = start_at(options, audio.sample_rate())?;
+    if let Some(trace) = &options.trace {
+        let file = File::create(&trace.file).map_err(|source| FrontendError::Trace {
+            path: trace.file.clone(),
+            source,
+        })?;
+        frontend = frontend.with_trace(TraceWriter::new(
+            BufWriter::new(file),
+            trace.from,
+            trace.frames,
+        ));
+    }
     let elapsed = match options.frames {
         Some(frames) if options.headless && options.stats => {
             run_headless_with_stats(&mut frontend, frames)?
@@ -160,6 +175,12 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
             frontend.last_frame_cycles()
         )
         .map_err(FrontendError::Output)?;
+    }
+    if let (Some(trace), Some(writer)) = (&options.trace, frontend.take_trace()) {
+        writer.finish().map_err(|source| FrontendError::Trace {
+            path: trace.file.clone(),
+            source,
+        })?;
     }
     if options.audio_stats {
         writeln!(out, "{}", audio.stats()).map_err(FrontendError::Output)?;

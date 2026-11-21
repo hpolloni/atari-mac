@@ -22,6 +22,7 @@ use core::fmt;
 
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
+use crate::debug::{BusAccess, CpuHook, NoHook, Position};
 use crate::gtia::{ConsoleKeys, Gtia};
 use crate::media::{Cartridge, DiskImage, SioBus, Tape, Xex};
 use crate::pia::Pia;
@@ -257,17 +258,6 @@ impl DmaMemory for Memory {
     }
 }
 
-/// One CPU bus access: for the debugger view of the last cycle and the bus log of the tests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct BusAccess {
-    /// The address.
-    addr: u16,
-    /// The byte read or written.
-    value: u8,
-    /// `true` for a write.
-    write: bool,
-}
-
 /// The CPU's view of the machine for one CPU cycle.
 struct CpuBus<'a> {
     /// RAM, ROMs and cartridge.
@@ -381,6 +371,9 @@ pub struct Machine {
     last_out: CycleOutput,
     /// The CPU bus access of the last machine cycle, if the CPU had the bus.
     last_access: Option<BusAccess>,
+    /// The start of the current interrupt or reset sequence, and `true` for reset. Only the
+    /// hooked run sets it (`docs/design/debugger.md`, "State").
+    sequence_start: Option<(Position, bool)>,
 }
 
 impl Machine {
@@ -424,6 +417,7 @@ impl Machine {
             frames: 0,
             last_out: CycleOutput::default(),
             last_access: None,
+            sequence_start: None,
         };
         // With no disk, D1: is not on the bus (the OS boot then sees no drive).
         machine.sio.set_drive_connected(false);
@@ -468,6 +462,7 @@ impl Machine {
         self.frames = 0;
         self.last_out = CycleOutput::default();
         self.last_access = None;
+        self.sequence_start = None;
     }
 
     /// The System Reset button (REQ-217): resets the CPU, ANTIC and the PIA. RAM, GTIA and
@@ -478,10 +473,18 @@ impl Machine {
         self.pia.reset();
         self.mem.portb = self.pia.port_b_pins();
         self.update_trig3();
+        self.sequence_start = None;
     }
 
     /// Runs one machine cycle, in the order of `docs/design/system.md`, "Timing".
     pub fn run_cycle(&mut self) {
+        self.cycle_with(&mut NoHook);
+    }
+
+    /// One machine cycle with the hook calls of `docs/design/debugger.md`, "Hooked run and
+    /// the cycle order". With [`NoHook`] the hook code is not compiled in (REQ-007).
+    #[inline]
+    fn cycle_with<H: CpuHook>(&mut self, hook: &mut H) {
         // 1. ANTIC, with the memory map of the end of the last cycle.
         let out = self.antic.tick(&mut self.mem);
         // 2. POKEY before the CPU access, with the SIO DATA IN level of this cycle. The bus
@@ -505,6 +508,9 @@ impl Machine {
             if self.fast_sio && self.cpu.at_opcode_fetch() {
                 siov::shortcut(self);
             }
+            if H::ACTIVE {
+                self.before_tick(&out, hook);
+            }
             let mut bus = CpuBus {
                 mem: &mut self.mem,
                 antic: &mut self.antic,
@@ -517,6 +523,11 @@ impl Machine {
             let _tick = self.cpu.tick(&mut bus, out.rdy);
             data = bus.data;
             self.last_access = bus.access;
+            if H::ACTIVE
+                && let Some(access) = bus.access
+            {
+                hook.access(access);
+            }
         }
         // 4a. The NMI level of this cycle, after the CPU access, also in a halted cycle: an
         //     `NMIEN` write of this cycle is included (OI-017).
@@ -565,6 +576,7 @@ impl Machine {
 
     /// Runs machine cycles until ANTIC ends the frame.
     pub fn run_frame(&mut self) {
+        self.sequence_start = None;
         let target = self.frames + 1;
         while self.frames < target {
             self.run_cycle();

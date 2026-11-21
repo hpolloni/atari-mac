@@ -9,6 +9,7 @@ use atari_core::VideoStandard;
 use crate::error::FrontendError;
 use crate::frontend::DisplayFilters;
 use crate::logging::Categories;
+use crate::trace::TraceOptions;
 
 /// The default OS ROM file (the free Altirra OS, see `roms/README.md`).
 pub const DEFAULT_OS_ROM: &str = "roms/altirraos-xl.rom";
@@ -44,6 +45,9 @@ Options:
   --audio-stats        At exit, print the audio sample rate and the underrun count
   --stats              Each second, write the speed statistics to standard error
   --log <categories>   Write log records to standard error: tape,sio,reset,media,frontend,all
+  --trace <file>       Write a line for each CPU instruction and interrupt to the file
+  --trace-from <frame> The first frame of the trace (default: 0)
+  --trace-frames <n>   The number of frames of the trace (default: 1)
   --screenshot <file>  At exit, save the last frame as a PNG file
   --artifacting        NTSC artifacting filter: false colors for hires pixel patterns
   --pal-blending       PAL chroma blending filter (needs a PAL machine)
@@ -94,6 +98,8 @@ pub struct Options {
     /// The log categories to write to standard error (`--log`, REQ-085). A second `--log`
     /// replaces the first.
     pub log: Option<Categories>,
+    /// The CPU instruction trace (`--trace`, `--trace-from`, `--trace-frames`, REQ-086).
+    pub trace: Option<TraceOptions>,
 }
 
 impl Default for Options {
@@ -116,6 +122,7 @@ impl Default for Options {
             audio_stats: false,
             stats: false,
             log: None,
+            trace: None,
         }
     }
 }
@@ -156,6 +163,42 @@ fn number<T: FromStr>(
         })
 }
 
+/// The trace options as the command line gives them (REQ-086).
+#[derive(Debug, Default)]
+struct TraceArgs {
+    /// `--trace <file>`.
+    file: Option<PathBuf>,
+    /// `--trace-from <frame>`.
+    from: Option<u64>,
+    /// `--trace-frames <n>`.
+    frames: Option<u64>,
+}
+
+impl TraceArgs {
+    /// The trace options, with the defaults (from frame 0, 1 frame).
+    ///
+    /// # Errors
+    ///
+    /// [`FrontendError::Usage`] for `--trace-frames 0`, and for `--trace-from` or
+    /// `--trace-frames` without `--trace`.
+    fn options(self) -> Result<Option<TraceOptions>, FrontendError> {
+        if self.frames == Some(0) {
+            return Err(usage("--trace-frames must be at least 1".to_owned()));
+        }
+        match self.file {
+            Some(file) => Ok(Some(TraceOptions {
+                file,
+                from: self.from.unwrap_or(0),
+                frames: self.frames.unwrap_or(1),
+            })),
+            None if self.from.is_some() || self.frames.is_some() => Err(usage(
+                "--trace-from and --trace-frames need --trace".to_owned(),
+            )),
+            None => Ok(None),
+        }
+    }
+}
+
 /// Parses the command line arguments (without the program name).
 ///
 /// # Errors
@@ -166,6 +209,7 @@ fn number<T: FromStr>(
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, FrontendError> {
     let mut args = args.into_iter();
     let mut options = Options::default();
+    let mut trace = TraceArgs::default();
     while let Some(arg) = args.next() {
         match arg.to_str().unwrap_or_default() {
             "-h" | "--help" => return Ok(Command::Help),
@@ -195,6 +239,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
                 })?;
                 options.log = Some(Categories::parse(text)?);
             }
+            "--trace" => trace.file = Some(value(&mut args, "--trace")?.into()),
+            "--trace-from" => trace.from = Some(number(&mut args, "--trace-from")?),
+            "--trace-frames" => trace.frames = Some(number(&mut args, "--trace-frames")?),
             "--scale" => {
                 let scale = number(&mut args, "--scale")?;
                 if !(1..=MAX_SCALE).contains(&scale) {
@@ -212,6 +259,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             }
         }
     }
+    options.trace = trace.options()?;
     if options.headless && options.frames.is_none() {
         return Err(usage("--headless needs --frames".to_owned()));
     }
@@ -369,6 +417,7 @@ mod tests {
                 audio_stats: true,
                 stats: true,
                 log: Categories::parse("sio:debug,frontend").ok(),
+                trace: None,
             },
             "all options"
         );

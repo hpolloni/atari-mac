@@ -2,10 +2,12 @@
 
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::BufReader;
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use atari_mac::atari_core::cpu::{Boundary, Registers};
+use atari_mac::atari_core::debug::{InstructionStart, Position, Sequence, SequenceKind};
 use atari_mac::atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
 use atari_mac::atari_core::keyboard::ascii_to_kbcode;
 use atari_mac::atari_core::screen::{has_row, screen_text};
@@ -14,6 +16,7 @@ use atari_mac::bas::{self, KEY_DOWN_FRAMES, KEY_UP_FRAMES, Phase, Typist};
 use atari_mac::cli::Options;
 use atari_mac::frontend::{Flow, Frontend};
 use atari_mac::start;
+use atari_mac::trace::{InstructionLine, SequenceLine, TraceWriter};
 // The binary uses this dependency; this test does not.
 use minifb as _;
 
@@ -1371,14 +1374,151 @@ fn log_help_lists_option() {
     );
 }
 
+/// The base cycle count of each opcode (NMOS 6502, HRM 3.5), without the page-crossing and
+/// branch cycles. A KIL opcode has 0.
+const BASE_CYCLES: [u8; 256] = [
+    7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6, // $0x
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // $1x
+    6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6, // $2x
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // $3x
+    6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6, // $4x
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // $5x
+    6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6, // $6x
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // $7x
+    2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, // $8x
+    2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5, // $9x
+    2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, // $Ax
+    2, 5, 0, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4, // $Bx
+    2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, // $Cx
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // $Dx
+    2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, // $Ex
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // $Fx
+];
+
+/// The free ROMs as `Options`, without media.
+fn rom_options() -> Options {
+    Options {
+        os: OS_ROM.into(),
+        basic: BASIC_ROM.into(),
+        ..Options::default()
+    }
+}
+
 /// Verifies REQ-086: `InstructionLine` and `SequenceLine` of fixed events give the
 /// example lines of `docs/design/debugger.md`, "Trace writer":
 /// `1 8 42 30822 E477: A9 00    LDA #$00  A=00 X=FF Y=01 S=FD P=N.-B.IZ.` and
 /// `1 248 7 58147 NMI vector $E7B2` (criteria 1 and 2).
 #[test]
-#[ignore = "planned: SLICE-10"]
 fn trace_line_format() {
-    planned();
+    let at = Position {
+        frame: 1,
+        scanline: 8,
+        hpos: 42,
+        cycle: 30822,
+    };
+    let regs = Registers {
+        a: 0x00,
+        x: 0xFF,
+        y: 0x01,
+        s: 0xFD,
+        p: 0xB6,
+        pc: 0xE477,
+    };
+    let line = |bytes: [u8; 3], p: u8| {
+        InstructionLine(&InstructionStart {
+            at,
+            regs: Registers { p, ..regs },
+            bytes,
+        })
+        .to_string()
+    };
+    assert_eq!(
+        line([0xA9, 0x00, 0x8D], 0xB6),
+        "1 8 42 30822 E477: A9 00    LDA #$00  A=00 X=FF Y=01 S=FD P=N.-B.IZ."
+    );
+    assert_eq!(
+        line([0x8D, 0x0A, 0xD4], 0xFF),
+        "1 8 42 30822 E477: 8D 0A D4 STA $D40A  A=00 X=FF Y=01 S=FD P=NV-BDIZC"
+    );
+    assert_eq!(
+        line([0xEA, 0x00, 0x00], 0x20),
+        "1 8 42 30822 E477: EA       NOP  A=00 X=FF Y=01 S=FD P=..-....."
+    );
+    let sequence = |kind, handler| {
+        SequenceLine(&Sequence {
+            at: Position {
+                frame: 1,
+                scanline: 248,
+                hpos: 7,
+                cycle: 58147,
+            },
+            kind,
+            handler,
+        })
+        .to_string()
+    };
+    assert_eq!(
+        sequence(SequenceKind::Nmi, 0xE7B2),
+        "1 248 7 58147 NMI vector $E7B2"
+    );
+    assert_eq!(
+        sequence(SequenceKind::Irq, 0x00AB),
+        "1 248 7 58147 IRQ vector $00AB"
+    );
+    assert_eq!(
+        sequence(SequenceKind::Reset, 0xC000),
+        "1 248 7 58147 RESET vector $C000"
+    );
+}
+
+/// The trace lines of frame 1 of the boot from a cycle-by-cycle run with `run_cycle`, and
+/// the opcode of each instruction line. An instruction starts in the cycle after which
+/// `Cpu::at_opcode_fetch` is no longer true. A sequence starts in the cycle after which the
+/// boundary of an interrupt is gone, and its line comes before the next instruction line.
+fn reference_trace_of_frame_1() -> Vec<(String, Option<u8>)> {
+    let mut machine = start(&rom_options()).expect("machine").machine().clone();
+    machine.run_frame();
+    let mut lines = Vec::new();
+    let mut pending: Option<Position> = None;
+    while machine.frame_count() == 1 {
+        let cycle = machine.cycle_count();
+        let at = Position {
+            frame: 1,
+            scanline: u32::try_from((cycle / 114) % 262).expect("line"),
+            hpos: u32::try_from(cycle % 114).expect("cycle"),
+            cycle,
+        };
+        let fetch = machine.cpu().at_opcode_fetch();
+        let interrupt = machine.cpu().boundary() == Some(Boundary::Interrupt);
+        let regs = *machine.cpu().registers();
+        let byte = |offset: u16| {
+            machine
+                .debug_peek(regs.pc.wrapping_add(offset))
+                .unwrap_or(0xFF)
+        };
+        let bytes = [byte(0), byte(1), byte(2)];
+        machine.run_cycle();
+        if fetch && !machine.cpu().at_opcode_fetch() {
+            if let Some(start) = pending.take() {
+                let kind = if machine.cpu().vector() == 0xFFFA {
+                    SequenceKind::Nmi
+                } else {
+                    SequenceKind::Irq
+                };
+                let sequence = Sequence {
+                    at: start,
+                    kind,
+                    handler: regs.pc,
+                };
+                lines.push((SequenceLine(&sequence).to_string(), None));
+            }
+            let start = InstructionStart { at, regs, bytes };
+            lines.push((InstructionLine(&start).to_string(), Some(bytes[0])));
+        } else if interrupt && machine.cpu().boundary().is_none() {
+            pending = Some(at);
+        }
+    }
+    lines
 }
 
 /// Verifies REQ-086: `--headless --frames 3 --trace <file> --trace-from 1
@@ -1387,33 +1527,130 @@ fn trace_line_format() {
 /// of the line before is at least the base cycle count of the instruction before it, and equals
 /// the value of a cycle-by-cycle run of the same boot (criteria 3 and 4).
 #[test]
-#[ignore = "planned: SLICE-10"]
 fn trace_writes_selected_frame() {
-    planned();
+    let path = temp_dir("trace_writes_selected_frame").join("trace.txt");
+    let path_arg = path.to_str().expect("UTF-8 path");
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "3",
+        "--trace",
+        path_arg,
+        "--trace-from",
+        "1",
+        "--trace-frames",
+        "1",
+    ]);
+    assert!(output.status.success(), "exit status: {}", stderr(&output));
+    let text = fs::read_to_string(&path).expect("trace file");
+    assert!(text.ends_with('\n'), "each line ends with a line end");
+    let lines: Vec<&str> = text.lines().collect();
+
+    let expected = reference_trace_of_frame_1();
+    assert!(expected.len() > 1000, "{} reference lines", expected.len());
+    let expected_text: Vec<&str> = expected.iter().map(|(line, _)| line.as_str()).collect();
+    assert_eq!(lines, expected_text, "the trace of frame 1");
+    assert!(
+        expected[0].1.is_some(),
+        "the first line is an instruction: {}",
+        lines[0]
+    );
+
+    let mut last: Option<(u64, u8)> = None;
+    for line in &lines {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(fields[0], "1", "frame of {line}");
+        let hpos: u64 = fields[2].parse().expect("hpos");
+        let cycle: u64 = fields[3].parse().expect("cycle");
+        assert!(hpos < 114, "hpos of {line}");
+        if fields[4].ends_with(':') {
+            let opcode = u8::from_str_radix(fields[5], 16).expect("opcode");
+            if let Some((before, previous)) = last {
+                assert!(
+                    cycle - before >= u64::from(BASE_CYCLES[usize::from(previous)]),
+                    "{line} after the opcode ${previous:02X} at cycle {before}"
+                );
+            }
+            last = Some((cycle, opcode));
+        }
+    }
 }
 
 /// Verifies REQ-086: the frame buffer and the RAM after 3 frames are the same
 /// with and without the trace (criterion 5).
 #[test]
-#[ignore = "planned: SLICE-10"]
 fn trace_does_not_change_machine() {
-    planned();
+    let path = temp_dir("trace_does_not_change_machine").join("trace.txt");
+    let mut plain = start(&rom_options()).expect("plain frontend");
+    let writer = TraceWriter::new(BufWriter::new(File::create(&path).expect("file")), 0, 3);
+    let mut traced = start(&rom_options())
+        .expect("traced frontend")
+        .with_trace(writer);
+    plain.run_frames(3).expect("plain frames");
+    traced.run_frames(3).expect("traced frames");
+    traced
+        .take_trace()
+        .expect("the writer")
+        .finish()
+        .expect("trace written");
+    assert!(
+        fs::read_to_string(&path).expect("trace").lines().count() > 1000,
+        "the trace has lines"
+    );
+    let (a, b) = (plain.machine(), traced.machine());
+    assert!(a.frame() == b.frame(), "frame buffer");
+    assert!(
+        (0..=0xFFFF_u16).all(|addr| a.peek_ram(addr) == b.peek_ram(addr)),
+        "RAM"
+    );
+    assert!(a == b, "machine");
 }
 
 /// Verifies REQ-086: `--trace` with a file in a directory that does not exist gives
 /// exit code 2 and a message on standard error that names the file (criterion 6).
 #[test]
-#[ignore = "planned: SLICE-10"]
 fn trace_file_error_exit_code() {
-    planned();
+    let path = temp_dir("trace_file_error_exit_code")
+        .join("missing")
+        .join("trace.txt");
+    let path_arg = path.to_str().expect("UTF-8 path");
+    let output = run(&["--headless", "--frames", "1", "--trace", path_arg]);
+    assert_eq!(output.status.code(), Some(2), "exit code");
+    assert!(
+        stderr(&output).contains(path_arg),
+        "the message names the file: {}",
+        stderr(&output)
+    );
+    for args in [
+        &["--headless", "--frames", "1", "--trace-from", "1"][..],
+        &[
+            "--headless",
+            "--frames",
+            "1",
+            "--trace",
+            path_arg,
+            "--trace-frames",
+            "0",
+        ][..],
+    ] {
+        assert_eq!(run(args).status.code(), Some(2), "usage error for {args:?}");
+    }
 }
 
 /// Verifies REQ-086: `--help` lists `--trace <file>`, `--trace-from <frame>` and
 /// `--trace-frames <n>` (criterion 7).
 #[test]
-#[ignore = "planned: SLICE-10"]
 fn trace_help_lists_options() {
-    planned();
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    let text = String::from_utf8_lossy(&output.stdout);
+    for option in [
+        "--trace <file>",
+        "--trace-from <frame>",
+        "--trace-frames <n>",
+    ] {
+        assert!(text.contains(option), "--help lists {option}");
+    }
 }
 
 /// Verifies REQ-088: `Monitor::open` on a running machine stops it before
