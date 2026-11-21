@@ -219,21 +219,85 @@ fn planned() {
     panic!("planned test: a package replaces this stub with the real test");
 }
 
+/// A valid executable: one segment with `JMP $0600` at `$0600`, and `RUNAD` = `$0600`.
+const VALID_XEX: [u8; 15] = [
+    0xFF, 0xFF, 0x00, 0x06, 0x02, 0x06, 0x4C, 0x00, 0x06, 0xE0, 0x02, 0xE1, 0x02, 0x00, 0x06,
+];
+
+/// A valid ATR image: 720 sectors of 128 bytes, all `$00` (single density).
+fn valid_atr() -> Vec<u8> {
+    let data_len: usize = 720 * 128;
+    let paragraphs = u16::try_from(data_len / 16).expect("paragraphs fit in 16 bits");
+    let mut atr = vec![0_u8; 16 + data_len];
+    atr[..2].copy_from_slice(&[0x96, 0x02]);
+    atr[2..4].copy_from_slice(&paragraphs.to_le_bytes());
+    atr[4..6].copy_from_slice(&128_u16.to_le_bytes());
+    atr
+}
+
 /// Verifies REQ-012: `--headless --frames 1` exits with status 0 for a valid 8,192-byte
 /// cartridge (`--cart`), a valid executable (`--xex`) and a valid ATR image (`--disk`)
 /// (criterion 1).
+///
+/// Ignored until `--xex` (SLICE-04 WP-1) and `--disk` (the ATR loader of REQ-625, SLICE-05)
+/// exist.
 #[test]
 #[ignore = "planned: SLICE-04"]
 fn loads_cart_xex_and_disk() {
-    planned();
+    let dir = temp_dir("loads_cart_xex_and_disk");
+    for (option, name, bytes) in [
+        ("--cart", "game.rom", vec![0_u8; 0x2000]),
+        ("--xex", "game.xex", VALID_XEX.to_vec()),
+        ("--disk", "game.atr", valid_atr()),
+    ] {
+        let file = dir.join(name);
+        fs::write(&file, bytes).expect("write the media file");
+        let output = run(&[
+            "--headless",
+            "--frames",
+            "1",
+            option,
+            file.to_str().expect("UTF-8 path"),
+        ]);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{option}: {}",
+            stderr(&output)
+        );
+    }
 }
 
 /// Verifies REQ-012: with a 100-byte file, each of `--cart`, `--xex` and `--disk` writes a
 /// message that names the file to standard error and exits with status 2 (criterion 2).
+///
+/// Ignored until `--xex` (SLICE-04 WP-1) and `--disk` (the ATR loader of REQ-625, SLICE-05)
+/// exist.
 #[test]
 #[ignore = "planned: SLICE-04"]
 fn rejects_bad_cart_xex_and_disk() {
-    planned();
+    let dir = temp_dir("rejects_bad_cart_xex_and_disk");
+    for (option, name) in [
+        ("--cart", "bad-cart.rom"),
+        ("--xex", "bad-program.xex"),
+        ("--disk", "bad-disk.atr"),
+    ] {
+        let file = dir.join(name);
+        fs::write(&file, [0_u8; 100]).expect("write the 100-byte file");
+        let output = run(&[
+            "--headless",
+            "--frames",
+            "1",
+            option,
+            file.to_str().expect("UTF-8 path"),
+        ]);
+        let message = stderr(&output);
+        assert_eq!(output.status.code(), Some(2), "{option}: exit status");
+        assert!(
+            message.contains(name),
+            "{option}: the message names the file: {message}"
+        );
+    }
 }
 
 /// Verifies REQ-081: `--headless --frames 1 --cas <file>` exits with status 0 for the boot
