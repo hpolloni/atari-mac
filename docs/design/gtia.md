@@ -199,8 +199,11 @@ even color clock.
 
 - DMA: a `DmaKind::Missile` byte goes to `grafm` if `GRACTL` bit 0 = 1. A `DmaKind::Player(n)` byte goes to
   `grafp[n]` if `GRACTL` bit 1 = 1. If the `VDELAY` bit of an object is 1 and `out.line` is
-  even, the object keeps its old value. GTIA handles a DMA byte as a write on the cycle of
-  the `tick`, with the delay of `GRAFx` (3 color clocks).
+  even, the object keeps its old value. For a missile, the old value is the last pending
+  `GRAFM` write if there is one, else `grafm`, so that a CPU write in its write delay is not
+  lost (HRM 6.5, REQ-415 criterion 5). A masked player DMA byte is not scheduled, so a
+  pending CPU write to `GRAFPn` takes effect as usual. GTIA handles a DMA byte as a write on
+  the cycle of the `tick`, with the delay of `GRAFx` (3 color clocks).
 - REQ-441: if `GRACTL` bit 1 = 1 and ANTIC gives a missile DMA cycle but no player DMA cycles,
   GTIA loads `grafp[n]` from `data_bus` on cycles 2-5.
 - Per color clock and per object: if `h == position`, then `shift |= latch` and
@@ -245,7 +248,11 @@ The same builder function is the reference for the unit tests against HRM Table 
   For `p = 0`, the
   luminance bits are cleared.
 - Mode 10: the even color clock uses `gtia_pixel` (the last pixel) and the odd color
-  clock uses `p`. Then `gtia_pixel = p`. `p` in 0-3 sets the input `Pp`. `p` in 4-7 or
+  clock uses `p`. On each odd color clock that is not a blank code, in all modes,
+  `gtia_pixel = p` (with the `%000` rule of REQ-433 below). Thus the delay latch follows the
+  pixel data also while mode 10 is off, and a change to mode 10 in a scanline shows the pixel
+  data of that scanline from the first color clock (HRM 6.10: "Mode 8 to mode 10: Clean
+  transition after 3 color clocks", REQ-430 criterion 7). `p` in 0-3 sets the input `Pp`. `p` in 4-7 or
   12-15 sets `PF(p & 3)`. `p` in 8-11 sets nothing. If `an[1]` is `%000` and `p` is not 0,
   `p` is 8 (REQ-433: the `BAK` code mutes the playfield of the pixel). `p` = 0 stays `P0`, so
   the border, where both codes are `%000`, shows `P0` (HRM 6.9, REQ-430 criterion 3).
@@ -319,7 +326,7 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-412 | `palette.rs` `pal_blend_formula`, `pal_blend_reference_rows`, `pal_blend_row_0_unchanged` (6); `src/frontend.rs` `display_filters_off_by_default` |
 | REQ-413 | `gtia.rs` `player_bits_msb_first`, `missile_bits_and_colors`, `all_object_colors`, `latch_repeats_without_dma` |
 | REQ-414 | `gtia.rs` `gractl_gates_dma`, `gractl_off_keeps_latch`, `missile_dma_needs_gractl_bit_0` (3), `cpu_writes_ignore_gractl`; `crates/harness/tests/gtia.rs` `pm_dma_one_line_resolution` |
-| REQ-415 | `gtia.rs` `vdelay_bit_map`, `vdelay_accepts_odd_lines_only`, `vdelay_ignores_cpu_writes` |
+| REQ-415 | `gtia.rs` `vdelay_bit_map`, `vdelay_accepts_odd_lines_only`, `vdelay_ignores_cpu_writes`, `vdelay_keeps_late_cpu_writes` |
 | REQ-416 | `gtia.rs` `player_starts_at_hpos`, `player_clipped_at_left_and_right` |
 | REQ-417 | `gtia.rs` `player_sizes`, `missile_sizes`, `size_bits_2_7_ignored` |
 | REQ-418 | `gtia.rs` `retrigger_shows_second_copy`, `move_left_suppresses_image`, `move_during_image_keeps_image`, `reload_ors_shift_register`, `image_shifts_out_in_hblank` |
@@ -333,7 +340,7 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-427 | `gtia.rs` `multicolor_players_or_colors`, `multicolor_missiles`, `multicolor_keeps_collisions` |
 | REQ-428 | `gtia.rs` `gtia_pixels_pair_even_hpos`, `gtia_mode_ignores_an2`, `gtia_mode_ignores_hires`; `crates/harness/tests/gtia.rs` `gtia_mode_pixels_from_antic` |
 | REQ-429 | `gtia.rs` `mode_9_luminance`, `mode_9_players_on_top`, `mode_9_no_playfield_collisions` |
-| REQ-430 | `gtia.rs` `mode_10_register_map`, `mode_10_delay_and_border`, `mode_10_wide_right_edge`, `mode_10_collisions` |
+| REQ-430 | `gtia.rs` `mode_10_register_map`, `mode_10_delay_and_border`, `mode_10_wide_right_edge`, `mode_10_collisions`, `mode_10_after_mid_line_prior` |
 | REQ-431 | `gtia.rs` `mode_11_hues`, `mode_11_players_on_top`, `mode_11_no_playfield_collisions` |
 | REQ-432 | `gtia.rs` `pseudo_mode_e_after_mid_line_prior`, `gtia_mode_at_hblank_blocks_hires` |
 | REQ-433 | `gtia.rs` `mode_10_bak_mutes_pixel` |
@@ -376,6 +383,8 @@ The tests that this list adds or changes do these checks:
 - `crates/harness/tests/gtia.rs` `gtia_mode_pixels_from_antic`: ANTIC mode F and mode E lines with `PRIOR` = `$40` (REQ-428 criteria 1 and 2).
 - `mode_9_no_playfield_collisions`, `mode_11_players_on_top`, `mode_11_no_playfield_collisions`: REQ-429 criterion 6, REQ-431 criteria 3 and 5.
 - `mode_10_wide_right_edge`: a wide mode F line with `PRIOR` = `$80`, checks HPOS `$2C-$DD`.
+- `vdelay_keeps_late_cpu_writes`: a CPU write to `GRAFM` (and, in a second run, `GRAFP0`) in cycle 113 of scanline 99 shows on scanline 100 with the `VDELAY` bit set, and not on scanlines 99 and 101.
+- `mode_10_after_mid_line_prior`: scanline 107 of `$77` bytes in mode 10, then scanline 108 of `$44` bytes with `PRIOR` = `$00` and a write of `$80` on cycle 65; compares HPOS `$88-$DD` with a run with no writes and checks that HPOS `$83-$87` do not show `COLPF3`.
 - `write_delay_base_other_cycle`: a `COLBK` write on cycle 30 changes the color from HPOS `$3B`.
 - `crates/harness/tests/gtia.rs` `trig2_always_inactive`: reads `TRIG2` after boot, with both joystick buttons pressed, and with `GRACTL` = `$04`.
 - `trigger_latch_all_triggers`: latches triggers 0, 1 and 3, and latches an input that is active when `GRACTL` bit 2 is set.
