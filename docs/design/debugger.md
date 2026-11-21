@@ -349,15 +349,25 @@ The command line options (`src/cli.rs`):
 
 | Option | Value | Default | `Options` field |
 | --- | --- | --- | --- |
-| `--trace <file>` | The trace file | No trace | `trace: Option<TraceOptions>` |
+| `--trace <file>` | The trace file, `-` for standard output | No trace | `trace: Option<TraceOptions>` |
 | `--trace-from <frame>` | Decimal frame number | 0 | `TraceOptions::from` |
 | `--trace-frames <n>` | Decimal count, at least 1 | 1 | `TraceOptions::frames` |
 
 `--trace-from` or `--trace-frames` without `--trace` is a usage error (exit code 2). `USAGE`
-lists the three options (REQ-086 criterion 7).
+lists the three options (REQ-086 criterion 8).
 
 ```rust
 pub struct TraceOptions { pub file: PathBuf, pub from: u64, pub frames: u64 }
+
+impl TraceOptions {
+    /// `true` when the file is `-` (standard output).
+    pub fn to_stdout(&self) -> bool;
+    /// Standard output for `-`, else the new file.
+    pub fn open(&self) -> io::Result<TraceOutput>;
+}
+
+/// The output of the trace; implements `Write`.
+pub enum TraceOutput { File(BufWriter<File>), Stdout(BufWriter<Stdout>) }
 
 /// Writes the lines of REQ-086 for the frames `from` to `from + frames - 1`.
 pub struct TraceWriter<W: Write> { /* see State */ }
@@ -403,7 +413,11 @@ Examples (P = `$B6`, X = `$FF`):
 ```
 
 The writer writes an event when its frame is in the range. The frontend opens the file
-before the first frame. A file that cannot be created is the error `FrontendError::Trace`
+before the first frame. `TraceOptions::open` gives a `TraceOutput`: `TraceOutput::File` (a
+`BufWriter<File>`), or `TraceOutput::Stdout` (a `BufWriter<Stdout>`) when the file is `-`.
+With `-` the frontend creates no file (REQ-086 criterion 7). The frontend finishes (flushes)
+the writer before it writes the elapsed time of `--frames` and the other output on standard
+output, so that these lines come after the last trace line. A file that cannot be created is the error `FrontendError::Trace`
 with the path, exit code 2 (REQ-086 criterion 6). A write error during the run is kept, and
 the frontend reports the same error at the end of the run.
 
@@ -549,7 +563,7 @@ breaks: Vec<u16>`, the option can repeat) adds breakpoints before the first fram
 | Requirement | Test |
 | --- | --- |
 | REQ-087 | `crates/harness/tests/disasm.rs` `disassembles_all_opcodes` (criteria 1 to 4: the 256 opcodes with the bytes `$34 $12` at `$2000`, length and text from a table in the test, with the names of "Undocumented names"), `branch_targets_wrap` (criterion 2: `BNE` at `$FFF0` with offset `$7F` gives `$0071`; at `$0010` with offset `$80` gives `$FF92`), `disassembly_reads_without_side_effects` (criterion 5: `Machine::disassemble_at` and `Machine::debug_peek` for each address `$D000` to `$D7FF` leave the machine equal to a copy from before) |
-| REQ-086 | `crates/harness/tests/debug_hook.rs` `hook_reports_each_instruction_start` (criteria 1 and 4: a program machine with DMA and `WSYNC`; each opcode fetch cycle that a cycle-by-cycle run finds with `Cpu::at_opcode_fetch` has exactly one `instruction` call, with the registers before it), `hook_reports_interrupt_sequences` (criterion 2: the reset after power-on, a VBI NMI and a POKEY timer IRQ each give one `sequence` call with the kind, the start position and the handler address, before the first handler instruction), `hooked_run_matches_plain_run` (criterion 5: 3 frames of the `AltirraOS` boot, plain and hooked, give equal machines); `tests/cli.rs` `trace_line_format` (criteria 1 and 2: `InstructionLine` and `SequenceLine` of fixed events give the example lines of this document), `trace_writes_selected_frame` (criteria 3 and 4: `--headless --frames 3 --trace <file> --trace-from 1 --trace-frames 1`; each line has frame 1, the first line is the first instruction of frame 1, and the cycle of each line minus the cycle of the line before is at least the base cycle count of the instruction before it and equals the count of a cycle-by-cycle run), `trace_does_not_change_machine` (criterion 5: the frame buffer and the RAM after 3 frames with and without the trace), `trace_file_error_exit_code` (criterion 6: a file in a directory that does not exist gives exit code 2 and a message with the path), `trace_help_lists_options` (criterion 7) |
+| REQ-086 | `crates/harness/tests/debug_hook.rs` `hook_reports_each_instruction_start` (criteria 1 and 4: a program machine with DMA and `WSYNC`; each opcode fetch cycle that a cycle-by-cycle run finds with `Cpu::at_opcode_fetch` has exactly one `instruction` call, with the registers before it), `hook_reports_interrupt_sequences` (criterion 2: the reset after power-on, a VBI NMI and a POKEY timer IRQ each give one `sequence` call with the kind, the start position and the handler address, before the first handler instruction), `hooked_run_matches_plain_run` (criterion 5: 3 frames of the `AltirraOS` boot, plain and hooked, give equal machines); `tests/cli.rs` `trace_line_format` (criteria 1 and 2: `InstructionLine` and `SequenceLine` of fixed events give the example lines of this document), `trace_writes_selected_frame` (criteria 3 and 4: `--headless --frames 3 --trace <file> --trace-from 1 --trace-frames 1`; each line has frame 1, the first line is the first instruction of frame 1, and the cycle of each line minus the cycle of the line before is at least the base cycle count of the instruction before it and equals the count of a cycle-by-cycle run), `trace_does_not_change_machine` (criterion 5: the frame buffer and the RAM after 3 frames with and without the trace), `trace_file_error_exit_code` (criterion 6: a file in a directory that does not exist gives exit code 2 and a message with the path), `trace_to_stdout` (criterion 7: `--headless --frames 2 --trace - --trace-frames 1` with an empty temporary directory as the current directory; standard output has the trace lines of frame 0, then the elapsed time line, and the directory stays empty), `trace_help_lists_options` (criterion 8) |
 | REQ-088 | `tests/cli.rs` `monitor_open_shows_next_instruction` (criterion 1), `monitor_step_runs_one_instruction` (criterion 2: the cycle of the new line minus the old cycle is the instruction cycles plus the halt cycles), `monitor_frame_runs_to_next_frame` (criterion 3), `monitor_go_continues` (criterion 4: `resume` is true and the next frame runs plain), `monitor_steps_keep_machine_deterministic` (criterion 5: 20 `s`, 2 `f` and a `g` in frame 2, then a run to cycle 5 frames; frame buffer and RAM equal a plain run to the same cycle), `monitor_open_silences_audio` (criterion 6: while open, no frame runs, `AudioSink::stop_sound` is called and no underrun is counted) |
 | REQ-089 | `tests/cli.rs` `monitor_breakpoint_stops_before_instruction` (criterion 1), `monitor_watches_stop_after_access` (criterion 2: `ww` and `wr` on a RAM address of a test program; the output names the address, the value and the instruction line), `monitor_lists_and_deletes_points` (criterion 3), `break_option_sets_breakpoint` (criterion 4: `--break 0600` and `--break $E477` parse to `Options::breaks`), `monitor_breakpoint_at_boot_tape_start` (criterion 5: the boot test tape of REQ-643; the machine stops with `PC` = `$0600` before the first instruction there), `no_points_use_plain_run` (criterion 6: without points, `Monitor::active` is false and `Frontend` calls `Machine::run_frame`) |
 | REQ-090 | `tests/cli.rs` `monitor_shows_registers` (criterion 1), `monitor_shows_memory` (criterion 2: 16 bytes for each line, hexadecimal and ATASCII, default 128 bytes), `monitor_disassembles_memory` (criterion 3: default 16 instructions), `monitor_changes_memory_and_registers` (criterion 4: `e` and `r` for each register), `monitor_reads_without_side_effects` (criterion 5: `m D000 2048` and `d D000 100` leave the machine equal; `$D500` shows `--`), `monitor_rejects_bad_input` (criterion 6: `m G000`, `e 10000 1`, `r Q 1` give `error:` and no change) |

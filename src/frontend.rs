@@ -22,7 +22,7 @@ use crate::cli::Options;
 use crate::error::FrontendError;
 use crate::keymap::InputState;
 use crate::logging::FRONTEND_TARGET;
-use crate::trace::TraceWriter;
+use crate::trace::{TraceOutput, TraceWriter};
 
 /// Sends one record of the category `frontend` (REQ-085 criterion 3) with the frame count
 /// and the cycle count of `machine` at the call: the counts at the start of the frame that
@@ -327,7 +327,7 @@ pub struct Frontend {
     /// The turbo cause of the last frame that ran (REQ-085 criterion 3).
     turbo_cause: Option<TurboCause>,
     /// The trace writer of `--trace` (REQ-086).
-    trace: Option<TraceWriter<BufWriter<File>>>,
+    trace: Option<TraceWriter<TraceOutput>>,
     /// `--auto-return` (REQ-092): the frontend presses RETURN for the tape boot, until it
     /// releases the key.
     auto_return: bool,
@@ -388,13 +388,13 @@ impl Frontend {
     /// Writes the trace of REQ-086 with `writer` in the frames that it wants. The other
     /// frames run with the plain `Machine::run_frame`.
     #[must_use]
-    pub fn with_trace(mut self, writer: TraceWriter<BufWriter<File>>) -> Self {
+    pub fn with_trace(mut self, writer: TraceWriter<TraceOutput>) -> Self {
         self.trace = Some(writer);
         self
     }
 
     /// Takes the trace writer, to finish it at the end of the run.
-    pub const fn take_trace(&mut self) -> Option<TraceWriter<BufWriter<File>>> {
+    pub const fn take_trace(&mut self) -> Option<TraceWriter<TraceOutput>> {
         self.trace.take()
     }
 

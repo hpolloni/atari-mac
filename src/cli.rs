@@ -49,6 +49,7 @@ Options:
   --stats              Each second, write the speed statistics to standard error
   --log <categories>   Write log records to standard error: tape,sio,reset,media,frontend,all
   --trace <file>       Write a line for each CPU instruction and interrupt to the file
+                       (- is standard output)
   --trace-from <frame> The first frame of the trace (default: 0)
   --trace-frames <n>   The number of frames of the trace (default: 1)
   --screenshot <file>  At exit, save the last frame as a PNG file

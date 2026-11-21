@@ -17,7 +17,7 @@ use atari_mac::bas::{self, KEY_DOWN_FRAMES, KEY_UP_FRAMES, Phase, Typist};
 use atari_mac::cli::{self, Options};
 use atari_mac::frontend::{Flow, Frontend};
 use atari_mac::start;
-use atari_mac::trace::{InstructionLine, SequenceLine, TraceWriter};
+use atari_mac::trace::{InstructionLine, SequenceLine, TraceOutput, TraceWriter};
 // The binary uses this dependency; this test does not.
 use minifb as _;
 
@@ -2026,7 +2026,11 @@ fn trace_writes_selected_frame() {
 fn trace_does_not_change_machine() {
     let path = temp_dir("trace_does_not_change_machine").join("trace.txt");
     let mut plain = start(&rom_options()).expect("plain frontend");
-    let writer = TraceWriter::new(BufWriter::new(File::create(&path).expect("file")), 0, 3);
+    let writer = TraceWriter::new(
+        TraceOutput::File(BufWriter::new(File::create(&path).expect("file"))),
+        0,
+        3,
+    );
     let mut traced = start(&rom_options())
         .expect("traced frontend")
         .with_trace(writer);
@@ -2081,8 +2085,59 @@ fn trace_file_error_exit_code() {
     }
 }
 
+/// Verifies REQ-086: `--headless --frames 2 --trace - --trace-frames 1`, run in an empty
+/// directory, writes the trace lines to standard output and creates no file `-`. The
+/// elapsed time line of `--frames` comes after the last trace line (criterion 7).
+#[test]
+fn trace_to_stdout() {
+    let dir = temp_dir("trace_to_stdout");
+    let output = Command::new(env!("CARGO_BIN_EXE_atari-mac"))
+        .current_dir(&dir)
+        .args(["--os", OS_ROM, "--basic", BASIC_ROM])
+        .args([
+            "--headless",
+            "--frames",
+            "2",
+            "--trace",
+            "-",
+            "--trace-frames",
+            "1",
+        ])
+        .output()
+        .expect("failed to run the atari-mac binary");
+    assert!(output.status.success(), "exit status: {}", stderr(&output));
+    assert!(!dir.join("-").exists(), "no file named -");
+    assert_eq!(
+        fs::read_dir(&dir).expect("read the directory").count(),
+        0,
+        "the run creates no file"
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = text.lines().collect();
+    let (last, trace) = lines.split_last().expect("standard output has lines");
+    assert!(
+        last.starts_with("2 frames in "),
+        "the elapsed time line comes last: {last}"
+    );
+    assert!(trace.len() > 1000, "{} trace lines", trace.len());
+    for line in trace {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(
+            fields.first(),
+            Some(&"0"),
+            "a trace line of frame 0: {line}"
+        );
+        assert!(
+            fields.get(4).is_some_and(
+                |field| field.ends_with(':') || ["NMI", "IRQ", "RESET"].contains(field)
+            ),
+            "a trace line: {line}"
+        );
+    }
+}
+
 /// Verifies REQ-086: `--help` lists `--trace <file>`, `--trace-from <frame>` and
-/// `--trace-frames <n>` (criterion 7).
+/// `--trace-frames <n>` (criterion 8).
 #[test]
 fn trace_help_lists_options() {
     let output = run(&["--help"]);
