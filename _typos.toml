@@ -22,6 +22,8 @@ flate = "flate"
 STRIG = "STRIG"
 CONSOL = "CONSOL"
 consol = "consol"
+# The CPU flags text of the trace, for example `P=N.-B.IZ.` (REQ-086).
+IZ = "IZ"
 # 6502 mnemonics.
 ANC = "ANC"
 ANE = "ANE"
