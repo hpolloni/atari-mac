@@ -1,7 +1,7 @@
 //! GTIA mode tests (REQ-428 to REQ-433).
 
 use super::objects::{
-    collisions, gtia_with, no_dma, only, pixel_codes, plain_frame, run_frame, span,
+    Hook, collisions, gtia_with, no_dma, only, pixel_codes, plain_frame, run_frame, run_lines, span,
 };
 use super::{COLBK, COLPF1, COLPM0, PRIOR, at};
 use std::ops::Range;
@@ -215,6 +215,52 @@ fn mode_10_wide_right_edge() {
         vec![0x50; 2 * 0xB1],
         "HPOS $2D-$DD"
     );
+}
+
+/// Verifies REQ-430: scan line 107 is a wide mode F line of `$77` bytes with `PRIOR` = `$80`.
+/// Scan line 108 is a wide mode F line of `$44` bytes, `PRIOR` = `$00` from its horizontal
+/// blank and a write of `$80` on cycle 65. HPOS `$88-$DD` show the same colors as with
+/// `PRIOR` = `$80` from the start of the line, and HPOS `$83-$87` do not show `COLPF3` (pixel
+/// value 7 of scan line 107) (criterion 7).
+#[test]
+fn mode_10_after_mid_line_prior() {
+    let run = |hook: Hook<'_>| {
+        let mut gtia = mode_10_gtia(0x80);
+        let pixel_7 = |h: u32| {
+            if (0x2C..=0xDD).contains(&h) {
+                AnCode::hires(if h.is_multiple_of(2) { 0b01 } else { 0b11 })
+            } else {
+                AnCode::BACKGROUND
+            }
+        };
+        run_lines(&mut gtia, 0..108, false, &pixel_7, &no_dma, hook);
+        let pixel_4 = mode_f_44(0x2C, 0xDD);
+        run_lines(&mut gtia, 108..249, false, &pixel_4, &no_dma, hook);
+        gtia
+    };
+    let reference = run(&mut |_, _, _| {});
+    let gtia = run(&mut |gtia, l, c| match (l, c) {
+        (108, 5) => gtia.write(PRIOR, 0x00),
+        (108, 65) => gtia.write(PRIOR, 0x80),
+        _ => {}
+    });
+    assert_eq!(
+        at(&reference, 99, 0x80),
+        [0x80; 2],
+        "scan line 107: pixel 7"
+    );
+    assert_eq!(
+        span(&gtia, 100, 0x88..=0xDD),
+        span(&reference, 100, 0x88..=0xDD),
+        "HPOS $88-$DD"
+    );
+    for h in 0x83..=0x87 {
+        assert!(
+            !at(&gtia, 100, h).contains(&0x80),
+            "HPOS ${h:02X} shows COLPF3: {:02X?}",
+            at(&gtia, 100, h)
+        );
+    }
 }
 
 /// Verifies REQ-430: with `PRIOR` = `$80`, player 0 over a pixel with value 5 sets `P0PF` =

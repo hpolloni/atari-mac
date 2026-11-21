@@ -322,6 +322,45 @@ fn vdelay_ignores_cpu_writes() {
     );
 }
 
+/// Verifies REQ-415: a CPU write to `GRAFM` (or `GRAFP0`) in cycle 113 of an odd scanline is
+/// still in its write delay when the DMA byte of the next (even) scanline comes. `VDELAY` keeps
+/// the CPU value, not the value from before the write (criterion 5 for the missile, and
+/// criterion 3 for the player at the same time).
+#[test]
+fn vdelay_keeps_late_cpu_writes() {
+    // (GRACTL, VDELAY, DMA kind and cycle, latch, value): missile 0, then player 0.
+    let cases = [
+        (0x01, 0x01, DmaKind::Missile, 0, GRAFM, 0x02),
+        (0x02, 0x10, DmaKind::Player(0), 2, GRAFP0, 0x80),
+    ];
+    for (gractl, vdelay, kind, dma_cycle, latch, value) in cases {
+        let mut gtia = gtia_with(&[
+            (COLBK, 0x02),
+            (COLPM0, 0x46),
+            (HPOSP0, 0x80),
+            (HPOSM0, 0x80),
+            (GRACTL, gractl),
+            (VDELAY, vdelay),
+        ]);
+        let dma = |_, cycle| {
+            if cycle == dma_cycle {
+                (kind, 0x00)
+            } else {
+                (DmaKind::None, 0xFF)
+            }
+        };
+        run_frame(&mut gtia, false, &background, &dma, &mut |gtia, l, c| {
+            if (l, c) == (99, 113) {
+                gtia.write(latch, value);
+            }
+        });
+        let name = format!("latch ${latch:02X}");
+        assert_eq!(player_hpos(&gtia, 91), [], "{name}: scan line 99");
+        assert_eq!(player_hpos(&gtia, 92), [0x80], "{name}: scan line 100");
+        assert_eq!(player_hpos(&gtia, 93), [], "{name}: scan line 101");
+    }
+}
+
 /// Verifies REQ-416: `GRAFP0` = `$80` and `HPOSP0` = `$80` show `$46` at HPOS `$80` (columns
 /// 192-193) and `$02` at HPOS `$7F` and `$81` (criterion 1).
 #[test]

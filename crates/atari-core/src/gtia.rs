@@ -122,7 +122,7 @@ pub struct Gtia {
     collisions: [u8; 16],
     /// The hires flip-flop: the last horizontal blank code was `%011`.
     hires: bool,
-    /// The last GTIA mode pixel (for the mode 10 delay).
+    /// The pixel of the last odd color clock, in all modes (the mode 10 delay, REQ-430).
     mode_10_pixel: u8,
     /// ANTIC did a missile DMA cycle on cycle 0 of this scan line (REQ-441).
     missile_line: bool,
@@ -196,6 +196,15 @@ const fn write_delay(reg: u8) -> u64 {
 /// Size `%10` gives single width from state `%00`, and the lockup from states `%01` and `%10`.
 const fn size_mask(size: u8) -> u8 {
     size & 3
+}
+
+/// The `GRAFM` bits of the missiles whose `VDELAY` bit (bits 0-3) is 1: bits `2n+1` and `2n`
+/// for missile n.
+const fn missile_vdelay_mask(vdelay: u8) -> u8 {
+    let low = vdelay & 0x0F;
+    // Spread bit n to bit 2n, then copy it to bit 2n+1.
+    let spread = (low & 1) | ((low & 2) << 1) | ((low & 4) << 2) | ((low & 8) << 3);
+    spread | (spread << 1)
 }
 
 impl Gtia {
@@ -368,6 +377,15 @@ impl Gtia {
         self.pending_len += 1;
     }
 
+    /// The value of the last write to `reg` that is not in effect yet.
+    fn pending_value(&self, reg: u8) -> Option<u8> {
+        self.pending[..self.pending_len]
+            .iter()
+            .rev()
+            .find(|write| write.reg == reg)
+            .map(|write| write.value)
+    }
+
     /// Applies the pending writes up to color clock `now`, in write order.
     fn apply_pending(&mut self, now: u64) {
         if self.pending_len == 0 {
@@ -420,11 +438,12 @@ impl Gtia {
         match antic.dma {
             DmaKind::Missile if self.gractl & 0x01 != 0 => {
                 let mut value = data_bus;
-                for n in 0..4 {
-                    if even && self.vdelay & (1 << n) != 0 {
-                        let mask = 3 << (2 * n);
-                        value = (value & !mask) | (self.grafm & mask);
-                    }
+                let mask = missile_vdelay_mask(self.vdelay);
+                if even && mask != 0 {
+                    // REQ-415: `VDELAY` keeps the latch value, also a CPU write that is
+                    // still in its write delay (HRM 6.5).
+                    let grafm = self.pending_value(0x11).unwrap_or(self.grafm);
+                    value = (value & !mask) | (grafm & mask);
                 }
                 self.schedule(0x11, value);
             }
@@ -528,6 +547,12 @@ impl Gtia {
                 ..Playfield::default()
             };
         }
+        if odd {
+            // REQ-430: the mode 10 delay latch follows the pixel data in all modes, so that
+            // a change to mode 10 is clean (HRM 6.10). A `%000` right code gives pixel 8, as
+            // in mode 10 (REQ-433).
+            self.mode_10_pixel = if bits == 0 && pixel != 0 { 8 } else { pixel };
+        }
         match self.prior >> 6 {
             0 if bits == 0 => Playfield::default(),
             0 if self.hires => Playfield {
@@ -548,19 +573,14 @@ impl Gtia {
                     ..Playfield::default()
                 }
             }
-            2 => self.mode_10(pixel, odd),
+            2 => Self::mode_10(if odd { pixel } else { self.mode_10_pixel }),
             _ => Playfield::default(),
         }
     }
 
-    /// GTIA mode 10: 9 colors with a one color clock delay (REQ-430, REQ-433).
-    fn mode_10(&mut self, pixel: u8, odd: bool) -> Playfield {
-        let p = if odd {
-            self.mode_10_pixel = pixel;
-            pixel
-        } else {
-            self.mode_10_pixel
-        };
+    /// GTIA mode 10: 9 colors with a one color clock delay (REQ-430, REQ-433). `p` is the
+    /// pixel of this color clock, or the latched pixel on an even color clock.
+    fn mode_10(p: u8) -> Playfield {
         match p {
             0..=3 => Playfield {
                 players: 1 << p,
