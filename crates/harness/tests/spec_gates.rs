@@ -1991,6 +1991,10 @@ mod gates {
     #[test]
     fn gates_run_within_10_seconds() {
         let root = repo_root();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the gate measures the host time; the core reads no clock (REQ-014)"
+        )]
         let start = Instant::now();
         let spec = spec::load(&root).unwrap();
         let violations = spec::check(&spec, &root);

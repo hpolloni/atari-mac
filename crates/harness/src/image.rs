@@ -138,6 +138,10 @@ impl GoldenPaths {
     /// The directories of the repository ([`GOLDEN_DIR`], [`FAILURE_DIR`]). The update mode
     /// is on when the environment variable `UPDATE_GOLDEN` is `1`.
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the harness reads UPDATE_GOLDEN; the core reads no environment (REQ-014)"
+    )]
     pub fn from_env() -> Self {
         let root = data::repo_root();
         Self {

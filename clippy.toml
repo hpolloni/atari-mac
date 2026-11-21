@@ -13,3 +13,11 @@ too-many-arguments-threshold = 5
 cognitive-complexity-threshold = 15
 excessive-nesting-threshold = 5
 missing-docs-in-crate-items = true
+
+# REQ-014: the emulation core reads no host clock and no environment, so it is deterministic.
+# The frontend and the test harness mark each place where they read them with `#[expect]`.
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "the core is deterministic (REQ-014)" },
+    { path = "std::time::SystemTime::now", reason = "the core is deterministic (REQ-014)" },
+    { path = "std::env::var", reason = "the core is deterministic (REQ-014)" },
+]

@@ -13,6 +13,7 @@ use std::mem;
 use std::ops::RangeInclusive;
 
 use crate::antic::{AnCode, CycleOutput, DmaKind};
+use crate::state::impl_state;
 use crate::timing::{VBLANK_START_LINE, VideoStandard};
 
 /// Frame width in half color clocks (HPOS `$20-$DF`).
@@ -44,6 +45,12 @@ pub struct ConsoleKeys {
     pub option: bool,
 }
 
+impl_state!(ConsoleKeys {
+    start,
+    select,
+    option
+});
+
 /// A write that takes effect at a later color clock (REQ-434).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct PendingWrite {
@@ -54,6 +61,8 @@ struct PendingWrite {
     /// The value.
     value: u8,
 }
+
+impl_state!(PendingWrite { time, reg, value });
 
 /// The playfield inputs of one color clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -136,6 +145,41 @@ pub struct Gtia {
     /// The priority table (see `priority`).
     priority: Box<[u16]>,
 }
+
+impl_state!(Gtia {
+    standard,
+    hposp,
+    hposm,
+    sizep,
+    sizem,
+    grafp,
+    grafm,
+    colpm,
+    colpf,
+    colbk,
+    prior,
+    vdelay,
+    gractl,
+    consol_out,
+    pending,
+    pending_len,
+    shift,
+    shift_state,
+    collisions,
+    hires,
+    mode_10_pixel,
+    missile_line,
+    trig_input,
+    trig_latch,
+    console,
+    clock,
+    line,
+    cycle,
+    back,
+    front,
+} skip {
+    priority
+});
 
 /// The write delay of a register in color clocks (HRM 6.10 Table 18, REQ-434).
 const fn write_delay(reg: u8) -> u64 {
