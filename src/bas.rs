@@ -278,6 +278,7 @@ mod tests {
             cartridge: None,
             disk: None,
             fast_sio: false,
+            tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,
         })

@@ -10,12 +10,14 @@ use core::fmt;
 
 use crate::state::{FNV_START, Reader, State, StateError, Writer, fnv1a};
 
+mod deck;
 mod disk;
 mod drive;
 mod sio;
 mod tape;
 mod xex;
 
+pub use deck::TapeDeck;
 pub use disk::{DiskImage, Geometry};
 pub use drive::{Accept, Completion, DiskDrive};
 pub use sio::{CommandFrame, SioBus, SioData, SioOutcome, SioRequest, sio_checksum};

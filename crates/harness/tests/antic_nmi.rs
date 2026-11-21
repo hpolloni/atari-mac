@@ -133,6 +133,7 @@ mod timing {
             cartridge: None,
             disk: None,
             fast_sio: false,
+            tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })

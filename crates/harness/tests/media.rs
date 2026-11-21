@@ -38,6 +38,7 @@ mod cartridges {
             cartridge,
             disk: None,
             fast_sio: false,
+            tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })
@@ -492,6 +493,7 @@ mod xex_loader {
             cartridge: None,
             disk: None,
             fast_sio: false,
+            tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })
@@ -799,6 +801,7 @@ mod disks {
             cartridge: None,
             disk: Some(disk),
             fast_sio,
+            tape: None,
             standard,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })
@@ -1085,36 +1088,189 @@ mod disks {
     }
 }
 
-/// Planned cassette system tests (`docs/design/media.md`, "Test method for the cassette
-/// deck").
+/// Cassette system tests (`docs/design/media.md`, "Test method for the cassette deck"): a
+/// synthetic OS ROM runs the test code, with a tape in `MachineConfig`.
 #[cfg(test)]
-mod planned_cassette {
-    use super::planned;
+mod cassette {
+    use std::iter;
+
+    use atari_core::media::Tape;
+    use atari_core::{Machine, MachineConfig, VideoStandard};
+    use atari_harness::system::{TEST_SAMPLE_RATE, test_os_rom};
+
+    /// `PACTL`.
+    const PACTL: u16 = 0xD302;
+    /// `SKSTAT`.
+    const SKSTAT: u16 = 0xD20F;
+
+    /// One CAS chunk: the 8-byte header (`kind`, the data length, `aux`) and `data`.
+    fn chunk(kind: [u8; 4], aux: u16, data: &[u8]) -> Vec<u8> {
+        let mut bytes = kind.to_vec();
+        bytes.extend(u16::try_from(data.len()).unwrap().to_le_bytes());
+        bytes.extend(aux.to_le_bytes());
+        bytes.extend(data);
+        bytes
+    }
+
+    /// Tape A of REQ-642: one `data` chunk, gap 100 ms, 600 baud, the bytes `55 A5`.
+    fn tape_a() -> Tape {
+        let mut file = chunk(*b"FUJI", 0, b"A");
+        file.extend(chunk(*b"data", 100, &[0x55, 0xA5]));
+        Tape::from_cas(&file).unwrap()
+    }
+
+    /// A machine with `code` (followed by a `JMP` to itself) in the OS ROM and tape A in
+    /// the deck, after power-on.
+    fn machine(code: &[u8]) -> Machine {
+        let mut program = code.to_vec();
+        let [lo, hi] = (0xC000 + u16::try_from(program.len()).unwrap()).to_le_bytes();
+        program.extend([0x4C, lo, hi]);
+        Machine::new(MachineConfig {
+            os_rom: test_os_rom(&program),
+            basic_rom: None,
+            cartridge: None,
+            disk: None,
+            fast_sio: false,
+            tape: Some(tape_a()),
+            standard: VideoStandard::Ntsc,
+            audio_sample_rate: TEST_SAMPLE_RATE,
+        })
+        .unwrap()
+    }
+
+    /// `LDA #value`, `STA PACTL`.
+    fn pactl(value: u8) -> Vec<u8> {
+        let [lo, hi] = PACTL.to_le_bytes();
+        vec![0xA9, value, 0x8D, lo, hi]
+    }
+
+    /// Runs cycles until the mode bits 5-0 of `PACTL` are `value`, at most `limit` cycles,
+    /// and gives the cycle count after the cycle of the write.
+    fn run_until_pactl(m: &mut Machine, value: u8, limit: u64) -> u64 {
+        for _ in 0..limit {
+            m.run_cycle();
+            if m.peek(PACTL) & 0x3F == value {
+                return m.cycle_count();
+            }
+        }
+        panic!("no write of ${value:02X} to PACTL in {limit} cycles");
+    }
+
+    /// A delay loop: `LDY #outer`, then `outer` times an inner loop of `LDX #inner`,
+    /// `DEX`, `BNE`, then `DEY`, `BNE`; then a loop of `LDX #tail`, `DEX`, `BNE`, and then
+    /// `nops` times `NOP`.
+    fn delay(outer: u8, inner: u8, tail: u8, nops: usize) -> Vec<u8> {
+        let mut code = vec![0xA0, outer, 0xA2, inner, 0xCA, 0xD0, 0xFD, 0x88, 0xD0, 0xF8];
+        code.extend([0xA2, tail, 0xCA, 0xD0, 0xFD]);
+        code.extend(iter::repeat_n(0xEA, nops));
+        code
+    }
 
     /// Verifies REQ-641: the test code writes `$34` to `PACTL` and, 100,000 cycles later,
     /// `$3C`; the tape position is then 100,000, within 2 cycles (criterion 4).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn req641_pactl_moves_tape() {
-        planned();
+        let mut code = pactl(0x34);
+        code.extend(delay(DELAY_OUTER, DELAY_INNER, DELAY_TAIL, DELAY_NOPS));
+        code.extend(pactl(0x3C));
+        let mut m = machine(&code);
+        assert_eq!(m.tape_position(), Some(0), "position 0 at power-on");
+        let motor_on = run_until_pactl(&mut m, 0x34, 1_000);
+        assert!(m.tape_motor_on(), "motor on after $34");
+        let motor_off = run_until_pactl(&mut m, 0x3C, 200_000);
+        assert!(!m.tape_motor_on(), "motor off after $3C");
+        assert_eq!(
+            motor_off - motor_on,
+            100_000,
+            "the writes are 100,000 cycles apart"
+        );
+        let position = m.tape_position().unwrap();
+        assert!(position.abs_diff(100_000) <= 2, "position {position}");
+        for _ in 0..10_000 {
+            m.run_cycle();
+        }
+        assert_eq!(m.tape_position(), Some(position), "the tape stays");
     }
 
     /// Verifies REQ-641: `Machine::press_reset` does not change the tape position;
     /// `Machine::power_on` sets it to 0, and the tape stays inserted (criterion 5).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn req641_reset_and_power_on() {
-        planned();
+        let mut m = machine(&pactl(0x34));
+        for _ in 0..50_000 {
+            m.run_cycle();
+        }
+        let position = m.tape_position().unwrap();
+        assert!(position > 40_000, "the tape moved: {position}");
+        m.press_reset();
+        assert_eq!(
+            m.tape_position(),
+            Some(position),
+            "RESET keeps the position"
+        );
+        // The reset code writes `$34` again: the tape moves on from the same position.
+        for _ in 0..1_000 {
+            m.run_cycle();
+        }
+        let after = m.tape_position().unwrap();
+        assert!(
+            after > position && after < position + 1_000,
+            "on from the same position: {after}"
+        );
+        // Save states keep the tape and the position.
+        let state = m.save_state();
+        let mut copy = machine(&pactl(0x34));
+        copy.load_state(&state).unwrap();
+        assert_eq!(copy.tape_position(), Some(after), "save state position");
+        assert_eq!(copy.tape_motor_on(), m.tape_motor_on(), "save state motor");
+        m.power_on();
+        assert_eq!(m.tape_position(), Some(0), "a cold reset rewinds");
+        assert!(
+            m.sio().tape_deck().tape().is_some(),
+            "the tape stays inserted"
+        );
+        assert!(!m.tape_motor_on(), "the motor is off after power-on");
+        let ejected = m.eject_tape();
+        assert!(ejected.is_some(), "eject gives the tape");
+        assert_eq!(m.tape_position(), None, "no tape");
+        m.insert_tape(tape_a());
+        assert_eq!(m.tape_position(), Some(0), "insert at position 0");
     }
 
     /// Verifies REQ-642: NTSC, tape A, the test code writes `$34` to `PACTL` and reads
     /// `SKSTAT` on each cycle: bit 4 is 1 in the gap, and its first 0 is 178,977 cycles after
     /// the motor starts, within 4 cycles (criterion 7).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn req642_skstat_sees_tape() {
-        planned();
+        let mut m = machine(&pactl(0x34));
+        let motor_on = run_until_pactl(&mut m, 0x34, 1_000);
+        let first_zero = loop {
+            m.run_cycle();
+            if m.peek(SKSTAT) & 0x10 == 0 {
+                break m.cycle_count();
+            }
+            assert!(m.cycle_count() < motor_on + 200_000, "SKSTAT bit 4 stays 1");
+        };
+        let after = first_zero - motor_on;
+        assert!(after.abs_diff(178_977) <= 4, "first 0 after {after} cycles");
     }
+
+    /// The delay loop of `req641_pactl_moves_tape`: with the writes, 100,000 machine cycles
+    /// from the `$34` write to the `$3C` write, with the refresh cycles of ANTIC.
+    const DELAY_OUTER: u8 = 71;
+    /// See [`DELAY_OUTER`].
+    const DELAY_INNER: u8 = 255;
+    /// See [`DELAY_OUTER`].
+    const DELAY_TAIL: u8 = 227;
+    /// See [`DELAY_OUTER`].
+    const DELAY_NOPS: usize = 5;
+}
+
+/// Planned cassette system tests (`docs/design/media.md`, "Test method for the cassette
+/// deck").
+#[cfg(test)]
+mod planned_cassette {
+    use super::planned;
 
     /// Verifies REQ-643: NTSC, `AltirraOS` and BASIC, the boot test tape, START until frame
     /// 60 and RETURN in frames 180-186: `$0600` holds `$A5` within 2,400 frames; the motor

@@ -79,6 +79,7 @@ fn headless_writes_screenshot() {
         cartridge: None,
         disk: None,
         fast_sio: false,
+        tape: None,
         standard: VideoStandard::Ntsc,
         audio_sample_rate: 48_000,
     })
@@ -395,6 +396,7 @@ fn frame_after_240(standard: VideoStandard) -> Vec<u8> {
         cartridge: None,
         disk: None,
         fast_sio: false,
+        tape: None,
         standard,
         audio_sample_rate: 48_000,
     })

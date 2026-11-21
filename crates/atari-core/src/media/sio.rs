@@ -9,12 +9,14 @@
 //! The machine calls [`SioBus::data_in_level`] before each POKEY tick, gives each byte that
 //! POKEY sent to [`SioBus::host_byte`] and each change of PIA CB2 to
 //! [`SioBus::set_command_line`] (OI-038, `docs/design/system.md`, "Timing"). Other devices
-//! (the tests now, the cassette deck of SLICE-08 later) put their bytes on SIO DATA IN with
-//! [`SioBus::send_device_byte`]. The line is the wired AND of all device outputs.
+//! (the tests) put their bytes on SIO DATA IN with [`SioBus::send_device_byte`]. The bus
+//! owns the cassette deck ([`TapeDeck`]), whose motor follows PIA CA2
+//! ([`SioBus::set_motor_line`]). The line is the wired AND of all device outputs.
 
 use core::mem;
 use std::collections::VecDeque;
 
+use super::deck::TapeDeck;
 use super::drive::{Accept, Completion, DiskDrive};
 use crate::pokey::SerialByte;
 use crate::state::{Reader, State, StateError, Writer, impl_state};
@@ -327,6 +329,8 @@ pub struct SioBus {
     host: Vec<u8>,
     /// The device bytes of `send_device_byte`, in start order.
     external: VecDeque<DeviceByte>,
+    /// The cassette deck (REQ-641, REQ-642).
+    deck: TapeDeck,
 }
 
 // The timing comes from the video standard of the configuration.
@@ -341,6 +345,7 @@ impl_state!(SioBus {
     out,
     host,
     external,
+    deck,
 } skip {
     timing
 });
@@ -361,7 +366,24 @@ impl SioBus {
             out: VecDeque::new(),
             host: Vec::new(),
             external: VecDeque::new(),
+            deck: TapeDeck::new(standard),
         }
+    }
+
+    /// The cassette deck.
+    #[must_use]
+    pub const fn tape_deck(&self) -> &TapeDeck {
+        &self.deck
+    }
+
+    /// The cassette deck, for insert and eject.
+    pub const fn tape_deck_mut(&mut self) -> &mut TapeDeck {
+        &mut self.deck
+    }
+
+    /// The PIA CA2 output changed at the end of cycle `now`. `low` = motor on (REQ-641).
+    pub const fn set_motor_line(&mut self, low: bool, now: u64) {
+        self.deck.set_motor_line(low, now);
     }
 
     /// Drive D1:.
@@ -540,16 +562,15 @@ impl SioBus {
     /// The level of the SIO DATA IN line in machine cycle `now` (`true` = mark). The bus
     /// makes the start bit, the 8 data bits (LSB first) and the stop bit of each scheduled
     /// device byte. The line is high when no byte is in progress.
-    /// The bytes of `send_device_byte` are on the same line: a space of any device gives a
-    /// space (wired AND).
+    /// The bytes of `send_device_byte` and the cassette deck are on the same line: a space
+    /// of any device gives a space (wired AND, REQ-642 criterion 6).
     #[must_use]
     pub fn data_in_level(&self, now: u64) -> bool {
-        queue_level(&self.out, now) && queue_level(&self.external, now)
+        queue_level(&self.out, now) && queue_level(&self.external, now) && self.deck.level(now)
     }
 
-    /// Schedules a byte on SIO DATA IN for a device that is not D1: (the tests, and the
-    /// cassette deck of SLICE-08): its start bit begins in cycle `start`, and each bit has
-    /// `bit_cycles` cycles. The start must not be before the end of the last byte of
+    /// Schedules a byte on SIO DATA IN for a device that is not D1: (the tests): its start
+    /// bit begins in cycle `start`, and each bit has `bit_cycles` cycles. The start must not be before the end of the last byte of
     /// `send_device_byte`. Each command line change removes the bytes that ended. The drive
     /// protocol does not change these bytes.
     ///
@@ -654,7 +675,8 @@ impl SioBus {
         }
     }
 
-    /// Bus state to idle (cold reset). The inserted image does not change.
+    /// Bus state to idle (cold reset). The inserted image and the cassette deck do not
+    /// change.
     pub fn reset(&mut self) {
         self.command_low = false;
         self.phase = BusPhase::Idle;
