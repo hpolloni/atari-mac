@@ -15,7 +15,7 @@ use atari_mac::atari_core::screen::{has_row, screen_text};
 use atari_mac::atari_core::{Machine, MachineConfig, VideoStandard, palette};
 use atari_mac::bas::{self, KEY_DOWN_FRAMES, KEY_UP_FRAMES, Phase, Typist};
 use atari_mac::cli::{self, Options};
-use atari_mac::frontend::{Flow, Frontend};
+use atari_mac::frontend::{Flow, Frontend, TurboCause};
 use atari_mac::start;
 use atari_mac::trace::{InstructionLine, SequenceLine, TraceOutput, TraceWriter};
 // The binary uses this dependency; this test does not.
@@ -921,6 +921,107 @@ fn no_basic_help() {
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("--no-basic"),
         "--help lists --no-basic"
+    );
+}
+
+/// The options of the command line `--disk <file>` with `extra`, with the free ROMs and the
+/// boot test disk of REQ-636 criterion 1 ([`boot_atr`]) in a file of the test `test`.
+fn parse_disk(test: &str, extra: &[&str]) -> Options {
+    let disk = temp_dir(test).join("boot.atr");
+    fs::write(&disk, boot_atr()).expect("write the ATR file");
+    let mut args = vec![
+        "--os",
+        OS_ROM,
+        "--basic",
+        BASIC_ROM,
+        "--disk",
+        disk.to_str().expect("UTF-8 path"),
+    ];
+    args.extend(extra);
+    match cli::parse(args.into_iter().map(OsString::from)) {
+        Ok(cli::Command::Run(options)) => *options,
+        other => panic!("the command line: {other:?}"),
+    }
+}
+
+/// Starts the frontend with `options` and runs it until `$0600` holds `$A5`, at most 300
+/// frames (REQ-636 criterion 1). Gives the frontend, the frames of the boot and whether a
+/// frame ran with the turbo of the disk drive (REQ-095).
+fn disk_boot_frames(options: &Options) -> (Frontend, Option<u64>, bool) {
+    let mut frontend = start(options).expect("start");
+    let mut disk_turbo = false;
+    for frame in 0..300 {
+        frontend.run_frames(1).expect("run");
+        disk_turbo |= frontend.turbo_cause() == Some(TurboCause::DiskDrive);
+        if frontend.machine().peek_ram(0x0600) == 0xA5 {
+            return (frontend, Some(frame + 1), disk_turbo);
+        }
+    }
+    (frontend, None, disk_turbo)
+}
+
+/// Verifies REQ-094: without `--no-fast-disk`, the machine of the frontend has the SIOV
+/// shortcut on with `--disk`, with `--xex` and with no media; the boot test disk boots with
+/// it, with no transfer on the SIO bus (criterion 1).
+#[test]
+fn fast_disk_default_on() {
+    let options = parse_disk("fast_disk_default_on", &[]);
+    assert!(options.fast_disk, "the option is on");
+    let (frontend, done, disk_turbo) = disk_boot_frames(&options);
+    assert!(frontend.machine().fast_sio(), "1: on with --disk");
+    assert!(done.is_some(), "1: the disk boots");
+    assert!(!disk_turbo, "1: SIOV has no transfer on the bus");
+    let xex = temp_dir("fast_disk_default_on_xex").join("game.xex");
+    fs::write(&xex, VALID_XEX).expect("write the executable");
+    let xex_options = Options {
+        xex: Some(xex),
+        disk: None,
+        ..options
+    };
+    let frontend = start(&xex_options).expect("start");
+    assert!(frontend.machine().fast_sio(), "1: on with --xex");
+    let frontend = start(&rom_options()).expect("start");
+    assert!(frontend.machine().fast_sio(), "1: on with no media");
+}
+
+/// Verifies REQ-094: with `--no-fast-disk`, the machine has the SIOV shortcut off, and the
+/// boot test disk boots through the POKEY serial port, as for the real drive (within 300 frames,
+/// with transfers on the SIO bus that start the disk turbo) (criterion 2).
+#[test]
+fn no_fast_disk_option() {
+    let options = parse_disk("no_fast_disk_option", &["--no-fast-disk"]);
+    assert!(!options.fast_disk, "the option is off");
+    let (frontend, done, disk_turbo) = disk_boot_frames(&options);
+    assert!(!frontend.machine().fast_sio(), "2: the shortcut is off");
+    assert!(done.is_some(), "2: the disk boots within 300 frames");
+    assert!(disk_turbo, "2: the disk loads on the SIO bus");
+}
+
+/// Verifies REQ-094: the boot test disk ([`boot_atr`]), with `--disk` and no other
+/// option, boots in fewer frames than with `--no-fast-disk` (criterion 3).
+#[test]
+fn fast_disk_boots_faster() {
+    let (_, fast, _) = disk_boot_frames(&parse_disk("fast_disk_boots_faster", &[]));
+    let (_, slow, _) = disk_boot_frames(&parse_disk(
+        "fast_disk_boots_faster_slow",
+        &["--no-fast-disk"],
+    ));
+    let (fast, slow) = (fast.expect("boot"), slow.expect("boot"));
+    println!("boot frames: {fast} with the shortcut, {slow} with --no-fast-disk");
+    assert!(
+        fast < slow,
+        "3: with the shortcut {fast} frames, without {slow} frames"
+    );
+}
+
+/// Verifies REQ-094: `--help` lists `--no-fast-disk` (criterion 4).
+#[test]
+fn no_fast_disk_help() {
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--no-fast-disk"),
+        "--help lists --no-fast-disk"
     );
 }
 

@@ -85,6 +85,9 @@ impl Pokey {
     pub fn set_serial_in(&mut self, high: bool);
     pub fn serial_out(&self) -> bool;
     pub fn serial_clock_out(&self) -> bool;
+    /// The data byte of the frame in the output shift register while it sends (`IRQST` bit 3
+    /// = 1), else `None`. Read-only, for `Machine::disk_transfer` (media.md, REQ-095).
+    pub fn serial_out_frame(&self) -> Option<u8>;
     pub fn set_serial_clock_in(&mut self, high: bool);
     /// The level that POKEY drives on the bidirectional SIO CLOCK IN line, or `None` when
     /// the line is an input (`SKCTL` bits 6-4 other than `010` and `110`, REQ-527).

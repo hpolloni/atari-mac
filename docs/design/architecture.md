@@ -410,6 +410,44 @@ shown frame, and a new `Pacer` from `now` after turbo. In turbo the frame loop c
 Turbo changes only the host pacing, so the emulated machine gives the same frames and RAM
 (criterion 4).
 
+### Disk shortcut option (REQ-094)
+
+`Options::fast_disk` is `true` by default, and `--no-fast-disk` sets it to `false`.
+`load_machine` gives it to `MachineConfig::fast_sio`, so the machine of the frontend has the
+SIOV shortcut of REQ-623 (`media.md`, "SIOV shortcut") unless the command line has
+`--no-fast-disk`, also with `--xex` and with no media. The help line is
+`--no-fast-disk       Read the disk at the real speed (no SIOV shortcut)`, and the README
+options table gets the row
+`` | `--no-fast-disk` | Read the disk at the real speed, with no SIOV shortcut (REQ-623) | ``.
+With the option, a disk loads through the POKEY serial port as in REQ-636, with the turbo
+of REQ-095.
+
+### Turbo while the disk drive transfers data (REQ-095)
+
+This is one more cause of the turbo of the tape (REQ-082), with the same `Pacing`, frame
+display and audio rules. Before each frame, `Frontend::run_frame` takes
+`Machine::disk_transfer()` (`media.md`, "Disk transfer"). The frame runs in turbo when D1:
+has a disk (`Machine::disk().is_some()`) and
+
+- `active` is `true` (criterion 1, a frame that starts while D1: takes part in a transfer),
+  or
+- `start - last_end <= DISK_TURBO_FRAMES * cycles_per_frame`, with `start` =
+  `cycle_count() + 1`, the first cycle of the frame (criterion 1, a frame that starts within
+  30 frames after the end of the last transfer).
+
+```rust
+/// The frames after the end of the last disk transfer that still run in turbo (REQ-095).
+pub const DISK_TURBO_FRAMES: u64 = 30;
+```
+
+Else the disk gives no turbo (criteria 2 and 3). Without a disk, the bus has no effect. With
+the SIOV shortcut on, a request through SIOV has no transfer on the bus, so it gives no
+turbo. The field `tape_turbo` of `Frontend` becomes `media_turbo`: the last frame started
+with the tape motor or the disk turbo. `Frontend::turbo()` is `typist.is_some() ||
+media_turbo`, so the window loop, `after_step`, the audio stop and the statistics (REQ-083)
+need no change (criterion 4). Turbo changes only the host pacing (criterion 5). The turbo
+cause gets the variant `TurboCause::DiskDrive` ("Frontend records", criterion 6).
+
 ## Logging and statistics
 
 This section is the design of SLICE-09: the machine event log in the core (REQ-084, WP-1),
@@ -696,7 +734,7 @@ the start of the frame that comes next (criterion 2).
 
 | Event | Function in `src/frontend.rs` | Message |
 | --- | --- | --- |
-| Turbo starts | `Frontend::run_frame`, before the frame, when the turbo cause changes | `turbo on (BASIC typing)` or `turbo on (tape motor)` |
+| Turbo starts | `Frontend::run_frame`, before the frame, when the turbo cause changes | `turbo on (BASIC typing)`, `turbo on (tape motor)` or `turbo on (disk drive)` (REQ-095) |
 | Turbo stops | `Frontend::run_frame`, as above | `turbo off` |
 | Pause | `Frontend::apply`, at the F9 edge, when the emulation stops | `paused` |
 | Continue | `Frontend::apply`, at the F9 edge, when the emulation continues | `continued` |
@@ -711,6 +749,8 @@ pub enum TurboCause {
     Typing,
     /// A tape is inserted and the motor line is low (REQ-082).
     TapeMotor,
+    /// D1: has a disk and takes part in a transfer, or did within 30 frames (REQ-095).
+    DiskDrive,
 }
 
 impl Frontend {
@@ -720,7 +760,8 @@ impl Frontend {
 ```
 
 Before each frame, `run_frame` calculates the cause: `Typing` while the typist is active,
-else `TapeMotor` when `Machine::tape_motor_on()`, else `None`. When the cause is not the
+else `TapeMotor` when `Machine::tape_motor_on()`, else `DiskDrive` with the disk turbo of
+REQ-095, else `None`. When the cause is not the
 cause of the last frame, it sends the record. So a change from `Typing` to `TapeMotor` sends
 `turbo on (tape motor)` and no `turbo off`. A pause runs no frame, so the cause does not
 change. `Frontend::turbo` does not change.
@@ -856,6 +897,8 @@ file error.
 | REQ-092 | `tests/cli.rs` `auto_return_presses_return` (1, NTSC and PAL), `auto_return_headless_boot` (2, NTSC and PAL), `auto_return_needs_cas` (3), `cas_without_auto_return` (4), `auto_return_help` (5) |
 | REQ-093 | `tests/cli.rs` `no_basic_holds_option` (1), `no_basic_ram_at_a000` (2), `no_basic_with_cas` (3), `no_basic_with_disk` (4), `no_basic_with_bas_and_xex` (5), `no_basic_help` (6) |
 | REQ-091 | `tests/cli.rs` `fast_tape_default_on` (1), `no_fast_tape_option` (2), `no_fast_tape_help` (3); `src/cli.rs` unit test `no_fast_tape_parses` |
+| REQ-094 | `tests/cli.rs` `fast_disk_default_on` (1, with `--disk`, `--xex` and no media), `no_fast_disk_option` (2: the boot test disk of REQ-636 boots on the serial path, with the disk turbo), `fast_disk_boots_faster` (3), `no_fast_disk_help` (4); `src/cli.rs` unit test `no_fast_disk_parses` |
+| REQ-095 | `src/frontend.rs` unit tests `disk_turbo_follows_transfers` (1, 2, fake clock, the boot test disk of REQ-636 with `AltirraOS` and the shortcut off), `empty_drive_keeps_pacing` (3), `disk_turbo_presents_frames` (4, fake clock and device), `disk_turbo_keeps_machine_state` (5); `tests/frontend_log.rs` `disk_turbo_records` (6); the core query of `media.md`, "Disk transfer": `crates/atari-core/src/media/tests/sio.rs` `req095_transfer_span` (1: a read, a write and a NAK), `req095_transfer_edges` (1: a bad frame, a frame for another device, a cut reply, `transact`, a removed drive and `reset`), each with a host that drives `SioBus`, `crates/harness/tests/media.rs` `req095_transfer_on_serial_boot` (1: with `AltirraOS` and the shortcut off, `Machine::disk_transfer` is active from the start bit of the first command byte, `IRQST` bit 3, to the end of the last reply byte, cycle by cycle) |
 | REQ-082 | `src/frontend.rs` unit tests `tape_turbo_follows_motor_line` (1, fake clock), `motor_line_without_tape_keeps_pacing` (2), `tape_turbo_presents_frames` (3), `tape_turbo_keeps_machine_state` (4), `tape_turbo_stops_audio` (5, fake device) |
 | REQ-083 | `src/stats.rs` unit tests `stats_line_each_second` (1, fake clock), `stats_frame_rate_and_speed` (2, 3), `stats_shown_and_underruns` (4, 7), `stats_emulation_time` (5), `stats_turbo_and_motor` (6); `tests/cli.rs` `stats_headless_lines` (1, 4, 7), `no_stats_without_option` (8), `stats_help_lists_option` (9) |
 | REQ-084 | `crates/harness/tests/event_log.rs` `tape_records` (1, 2, 3), `sio_records` (1, 2, 3, the serial path and the SIOV shortcut), `reset_records` (1, 2, 3), `media_records` (1, 2, 3), `log_keeps_machine_state` (4), `no_logger_calls_when_off` (5) |

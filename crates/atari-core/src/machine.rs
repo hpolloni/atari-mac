@@ -25,7 +25,7 @@ use crate::cpu::{Bus, Cpu};
 use crate::debug::{BusAccess, CpuHook, Position};
 use crate::events::{self, record};
 use crate::gtia::{ConsoleKeys, Gtia};
-use crate::media::{Cartridge, DiskImage, SioBus, Tape, TapeBlock, TapeMark, Xex};
+use crate::media::{Cartridge, DiskImage, DiskTransfer, SioBus, Tape, TapeBlock, TapeMark, Xex};
 use crate::pia::Pia;
 use crate::pokey::Pokey;
 use crate::state::StateError;
@@ -889,6 +889,15 @@ impl Machine {
     pub const fn tape_motor_on(&self) -> bool {
         let deck = self.sio.tape_deck();
         deck.tape().is_some() && deck.motor_on()
+    }
+
+    /// The part of D1: in the transfers on the SIO bus in the last cycle that ran
+    /// (`cycle_count`), for the disk turbo of REQ-095 (`docs/design/media.md`, "Disk
+    /// transfer"). Read-only.
+    #[must_use]
+    pub fn disk_transfer(&self) -> DiskTransfer {
+        self.sio
+            .disk_transfer(self.cycles, self.pokey.serial_out_frame())
     }
 
     /// Turns the SIOV shortcut on or off (REQ-623).

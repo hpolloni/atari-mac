@@ -35,6 +35,7 @@ Options:
   --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes, or a CAR file
   --xex <file>         Executable (XEX): boot it from D1: with BASIC disabled
   --disk <file>        ATR disk image in drive D1: (the OS boots it)
+  --no-fast-disk       Read the disk at the real speed (no SIOV shortcut)
   --cas <file>         CAS tape image: boot it (holds START at power-on)
   --no-fast-tape       Read the tape records at the real speed (no tape shortcut)
   --auto-return        With --cas: press RETURN after the prompt tone
@@ -81,6 +82,8 @@ pub struct Options {
     pub cas: Option<PathBuf>,
     /// The tape shortcut (REQ-644) is on: `true` unless `--no-fast-tape` (REQ-091).
     pub fast_tape: bool,
+    /// The SIOV shortcut (REQ-623) is on: `true` unless `--no-fast-disk` (REQ-094).
+    pub fast_disk: bool,
     /// With `--cas`: the frontend presses RETURN after the prompt tone (`--auto-return`,
     /// REQ-092).
     pub auto_return: bool,
@@ -124,6 +127,7 @@ impl Default for Options {
             disk: None,
             cas: None,
             fast_tape: true,
+            fast_disk: true,
             auto_return: false,
             no_basic: false,
             headless: false,
@@ -236,6 +240,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--disk" => options.disk = Some(value(&mut args, "--disk")?.into()),
             "--cas" => options.cas = Some(value(&mut args, "--cas")?.into()),
             "--no-fast-tape" => options.fast_tape = false,
+            "--no-fast-disk" => options.fast_disk = false,
             "--auto-return" => options.auto_return = true,
             "--no-basic" => options.no_basic = true,
             "--headless" => options.headless = true,
@@ -437,6 +442,7 @@ mod tests {
                 disk: Some("d.atr".into()),
                 cas: None,
                 fast_tape: true,
+                fast_disk: true,
                 auto_return: false,
                 no_basic: false,
                 headless: true,
@@ -578,6 +584,19 @@ mod tests {
         assert!(
             !parse_ok(&["--cas", "a.cas", "--no-fast-tape"]).fast_tape,
             "--no-fast-tape"
+        );
+    }
+
+    /// Verifies REQ-094: the SIOV shortcut is on without `--no-fast-disk`, also with `--xex`
+    /// and with no media, and `--no-fast-disk` turns it off (criteria 1, 2).
+    #[test]
+    fn no_fast_disk_parses() {
+        assert!(parse_ok(&["--disk", "a.atr"]).fast_disk, "on with --disk");
+        assert!(parse_ok(&["--xex", "a.xex"]).fast_disk, "on with --xex");
+        assert!(parse_ok(&[]).fast_disk, "on with no media");
+        assert!(
+            !parse_ok(&["--disk", "a.atr", "--no-fast-disk"]).fast_disk,
+            "--no-fast-disk"
         );
     }
 }

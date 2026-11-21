@@ -244,8 +244,23 @@ impl SioBus {
     pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)>;
     /// A complete transaction at once, for the SIOV shortcut (REQ-623).
     pub fn transact(&mut self, request: &SioRequest<'_>) -> SioOutcome;
+    /// The part of D1: in the transfers on the bus in machine cycle `now`, for the disk
+    /// turbo of the frontend (REQ-095, "Disk transfer"). `sending` is the data byte of the
+    /// frame that the POKEY shift register sends in `now` (`Pokey::serial_out_frame`).
+    /// Read-only.
+    pub fn disk_transfer(&self, now: u64, sending: Option<u8>) -> DiskTransfer;
     /// Bus state to idle (cold reset). The inserted image does not change.
     pub fn reset(&mut self);
+}
+
+/// The part of D1: in the transfers on the SIO bus (REQ-095).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskTransfer {
+    /// D1: takes part in a transfer in the cycle of the query.
+    pub active: bool,
+    /// The first cycle after the end of the last transfer that ended at or before the
+    /// cycle of the query, or `None` (no transfer since the cold reset).
+    pub last_end: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -528,6 +543,9 @@ pub fn eject_tape(&mut self) -> Option<Tape>;
 pub fn tape_position(&self) -> Option<u64>;
 /// A tape is inserted and the motor line is low (REQ-641), for the turbo of REQ-082.
 pub fn tape_motor_on(&self) -> bool;
+/// `SioBus::disk_transfer` for the last cycle that ran (`cycle_count()`), with the byte
+/// that POKEY sends in it, for the disk turbo of REQ-095. Read-only.
+pub fn disk_transfer(&self) -> DiskTransfer;
 /// Inserts `tape`, does a cold reset, and holds START from the cold reset until frame 60
 /// (REQ-081 criterion 3, OI-050). It presses no other key. The frame count starts at 0 at
 /// the cold reset.
@@ -597,6 +615,7 @@ REQ-633 gives. A cold reset does not change the connection or the image.
 | `out` | `VecDeque<DeviceByte>` | Empty | Scheduled device bytes. `DeviceByte { value, start, bit_cycles }` is private to `SioBus`; its last cycle is `start + 10 * bit_cycles`. |
 | `host` | `Vec<u8>` | Empty | The values of the bytes from the computer since the last falling edge of the command line, at most 300 (`host_bytes`) |
 | `external` | `VecDeque<DeviceByte>` | Empty | The bytes of `send_device_byte`, in start order |
+| `transfer_end` | `Option<u64>` | `None` | The end of the last D1: transfer, or of the reply that is scheduled: the first cycle after its last bit ("Disk transfer", REQ-095). It does not change the emulated machine. |
 
 ```rust
 enum BusPhase {
@@ -806,6 +825,38 @@ NAK (`Accept::Nak`): NAK at `t + ACK_DELAY`, then no more bytes.
 
 Each scheduled byte has `bit_cycles = BIT_PERIOD`. The phase becomes `Idle` after the last
 byte ends.
+
+### Disk transfer (REQ-095)
+
+`SioBus::disk_transfer(now, sending)` tells the frontend when D1: takes part in a transfer:
+from the first bit of a command frame for D1: until the last bit of the reply of the drive
+(REQ-095 criterion 1). It reads the bus state only.
+
+`active` is `true` when D1: is on the bus (`drive_connected`) and one of these is true:
+
+1. The phase is `Command`, and the first byte of `frame` is `$31`.
+2. The phase is `Command`, `frame` has no byte yet, and `sending` is `Some($31)`: POKEY
+   sends the first byte of the frame, from its start bit on.
+3. The phase is `DataIn`: the drive waits for the data frame of the computer.
+4. The phase is `Reply`, and `now < transfer_end`: a reply byte is still on the line.
+
+`transfer_end` changes at these events:
+
+| Event | Change |
+| --- | --- |
+| `schedule` of a reply byte | `transfer_end` = the larger of `transfer_end` and the first cycle after the stop bit of the byte |
+| Command line goes low at `now` | If `transfer_end > now` (a reply is cut), or the phase is `DataIn`, or the phase is `Command` with `$31` as the first byte: `transfer_end = now` |
+| Command line goes high at `now`, from `Command` with `$31` as the first byte, and no reply is scheduled (a bad frame) | `transfer_end = now` |
+| `reset` (cold reset) | `None`: the cycle count starts again at 0 |
+
+`last_end` is `transfer_end` when it is at most `now`, else `None` (the transfer still runs).
+`transact` (the SIOV shortcut) does not change `transfer_end`: a request through SIOV has no
+transfer on the bus (REQ-095 Notes).
+
+`Machine::disk_transfer` calls it with `now = cycle_count()`, the last cycle that ran, and
+`sending = Pokey::serial_out_frame()`: the data byte of the frame in the output shift
+register while it sends (`IRQST` bit 3 = 1), else `None`. POKEY loads the shift register in
+the cycle of the start bit, so case 2 is `true` from the start bit of the first byte.
 
 ### Drive commands (REQ-627 to REQ-635)
 
