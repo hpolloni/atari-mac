@@ -16,8 +16,8 @@ implements, the work packages, and the conditions that tell when it is done.
 | [SLICE-02](SLICE-02.md) | Graphics modes, fine scrolling and player/missile graphics, with golden frame tests | Done |
 | [SLICE-03](SLICE-03.md) | Sound: POKEY audio and the console speaker, at real-time speed | Done |
 | [SLICE-04](SLICE-04.md) | Cartridges, executable files, joysticks and paddles | Done |
-| [SLICE-05](SLICE-05.md) | Disk drive D1: with ATR images (needs SLICE-04) | Planned |
-| [SLICE-06](SLICE-06.md) | Exact interrupt and PIA timing, power-on state, save states and product qualities | Planned |
+| [SLICE-05](SLICE-05.md) | Disk drive D1: with ATR images (needs SLICE-04) | In progress |
+| [SLICE-06](SLICE-06.md) | Exact interrupt and PIA timing, power-on state, save states and product qualities | In progress |
 | [SLICE-07](SLICE-07.md) | Run a BASIC program from a text file with `--bas` | Done |
 | [SLICE-08](SLICE-08.md) | Cassette tape: boot a CAS tape image with `--cas` (needs SLICE-05) | In progress |
 | [SLICE-09](SLICE-09.md) | Logging and speed statistics: `--stats` and `--log` | In progress |
