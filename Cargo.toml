@@ -25,6 +25,8 @@ publish.workspace = true
 
 [dependencies]
 atari-core.workspace = true
+# Audio output on the default host device (docs/design/architecture.md, "Audio output").
+cpal = { version = "0.18.2", default-features = false }
 # Window and keyboard (docs/design/architecture.md, "Frontend"). The Linux backends are not
 # needed: `x11` is on only because the build script of minifb 0.29.0 does not detect a
 # `-darwin` target and stops without `x11` or `wayland`. On macOS, `x11` compiles no code.
