@@ -321,10 +321,11 @@ fn cas_chunk(kind: [u8; 4], aux: u16, data: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// One tape record: `55 55 FC`, the 128 bytes of `data` (`$00` after its end) and the
-/// checksum of the 131 bytes before it (REQ-616: the sum with the carry added back).
-fn cas_record(data: &[u8]) -> Vec<u8> {
-    let mut bytes = vec![0x55, 0x55, 0xFC];
+/// One tape record: `55 55`, the control byte `control` (`$FC` data, `$FE` end of file),
+/// the 128 bytes of `data` (`$00` after its end) and the checksum of the 131 bytes before
+/// it (REQ-616: the sum with the carry added back).
+fn cas_record(control: u8, data: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0x55, 0x55, control];
     bytes.extend(data);
     bytes.resize(131, 0);
     let sum = bytes.iter().fold(0_u8, |sum, &byte| {
@@ -335,21 +336,25 @@ fn cas_record(data: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// Writes the boot test tape of REQ-643 (a CAS file) in the directory of `test` and gives
-/// its path.
+/// Writes the boot test tape of REQ-643 (a CAS file: two boot records and the end-of-file
+/// record) in the directory of `test` and gives its path.
 fn boot_tape_file(test: &str) -> PathBuf {
     let mut file = cas_chunk(*b"FUJI", 0, b"");
     file.extend(cas_chunk(*b"baud", 600, &[]));
     file.extend(cas_chunk(
         *b"data",
         20_000,
-        &cas_record(&[0x00, 0x02, 0x00, 0x07, 0x86, 0x07, 0x4C, 0x80, 0x07]),
+        &cas_record(
+            0xFC,
+            &[0x00, 0x02, 0x00, 0x07, 0x86, 0x07, 0x4C, 0x80, 0x07],
+        ),
     ));
     file.extend(cas_chunk(
         *b"data",
         3_000,
-        &cas_record(&[0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x18, 0x60]),
+        &cas_record(0xFC, &[0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x18, 0x60]),
     ));
+    file.extend(cas_chunk(*b"data", 3_000, &cas_record(0xFE, &[])));
     let path = temp_dir(test).join("boot.cas");
     fs::write(&path, file).expect("write the CAS file");
     path
@@ -457,13 +462,7 @@ fn cas_key_presses() {
 /// Verifies REQ-081: with the boot test tape, the test presses RETURN in frames 180-186
 /// (NTSC) or 150-156 (PAL); then `$0600` holds `$A5` within 2,400 frames (NTSC) and 2,000
 /// frames (PAL) after the start (criterion 4).
-///
-/// Ignored: with `AltirraOS`, the boot of the tape of REQ-643 does not end. After the two
-/// records, the OS reads one more record (the EOF record, as TRN SRC-MONITP line 3927 "GET
-/// EOF RECORD, BUT DON'T USE IT"), and the tape has none. The lead changes the tape of the
-/// requirement.
 #[test]
-#[ignore = "planned: SLICE-08"]
 fn cas_boots_tape() {
     let tape = boot_tape_file("cas_boots_tape");
     for (standard, press, limit) in [
