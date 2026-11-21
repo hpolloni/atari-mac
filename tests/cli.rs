@@ -236,6 +236,55 @@ fn rejects_bad_cart_xex_and_disk() {
     planned();
 }
 
+/// Verifies REQ-081: `--headless --frames 1 --cas <file>` exits with status 0 for the boot
+/// test tape of REQ-643 (criterion 1).
+#[test]
+#[ignore = "planned: SLICE-08"]
+fn cas_loads_tape() {
+    planned();
+}
+
+/// Verifies REQ-081: a file of 100 bytes of `$00` gives exit code 2 and a message that names
+/// the file and `CasSignature`; a missing file gives exit code 2 and a message that names
+/// the file (criterion 2).
+#[test]
+#[ignore = "planned: SLICE-08"]
+fn cas_rejects_bad_files() {
+    planned();
+}
+
+/// Verifies REQ-081: with `--cas`, START and OPTION are held from the cold reset until frame
+/// 60, and RETURN is pressed in frames 180-186 (NTSC) or 150-156 (PAL); no other key is
+/// pressed (criterion 3).
+#[test]
+#[ignore = "planned: SLICE-08"]
+fn cas_key_presses() {
+    planned();
+}
+
+/// Verifies REQ-081: with the boot test tape, `$0600` holds `$A5` within 2,400 frames
+/// (NTSC) and 2,000 frames (PAL) after the start (criterion 4).
+#[test]
+#[ignore = "planned: SLICE-08"]
+fn cas_boots_tape() {
+    planned();
+}
+
+/// Verifies REQ-081: `--help` lists `--cas <file>` (criterion 5).
+#[test]
+#[ignore = "planned: SLICE-08"]
+fn cas_help_lists_option() {
+    planned();
+}
+
+/// Verifies REQ-081: `--cas` with `--bas` gives exit code 2 and a message that names both
+/// options (criterion 6).
+#[test]
+#[ignore = "planned: SLICE-08"]
+fn cas_with_bas_rejected() {
+    planned();
+}
+
 /// Runs `--headless --frames 240 --screenshot` with `flags` and returns the PNG pixels as
 /// `0x00RRGGBB` values.
 fn screenshot_240(test: &str, flags: &[&str]) -> Vec<u32> {

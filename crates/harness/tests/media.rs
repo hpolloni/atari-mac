@@ -365,3 +365,69 @@ mod planned_disks {
         planned();
     }
 }
+
+/// Planned cassette system tests (`docs/design/media.md`, "Test method for the cassette
+/// deck").
+#[cfg(test)]
+mod planned_cassette {
+    use super::planned;
+
+    /// Verifies REQ-641: the test code writes `$34` to `PACTL` and, 100,000 cycles later,
+    /// `$3C`; the tape position is then 100,000, within 2 cycles (criterion 4).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn req641_pactl_moves_tape() {
+        planned();
+    }
+
+    /// Verifies REQ-641: `Machine::press_reset` does not change the tape position;
+    /// `Machine::power_on` sets it to 0, and the tape stays inserted (criterion 5).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn req641_reset_and_power_on() {
+        planned();
+    }
+
+    /// Verifies REQ-642: NTSC, tape A, the test code writes `$34` to `PACTL` and reads
+    /// `SKSTAT` on each cycle: bit 4 is 1 in the gap, and its first 0 is 178,977 cycles after
+    /// the motor starts, within 4 cycles (criterion 7).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn req642_skstat_sees_tape() {
+        planned();
+    }
+
+    /// Verifies REQ-643: NTSC, `AltirraOS` and BASIC, the boot test tape, START until frame
+    /// 60 and RETURN in frames 180-186: `$0600` holds `$A5` within 2,400 frames; the motor
+    /// line is high at the end of each frame before frame 180 and low at the end of a frame
+    /// from 181 to 300 (criteria 1, 3).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn req643_boot_tape_ntsc() {
+        planned();
+    }
+
+    /// Verifies REQ-643: PAL, START until frame 60 and RETURN in frames 150-156: `$0600`
+    /// holds `$A5` within 2,000 frames (criterion 2).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn req643_boot_tape_pal() {
+        planned();
+    }
+
+    /// Verifies REQ-643: the boot test tape with one bit of the record 2 checksum changed:
+    /// after 2,400 frames (NTSC), `$0600` does not hold `$A5` (criterion 4).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn req643_bad_checksum_no_boot() {
+        planned();
+    }
+
+    /// Verifies REQ-643: the NTSC boot of criterion 1 also passes with the SIOV shortcut
+    /// on (criterion 5).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn req643_boot_tape_siov_shortcut() {
+        planned();
+    }
+}

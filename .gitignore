@@ -5,6 +5,7 @@
 /lcov.info
 .DS_Store
 /roms/*.rom
+/roms/*.cas
 /test-data
 /reference/pinned/
 /reference/text/

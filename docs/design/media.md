@@ -3,7 +3,8 @@
 ## Scope
 
 This document tells how the emulator satisfies the media requirements: cartridges, executable
-files (XEX), the SIO bus, the disk drive D1: and ATR disk images. It covers REQ-600 to REQ-638.
+files (XEX), the SIO bus, the disk drive D1:, ATR disk images, the cassette deck and CAS tape
+images. It covers REQ-600 to REQ-643.
 
 | Topic | Requirements |
 | --- | --- |
@@ -11,6 +12,7 @@ files (XEX), the SIO bus, the disk drive D1: and ATR disk images. It covers REQ-
 | Executable files | REQ-610 to REQ-614 |
 | SIO bus protocol | REQ-615 to REQ-623 |
 | Disk drive and ATR images | REQ-624 to REQ-638 |
+| Cassette deck and CAS images | REQ-639 to REQ-643 |
 
 The POKEY serial port (REQ-500 range), the PIA CB2 output and the memory map (REQ-200 range)
 are not in this document. This document gives the calls that those modules make to the media
@@ -56,6 +58,20 @@ pub enum MediaError {
     AtrTruncated { expected: usize, actual: usize },
     /// The ATR sector count is 0 or more than 65535.
     AtrSectorCount(usize),
+    /// A CAS file is shorter than one chunk header (8 bytes).
+    CasHeader,
+    /// The first chunk of a CAS file is not `FUJI`.
+    CasSignature,
+    /// The chunk at `offset` has an incomplete header, or its data goes past the end.
+    CasTruncated { offset: usize },
+    /// The chunk at `offset` has a type that the emulator does not support (OI-048).
+    CasChunkType { offset: usize, chunk_type: [u8; 4] },
+    /// The `baud` chunk at `offset` gives the baud rate 0.
+    CasBaud { offset: usize },
+    /// The `fsk ` chunk at `offset` has an odd data length.
+    CasFskLength { offset: usize, length: u16 },
+    /// The CAS file has no `data` chunk and no `fsk ` chunk.
+    CasEmpty,
 }
 ```
 
@@ -322,6 +338,74 @@ the machine:
 
 The fast path takes no emulated time. The POKEY registers do not change.
 
+The OS cassette requests never reach `transact`: the OS sends them to its own cassette code
+(OI-046), which drives POKEY and the motor line. The cassette deck below gets them through
+the real serial path only.
+
+### Cassette deck
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TapeBlock {
+    /// A `data` chunk: the gap in ms, the baud rate, the bytes.
+    Data { gap_ms: u16, baud: u16, bytes: Vec<u8> },
+    /// An `fsk ` chunk: the gap in ms, the signal lengths in 0.1 ms. The first signal is 0.
+    Signal { gap_ms: u16, lengths: Vec<u16> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tape { /* see State */ }
+
+impl Tape {
+    pub fn from_cas(file: &[u8]) -> Result<Self, MediaError>;
+    /// The text of the first `FUJI` chunk (UTF-8, lossy).
+    pub fn description(&self) -> &str;
+    pub fn blocks(&self) -> &[TapeBlock];
+}
+
+#[derive(Debug, Clone)]
+pub struct TapeDeck { /* see State */ }
+
+impl TapeDeck {
+    pub fn new(standard: VideoStandard) -> Self;
+    /// Inserts `tape` at position 0 from cycle `now`. The motor state does not change.
+    pub fn insert(&mut self, tape: Tape, now: u64);
+    pub fn eject(&mut self) -> Option<Tape>;
+    pub const fn tape(&self) -> Option<&Tape>;
+    /// The motor line changed at the end of cycle `now`. `low` = motor on.
+    pub fn set_motor_line(&mut self, low: bool, now: u64);
+    /// The deck output in cycle `now` (`true` = mark). `true` with no tape, with the motor
+    /// off and after the end of the tape.
+    pub fn level(&self, now: u64) -> bool;
+    /// The tape position in cycle `now`: the tape time in machine cycles (REQ-641).
+    pub fn position(&self, now: u64) -> u64;
+    /// The tape signal at tape time `p` (REQ-642), independent of the motor. For tests.
+    pub fn signal_at(&self, p: u64) -> bool;
+    /// Back to position 0 (cold reset, OI-052). The tape stays inserted.
+    pub fn rewind(&mut self, now: u64);
+}
+
+impl SioBus {
+    pub const fn tape_deck(&self) -> &TapeDeck;
+    pub const fn tape_deck_mut(&mut self) -> &mut TapeDeck;
+    /// The PIA CA2 output changed at the end of cycle `now`. `low` = motor on.
+    pub fn set_motor_line(&mut self, low: bool, now: u64);
+}
+```
+
+`SioBus` owns the `TapeDeck`, so that the machine contract stays one call: `data_in_level(now)`
+gives `drive_level(now) && deck.level(now)` (REQ-642 criterion 6). `drive_level` is the line
+level of the scheduled device bytes, as before.
+
+Call contract for the machine (added to the contract of "SIO bus and disk drive"):
+
+5. The machine calls `sio.set_motor_line(!pia.ca2(), c)` in the machine cycle `c` where the
+   PIA CA2 output changes (`system.md`, "Timing", step 6). In input mode CA2 is high, so the
+   motor is off.
+6. `Machine::power_on` calls `rewind` (REQ-641 criterion 5, OI-052). `Machine::press_reset`
+   does not call a deck function. `SioBus::reset` does not change the deck.
+7. The deck never reads the cycle counter by itself (REQ-014). All times come from `now`.
+
 ### Machine configuration
 
 `MachineConfig` gets these fields:
@@ -330,6 +414,7 @@ The fast path takes no emulated time. The POKEY registers do not change.
 pub cartridge: Option<Cartridge>,
 pub disk: Option<DiskImage>,
 pub fast_sio: bool,
+pub tape: Option<Tape>,
 ```
 
 `Machine` gets these functions:
@@ -340,6 +425,14 @@ pub fn eject_disk(&mut self) -> Option<DiskImage>;
 pub fn disk(&self) -> Option<&DiskImage>;
 /// Puts the boot image of `xex` in D1:, does a cold reset and holds OPTION (REQ-612).
 pub fn start_xex(&mut self, xex: &Xex);
+pub fn insert_tape(&mut self, tape: Tape);
+pub fn eject_tape(&mut self) -> Option<Tape>;
+/// The tape position (REQ-641), for tests and the frontend.
+pub fn tape_position(&self) -> Option<u64>;
+/// Inserts `tape`, does a cold reset, and makes the key presses of REQ-081 criterion 3
+/// (OI-050): START and OPTION until frame 60, RETURN in frames 180-186 (NTSC) or
+/// 150-156 (PAL). The frame count starts at 0 at the cold reset.
+pub fn start_tape(&mut self, tape: Tape);
 ```
 
 ## State
@@ -405,6 +498,29 @@ enum BusPhase {
     Reply,
 }
 ```
+
+`SioBus` also has the field `deck: TapeDeck` (power-on: the tape of the configuration, at
+position 0, motor off).
+
+### Tape
+
+| Field | Type | Contents |
+| --- | --- | --- |
+| `description` | `String` | The first `FUJI` chunk |
+| `blocks` | `Vec<TapeBlock>` | One block for each `data` and `fsk ` chunk, in file order. At least one. |
+
+### TapeDeck
+
+| Field | Type | Power-on value | Contents |
+| --- | --- | --- | --- |
+| `tape` | `Option<Tape>` | From the configuration | The inserted tape |
+| `clock_hz` | `f64` | `VideoStandard::cpu_clock_hz` | For the conversions of the Timing section |
+| `block_start` | `Vec<u64>` | From `tape` | The tape time where each block starts. One more entry: the end of the last block. Made at `insert`. |
+| `played` | `u64` | 0 | The tape time that the motor played before the current motor start |
+| `running_since` | `Option<u64>` | `None` | The first cycle in which the tape moves, while the motor is on |
+
+The position in cycle `now` is `played + (now - running_since)` while the motor is on, else
+`played`.
 
 All state types derive `Clone`, for save states (REQ-018).
 
@@ -598,6 +714,77 @@ A successful command other than Status clears `error_bits`. `data_frame_error` s
 
 The Format geometry: for `$22`, ED. For `$21`, `format_geometry` if it is DD, else SD.
 
+### CAS loading (REQ-639, REQ-640)
+
+`from_cas` checks, in this order:
+
+1. Length at least 8, else `CasHeader`.
+2. Bytes 0-3 are `FUJI`, else `CasSignature`.
+3. Loop over the chunks with an offset `p`, from 0, while `p < len`:
+   1. If `len - p < 8`, or `len - p - 8 < length` (bytes `p+4`, `p+5`), give `CasTruncated { offset: p }`.
+   2. The type (bytes `p` to `p+3`) is `FUJI`, `baud`, `data` or `fsk `, else `CasChunkType`.
+   3. `FUJI`: the first one sets `description`. The others have no effect.
+   4. `baud`: `aux` (bytes `p+6`, `p+7`) is the baud rate of the next `data` chunks. If it is 0, give
+      `CasBaud`. The data bytes, if any, are ignored.
+   5. `data`: add `TapeBlock::Data { gap_ms: aux, baud, bytes }`. `baud` starts at 600.
+   6. `fsk `: if `length` is odd, give `CasFskLength`. Else add `TapeBlock::Signal` with the
+      `length / 2` values (low byte first).
+   7. `p += 8 + length`.
+4. If there is no block, give `CasEmpty`.
+
+All numbers are little-endian (CAS-FMT). The tape does not check the record contents (`$55
+$55`, the control byte, the checksum).
+
+### Tape signal (REQ-642)
+
+`insert` makes `block_start`. For a block that starts at `S`:
+
+- `G = round(gap_ms * f / 1000)`.
+- Data block, `n` bytes at baud `b`: bit `k` (0 to `10n - 1`) starts at `S + G + round(k * f / b)`.
+  The block ends at `S + G + round(10n * f / b)`. Bit `k` of byte `i = k / 10` is: `k % 10 == 0`
+  start bit 0; `k % 10 == 9` stop bit 1; else data bit `k % 10 - 1` of byte `i`.
+- Signal block with lengths `L`: signal `j` (from 0) starts at
+  `S + G + round(sum(L[0..j]) * f / 10000)`, and its level is `j % 2 == 1` (the first signal is 0).
+
+`round` is `f64::round` (a half rounds away from zero; all values are positive, so it rounds
+up). `f` is `clock_hz`. The sums are exact in `f64` for all lengths of a CAS file.
+
+`signal_at(p)`: find the block with `block_start[i] <= p < block_start[i + 1]` (binary search).
+In the gap, `true`. In a data block, find `k` from `floor((p - S - G) * b / f)` and correct it
+by one step up or down until `start(k) <= p < start(k + 1)`. In a signal block, use a prefix
+sum table of the lengths and a binary search. After the last block, `true`.
+
+`level(now)` is `signal_at(position(now))` while the motor is on and a tape is inserted, else
+`true`.
+
+### Motor (REQ-641)
+
+| Event | Action |
+| --- | --- |
+| `set_motor_line(true, M)`, motor off | `running_since = Some(M + 1)` |
+| `set_motor_line(false, H)`, motor on | `played += H + 1 - running_since`, `running_since = None` |
+| `set_motor_line` with no change | No change |
+| `insert(tape, now)` | Keep `tape` and make `block_start`, then `rewind(now)` |
+| `eject()` | The deck has no tape. `level` gives `true`. |
+| `rewind(now)` | Position 0 from cycle `now`: `played = 0`, and `running_since = Some(now)` if the motor is on |
+
+The motor line low at the end of cycle `M` moves the tape in cycles `M + 1` to `H`, where the
+line goes high at the end of cycle `H`: `H - M` cycles of tape time (REQ-641 criterion 3).
+The deck has no start or stop time (a project decision, REQ-641 Notes).
+
+### Tape boot (REQ-643, REQ-081)
+
+`Machine::start_tape(tape)`:
+
+1. `insert_tape(tape)`, then `power_on` (the tape position is 0).
+2. `set_console_keys` with START and OPTION from frame 0 until frame 60. Then no console key.
+3. `key_down($0C)` (RETURN) in frame 180 and `key_up` in frame 186 (NTSC). PAL: frames 150
+   and 156.
+
+The machine counts the frames from the cold reset and does each step at the first cycle of
+the frame. The OS does the rest: the prompt tone, the motor start, the baud rate measurement
+with `SKSTAT` bit 4, and the record reads through `SERIN`.
+
 ### Seek and verify timing (REQ-638)
 
 `busy_us` for Read, Put and Write is `OP_BASE_US`, plus `40_000 + 20_000 * (moves - 1)` if the
@@ -630,6 +817,23 @@ Example: a Read of one SD sector at NTSC takes about 2.6 ms for the command fram
 delay, 0.5 ms ACK, 1 ms operation, and 129 * 549 µs = 70.8 ms for the Complete byte and the
 data. The total is about 76 ms, near the 68 ms data time of HRM Figure 18.
 
+Cassette values (REQ-642). The deck uses `VideoStandard::cpu_clock_hz` (1,789,772.5 Hz NTSC,
+1,773,447 Hz PAL). The conversions are not rounded per bit: each bit edge is rounded from the
+start of the block, so the bit lengths differ by at most one cycle and do not add up errors.
+
+| Value | Formula | NTSC cycles | PAL cycles |
+| --- | --- | --- | --- |
+| 600 baud, bit 1 starts | `round(f / 600)` | 2,983 | 2,956 |
+| 600 baud, one byte (10 bits) | `round(10 * f / 600)` | 29,830 | 29,557 |
+| 600 baud, record of 132 bytes | `round(1320 * f / 600)` | 3,937,500 | 3,901,583 |
+| Gap 100 ms | `round(100 * f / 1000)` | 178,977 | 177,345 |
+| Gap 3000 ms | `round(3000 * f / 1000)` | 5,369,318 | 5,320,341 |
+| Gap 20000 ms | `round(20000 * f / 1000)` | 35,795,450 | 35,468,940 |
+| Signal 1.0 ms (`fsk ` length 10) | `round(10 * f / 10000)` | 1,790 | 1,773 |
+
+The motor line acts in the cycle after the PIA change (REQ-641). The OS waits for the motor
+with its own timers (REQ-643 Notes), so the deck needs no start time.
+
 ## Test plan
 
 Unit tests are in `crates/atari-core/src/media.rs`, module `tests`. System tests are in
@@ -649,6 +853,9 @@ The test helpers make these images. The requirements give the same definitions.
 | CAR file | 16-byte header (`CART`, type, checksum, `00 00 00 00`) and the offset pattern data. | REQ-605, REQ-606 |
 | SD test image | 720 x 128. Each byte of sector `n` holds `n & $FF`. | REQ-615 to REQ-624, REQ-631 |
 | ATR pattern files | SD, ED and DD files of REQ-625. Data byte `i` holds `i & $FF`. | REQ-625 to REQ-638 |
+| CAS file T | The 201-byte file of REQ-639: `FUJI`, `baud` 600, `data` (record R, gap 20000 ms), `baud` 300, `data` (`55 55 AA`, gap 1000 ms), `fsk ` (gap 100 ms), `FUJI`. | REQ-639, REQ-640, REQ-642 |
+| Tapes A and B | Tape A: one `data` chunk, gap 100 ms, 600 baud, `55 A5`. Tape B: one `fsk ` chunk, gap 0, lengths 10 and 20. | REQ-641, REQ-642 |
+| Boot test tape | The CAS image of REQ-643: two records of 132 bytes (gaps 20000 ms and 3000 ms) with the boot header `00 02 00 07 86 07`. | REQ-643, REQ-081 |
 | Boot image | SD or DD image. Sector 1 starts with the boot header `00 nn 00 07 00 07` (flags, boot sector count `nn`, load address `$0700`, init address `$0700`), then the test code at offset 6. To verify: the header layout. The HRM does not give it. | REQ-623, REQ-636 |
 
 ### Unit test method for the SIO bus
@@ -683,6 +890,16 @@ The disk and XEX system tests use AltirraOS (`os_rom()`) and, if the requirement
 the BASIC ROM (`basic_rom()`). They call `Machine::new` with `disk` and `fast_sio` in
 `MachineConfig`, or `Machine::start_xex`. They wait with `run_until` for a marker byte that
 the test code writes (usually `$A5` at `$0600`), with the frame limit of the requirement.
+
+### Test method for the cassette deck
+
+The deck unit tests drive `TapeDeck` directly: `insert`, `set_motor_line` and `level` for each
+cycle of the range that the criterion gives, and compare with `signal_at`. The signal tests
+call `signal_at` for each tape time at the edges that the criterion names, and one test per
+standard decodes the full block of tape A cycle by cycle. The machine tests (`PACTL`, `SKSTAT`,
+RESET, power-on) use a synthetic OS ROM, as "System test method for cartridges", with the tape
+in `MachineConfig`. The boot tests use AltirraOS and the BASIC ROM, the key presses of the
+requirement, and `run_until` for `$0600` = `$A5`.
 
 ### Tests
 
@@ -724,6 +941,11 @@ the test code writes (usually `$A5` at `$0600`), with the frame limit of the req
 | REQ-636 | `crates/harness/tests/media.rs` `req636_boot_sd_ntsc` (1), `req636_boot_sd_pal` (2), `req636_boot_fast_sio` (3), `req636_boot_dd` (4) |
 | REQ-637 | `media.rs` `req637_export_unchanged` (1, 2, 5), `req637_export_after_write` (3, 5), `req637_export_after_format` (4, 5) |
 | REQ-638 | `media.rs` `req638_seek_time` (1-4, 6), `req638_write_verify_time` (5) |
+| REQ-639 | `media.rs` `req639_cas_blocks` (1-5), `req639_cas_default_baud` (6), `req639_cas_trailing_chunk` (7) |
+| REQ-640 | `media.rs` `req640_cas_errors` (1-8), `req640_cas_error_order` (9) |
+| REQ-641 | `media.rs` `req641_motor_off_no_motion` (1), `req641_motor_start` (2), `req641_motor_stop_keeps_position` (3), `req641_eject` (6); `crates/harness/tests/media.rs` `req641_pactl_moves_tape` (4), `req641_reset_and_power_on` (5) |
+| REQ-642 | `media.rs` `req642_data_block_ntsc` (1, 2, 5), `req642_data_block_pal` (3), `req642_signal_block` (4), `req642_and_with_drive` (6); `crates/harness/tests/media.rs` `req642_skstat_sees_tape` (7) |
+| REQ-643 | `crates/harness/tests/media.rs` `req643_boot_tape_ntsc` (1, 3), `req643_boot_tape_pal` (2), `req643_bad_checksum_no_boot` (4), `req643_boot_tape_siov_shortcut` (5) |
 
 `req623_fast_sio_xl_os` uses a user-supplied Atari XL/XE OS ROM (REQ-004), which the project
 cannot download. How this test runs without the ROM is open: see OI-040. REQ-623 criterion 7 and this
@@ -753,8 +975,8 @@ The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model i
 9. To verify: when a real 1050 clears status byte 0 bits 0-3, and whether it sets bit 2 for a
    write-protect error.
 10. Out of scope for now: drives D2: to D8:, high-speed SIO (US Doubler, XF551), sector-level
-    rotational timing, the motor model and status bit 4, other cartridge types, ATX images,
-    and cassette.
+    rotational timing, the motor model and status bit 4, other cartridge types and ATX images.
+    The cassette deck is in SLICE-08 (REQ-639 to REQ-643).
 11. Cartridge interface conflict. The system design (`system.md`, "Cartridge port") asks for
     `read(&mut self)`, `peek(&self)`, `write` and `access_control(..) -> Option<u8>`. This
     document gives `read(&self)` and `access_control(..)` with no return value. The two
@@ -767,3 +989,9 @@ The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model i
 14. To decide: REQ-632 uses a kept Percom geometry for Format `$21` only if it is DD. REQ-635
     says that the drive keeps the SD, ED or DD geometry for the next Format `$21`. The result
     of an ED block is not agreed.
+15. Open for the cassette deck: the chunk types (OI-048), tape writing (OI-049), the key
+    presses of `start_tape` (OI-050), the load speed (OI-051) and the tape position at a cold
+    reset (OI-052). The design follows the recommended option of each item.
+16. To verify: the AltirraOS cassette boot. The waits of REQ-643 (Notes) are from the 400/800
+    OS listing (TRN SRC-CASORG). AltirraOS can use other waits or another prompt tone time.
+    The boot tests will show it.

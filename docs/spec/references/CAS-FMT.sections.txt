@@ -1,0 +1,17 @@
+# Section index of CAS-FMT: A8CAS - description of CAS file format (one HTML page).
+# Format: one section per line, key<TAB>title. Lines that start with # are comments.
+#
+# How it was made: from the <h3> and <h4> headings of the page (lines 59-184 of the
+# HTML file). The headings have no numbers. The key of a chunk type is the
+# chunk type; the key of the chunk type "fsk " (with a space at the end) is "fsk". The
+# other keys are the heading words, with "-" between the words.
+Structure	Structure
+Chunk-types	Chunk types
+FUJI	FUJI - tape description
+baud	baud - baudrate for subsequent SIO records
+data	data - standard SIO record
+fsk	fsk  - non-standard SIO signals
+pwms	pwms - settings for subsequent turbo records
+pwmc	pwmc - sequence of turbo signals
+pwmd	pwmd - turbo record with data
+pwml	pwml
