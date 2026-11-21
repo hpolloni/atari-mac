@@ -16,6 +16,10 @@ packages:
     title: Tape boot and the --cas option
     status: done
     requirements: [REQ-643, REQ-081, REQ-082]
+  - id: WP-4
+    title: Tape shortcut
+    status: planned
+    requirements: [REQ-644, REQ-091]
 ---
 # SLICE-08: Cassette tape
 
@@ -30,8 +34,9 @@ The user starts the emulator with `--cas game.cas`. The emulator inserts the CAS
 | WP-1 | CAS tape images | REQ-639, REQ-640 |
 | WP-2 | Tape deck, motor and signal | REQ-641, REQ-642, REQ-227 |
 | WP-3 | Tape boot and the --cas option | REQ-643, REQ-081, REQ-082 |
+| WP-4 | Tape shortcut | REQ-644, REQ-091 |
 
-WP-1 is in the core only (`Tape::from_cas`). WP-2 needs WP-1, the POKEY serial input and `SKSTAT` bit 4 (SLICE-05 WP-1: REQ-526, REQ-530), and the PIA CA2 output (REQ-227, moved here from SLICE-06 WP-2 on 2026-11-20). WP-3 needs WP-2. WP-1 can start at once, in parallel with SLICE-05 WP-1.
+WP-1 is in the core only (`Tape::from_cas`). WP-2 needs WP-1, the POKEY serial input and `SKSTAT` bit 4 (SLICE-05 WP-1: REQ-526, REQ-530), and the PIA CA2 output (REQ-227, moved here from SLICE-06 WP-2 on 2026-11-20). WP-3 needs WP-2. WP-4 (added on 2026-11-21, a decision of the user) needs WP-3 and the SIOV hook of SLICE-05 (`machine/siov.rs`). WP-1 can start at once, in parallel with SLICE-05 WP-1.
 
 REQ-227 criteria 3 to 5 (the pulse modes) follow the recommended option 1 of OI-010, which is open. The lead records this here. The tape uses only criteria 1 and 2.
 
@@ -48,7 +53,7 @@ These open items change the requirements of this slice. The requirements follow 
 | OI-050 | The key presses for a tape boot (decided: option 2, START only) | REQ-081, REQ-643 |
 | OI-051 | The tape load speed (decided: option 2, turbo) | REQ-082 |
 | OI-052 | The tape position at a cold reset (decided: option 2) | REQ-641 criterion 5 |
-| OI-046 | The cassette device code that SIO intercepts | REQ-643 criterion 5 does not depend on it |
+| OI-046 | The cassette device code that SIO intercepts (decided: option 2, `$60`) | REQ-644, REQ-643 criterion 5 |
 
 ### Test rule for each package (REQ-027)
 
@@ -59,5 +64,5 @@ The tests make all tape images in code, so no test data is downloaded, except th
 ## Done when
 
 1. The OS boots the boot test tape of REQ-643 for NTSC and PAL.
-2. The user boots a boot-tape game from a CAS file in the window with `--cas`.
+2. The user boots a boot-tape game from a CAS file in the window with `--cas`. With the tape shortcut, a tape of standard OS records loads in less than 10 s.
 3. `make check` passes, and the gates show no requirement of the slice as `missing`.
