@@ -551,6 +551,9 @@ Reads and writes have the same effect. The data of a write is ignored.
 
 ### Raw and CAR loading
 
+The frontend reads a `--cart` file as a CAR file if it starts with `CART`, else as a raw
+image.
+
 `from_raw`: 8192 bytes give `Standard8k`, 16384 bytes give `Standard16k`, other sizes give
 `BadSize` (REQ-604).
 
@@ -591,7 +594,11 @@ a marker. A segment can have up to 65536 bytes (`$0000-$FFFF`).
 
 The geometry is `sectors = 3 + ceil(stream_len / 128)`. The loader code is a constant byte
 array in `media.rs`, with its assembler listing in a comment. The core has no assembler
-dependency (REQ-015). The stream length goes into the loader at a fixed offset.
+dependency (REQ-015). The loader does not need the stream length, because the last record is
+always a Run record. The loader uses no zero-page byte: it keeps its state in `$07DB-$07DF`
+and writes the data with a self-modified `STA abs`, so an init routine can use all of the
+zero page. The boot header is `00 03 00 07 17 07`: the init address (`DOSINI`) is an `RTS` at
+`$0717`.
 
 The Rust side converts the segments into a load stream of records. Thus the 6502 code stays
 small, and the INITAD and RUNAD rules are in Rust, where unit tests can check them.
@@ -621,7 +628,8 @@ Boot sequence:
    clears the carry and returns. The OS completes its initialization and jumps through `DOSVEC`.
 4. The main entry reads sectors 4 to N with `DSKINV` (`$E453`) into the buffer at
    `$0880-$08FF`, and does the records.
-5. If `DSKINV` gives an error, the loader sets the background color to red and stops.
+5. If `DSKINV` gives an error (`DSTATS` not `$01`), the loader writes `$34` (red) to `COLOR2`
+   and `COLOR4` and stops.
 
 Loader memory: `$0700-$08FF`. `Xex::loader_conflict` reports a segment in this range.
 
@@ -907,16 +915,16 @@ requirement, and `run_until` for `$0600` = `$A5`.
 | --- | --- |
 | REQ-600 | `crates/harness/tests/media.rs` `req600_std8k_maps_left_window` (criteria 1, 2), `req600_std16k_maps_both_windows` (3, 4); `media.rs` `standard_mapping` |
 | REQ-604 | `media.rs` `req604_raw_sizes` (1, 2), `req604_raw_bad_sizes` (3); `media.rs` `raw_sizes_select_kind` |
-| REQ-605 | `media.rs` `req605_car_type1` (1), `req605_car_type2` (2), `req605_car_unused_bytes_ignored` (3). The reads use `Cartridge::read`. |
+| REQ-605 | `media.rs` `req605_car_type1` (1), `req605_car_type2` (2), `req605_car_unused_bytes_ignored` (3). The reads use `Cartridge::read`. `src/frontend.rs` unit test `cart_file_car_or_raw` (the `--cart` file is a CAR file if it starts with `CART`). |
 | REQ-606 | `media.rs` `req606_car_errors` (1-5), `req606_car_error_order` (6) |
 | REQ-607 | `crates/harness/tests/media.rs` `req607_bank_kept_on_reset_key` (1, 2), `req607_cold_reset_bank0` (3, 4). The test calls `Machine::press_reset` or `Machine::power_on` and then `peek` with no `Machine::run_cycle` between. |
 | REQ-608 | `media.rs` `req608_maxflash1_banks` (1-5, 8), `req608_maxflash8_banks` (6-8); `crates/harness/tests/media.rs` `req608_flash_write_ignored` (9) |
 | REQ-609 | `crates/harness/tests/media.rs` `req609_dummy_read_switches_bank` (1), `req609_antic_dma_switches_bank` (2: the test code writes the display list to `$0600`, `DLISTL`/`DLISTH` and `DMACTL`, and the test runs 2 frames) |
 | REQ-610 | `media.rs` `req610_parse_segments` (1-6) |
 | REQ-611 | `media.rs` `req611_xex_signature_errors` (1-3), `req611_xex_no_segment` (4-6), `req611_xex_defects_keep_segments` (7-9) |
-| REQ-612 | `crates/harness/tests/media.rs` `req612_xex_loads_segments` (1-3), `req612_xex_file_order` (4), each with the SIOV shortcut off and on (5); `media.rs` `req612_boot_image_records` (the records and the geometry of `Xex::boot_image`) |
-| REQ-613 | `crates/harness/tests/media.rs` `req613_initad_called_per_segment` (1, 2); `media.rs` `req613_init_records` (an Init record after segments C and E only) |
-| REQ-614 | `crates/harness/tests/media.rs` `req614_runad` (1, 3), `req614_run_first_segment` (2, 3); `media.rs` `req614_run_records` (Run indirect or Run direct `$2000`) |
+| REQ-612 | `crates/harness/tests/media.rs` `req612_xex_loads_segments` (1-3), `req612_xex_file_order` (4), each with the SIOV shortcut off and on (5); `media.rs` `req612_boot_image_records` (the records and the geometry of `Xex::boot_image`); `crates/harness/tests/media.rs` `loader_writes_segments_in_order` (the 6502 loader with a synthetic OS whose `DSKINV` copies the sectors from RAM: criteria 1 and 4), `loader_read_error_shows_red` (step 5 of the boot sequence) |
+| REQ-613 | `crates/harness/tests/media.rs` `req613_initad_called_per_segment` (1, 2); `media.rs` `req613_init_records` (an Init record after segments C and E only); `crates/harness/tests/media.rs` `loader_calls_initad` (the loader with the synthetic OS) |
+| REQ-614 | `crates/harness/tests/media.rs` `req614_runad` (1, 3), `req614_run_first_segment` (2, 3); `media.rs` `req614_run_records` (Run indirect or Run direct `$2000`); `crates/harness/tests/media.rs` `loader_jumps_to_run_address` (the loader with the synthetic OS) |
 | REQ-615 | `media.rs` `req615_status_frame_reply` (1), `req615_frame_needs_command_line` (2), `req615_frame_restart` (3), `req615_baud_tolerance` (4, 5) |
 | REQ-616 | `media.rs` `req616_checksum_values` (1-6) |
 | REQ-617 | `media.rs` `req617_ignored_frames` (1-5) |
@@ -963,7 +971,7 @@ The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model i
 3. Resolved by OI-002: `DmaMemory::dma_read` takes `&mut self`, and a DMA read of `$D5xx`
    calls `Cartridge::access_control`.
 4. Loader memory. The XEX loader uses `$0700-$08FF`. A later version can move itself to the top
-   of RAM. The zero-page bytes that the loader uses are not chosen yet.
+   of RAM. The loader uses no zero-page byte.
 5. RESET after an XEX start. The OS jumps through `DOSVEC` again. If the program did not change
    `DOSVEC`, the loader runs again. The loader could set `DOSVEC` to the run address before it
    runs the program.
@@ -995,3 +1003,7 @@ The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model i
 16. To verify: the AltirraOS cassette boot. The waits of REQ-643 (Notes) are from the 400/800
     OS listing (TRN SRC-CASORG). AltirraOS can use other waits or another prompt tone time.
     The boot tests will show it.
+17. The system tests of REQ-612 to REQ-614 (`req612_xex_loads_segments` and the others) and
+    `Machine::start_xex` need D1: (REQ-636): the SIO bus, the disk drive and the POKEY serial
+    input (SLICE-05). SLICE-04 WP-1 has the parser, the boot image and the loader, and tests
+    the loader with a synthetic OS. The system tests are planned in SLICE-05 WP-3.

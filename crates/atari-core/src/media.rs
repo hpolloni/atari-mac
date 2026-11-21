@@ -1,11 +1,17 @@
 //! Cartridge and executable file formats.
 //!
 //! Design: `docs/design/media.md`. Requirements: REQ-600 to REQ-638. The cartridge
-//! interface is decided in OI-003. The standard 8 KB and 16 KB cartridges and the Atarimax
-//! `MaxFlash` cartridges exist now.
+//! interface is decided in OI-003. The standard 8 KB and 16 KB cartridges, the Atarimax
+//! `MaxFlash` cartridges, the XEX parser and the XEX boot image exist now.
 
 use core::error::Error;
 use core::fmt;
+
+mod disk;
+mod xex;
+
+pub use disk::{DiskImage, Geometry};
+pub use xex::{SegmentDefect, Xex, XexDefect, XexSegment};
 
 /// The size of the CAR file header (REQ-605).
 const CAR_HEADER: usize = 16;
@@ -40,6 +46,10 @@ pub enum MediaError {
         /// The wrapping sum of the data bytes.
         computed: u32,
     },
+    /// An XEX file does not start with `$FF $FF`.
+    XexSignature,
+    /// An XEX file has no complete segment. The defect, if any, is the first one.
+    XexNoSegment(Option<XexDefect>),
 }
 
 impl fmt::Display for MediaError {
@@ -60,6 +70,14 @@ impl fmt::Display for MediaError {
             Self::CarChecksum { stored, computed } => write!(
                 f,
                 "CAR checksum ${stored:08X} does not agree with the data sum ${computed:08X}"
+            ),
+            Self::XexSignature => write!(f, "XEX file does not start with $FF $FF"),
+            Self::XexNoSegment(None) => write!(f, "XEX file has no segment"),
+            Self::XexNoSegment(Some(defect)) => write!(
+                f,
+                "XEX file has no complete segment: {} at offset {}",
+                defect.kind.describe(),
+                defect.offset
             ),
         }
     }

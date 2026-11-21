@@ -17,13 +17,13 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-01](docs/plan/SLICE-01.md) | Boot to BASIC and type a command | done | 99 | 0 | 0 | 1 |
 | [SLICE-02](docs/plan/SLICE-02.md) | Graphics modes and player/missile graphics | done | 60 | 0 | 0 | 0 |
 | [SLICE-03](docs/plan/SLICE-03.md) | Sound | in-progress | 19 | 0 | 0 | 0 |
-| [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | in-progress | 19 | 7 | 0 | 0 |
-| [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 4 | 33 | 0 | 0 |
+| [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | in-progress | 23 | 0 | 0 | 0 |
+| [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 7 | 33 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | planned | 23 | 2 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
 | [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | planned | 1 | 6 | 0 | 0 |
 
-All 279 requirements: 226 tested, 48 pending, 0 missing, 5 not a test requirement. Implemented: 189. Open items with the status `open`: 31.
+All 279 requirements: 233 tested, 41 pending, 0 missing, 5 not a test requirement. Implemented: 201. Open items with the status `open`: 31.
 
 <!-- END GENERATED: status -->
 
@@ -58,7 +58,7 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | Option | Meaning |
 | --- | --- |
 | `--os <file>`, `--basic <file>` | Use other OS or BASIC ROM files (default: the files in `roms/`) |
-| `--cart <file>` | Insert a cartridge: a raw image of 8 KB or 16 KB |
+| `--cart <file>` | Insert a cartridge: a raw image of 8 KB or 16 KB, or a CAR file (type 1, 2, 41 or 42) |
 | `--pal` | PAL machine (default: NTSC) |
 | `--scale <n>` | Window scale, 1 to 8 (default: 2) |
 | `--artifacting` | NTSC artifacting filter: false colors for hi-res pixel patterns |

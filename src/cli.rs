@@ -30,7 +30,7 @@ Atari 65XE emulator (NTSC, or PAL with --pal).
 Options:
   --os <file>          OS ROM, 16384 bytes (default: roms/altirraos-xl.rom)
   --basic <file>       BASIC ROM, 8192 bytes (default: roms/altirra-basic.rom)
-  --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes
+  --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes, or a CAR file
   --xex <file>         Executable (not supported yet)
   --disk <file>        ATR disk image (not supported yet)
   --bas <file>         Type a BASIC program from a text file at Ready, then RUN it

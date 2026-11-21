@@ -6,8 +6,8 @@ depends_on: "SLICE-01"
 packages:
   - id: WP-1
     title: Cartridges and executable files
-    status: planned
-    requirements: [REQ-209, REQ-210, REQ-232, REQ-600, REQ-604, REQ-605, REQ-606, REQ-607, REQ-608, REQ-609, REQ-610, REQ-611, REQ-612, REQ-613, REQ-614]
+    status: done
+    requirements: [REQ-209, REQ-210, REQ-232, REQ-600, REQ-604, REQ-605, REQ-606, REQ-607, REQ-608, REQ-609, REQ-610, REQ-611]
   - id: WP-2
     title: Joysticks, paddles and console keys
     status: done
@@ -27,11 +27,11 @@ The user starts a cartridge image or an executable file from the command line an
 
 | Package | Title | Requirements |
 | --- | --- | --- |
-| WP-1 | Cartridges and executable files | REQ-209, REQ-210, REQ-232, REQ-600, REQ-604, REQ-605, REQ-606, REQ-607, REQ-608, REQ-609, REQ-610, REQ-611, REQ-612, REQ-613, REQ-614 |
+| WP-1 | Cartridges and executable files | REQ-209, REQ-210, REQ-232, REQ-600, REQ-604, REQ-605, REQ-606, REQ-607, REQ-608, REQ-609, REQ-610, REQ-611 |
 | WP-2 | Joysticks, paddles and console keys | REQ-006, REQ-010, REQ-017, REQ-436, REQ-439, REQ-440, REQ-534, REQ-535, REQ-536, REQ-537 |
 | WP-3 | Command line and robust input | REQ-004 |
 
-On 2026-11-20 the lead moved REQ-012 to SLICE-05 WP-2 (it needs the ATR loader of REQ-625) and REQ-016 to SLICE-08 WP-3 (criterion 2 needs every media loader, and the CAS loader is in SLICE-08). The REQ-016 tests already run for raw and CAR images.
+On 2026-11-20 the lead moved REQ-612, REQ-613 and REQ-614 to SLICE-05 WP-3 (the XEX boot needs D1:, REQ-636), REQ-012 to SLICE-05 WP-2 (it needs the ATR loader of REQ-625) and REQ-016 to SLICE-08 WP-3 (criterion 2 needs every media loader, and the CAS loader is in SLICE-08). The REQ-016 tests already run for raw and CAR images.
 
 Some requirements in this slice already have tests that run (from SLICE-01). The package must still check them against the full acceptance criteria.
 
@@ -41,7 +41,7 @@ Each test that the design test plans name for these requirements exists now as a
 
 ## Done when
 
-1. A cartridge image and an executable file start from the command line.
-2. The joystick, the fire button and the paddles change the values that the program reads.
+1. A cartridge image starts from the command line. (Executable files start in SLICE-05.)
+2. The joystick, the fire button and the paddles change the values that the program reads. (The tests set the paddles with `Machine::set_paddle`. Host control of the paddles is OI-053.)
 3. No bad cartridge file or bad command line makes the emulator panic (the REQ-016 tests for raw and CAR images).
 4. `make check` passes, and the gates show no requirement of the slice as `missing`.

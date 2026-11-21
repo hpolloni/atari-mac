@@ -1,32 +1,73 @@
-//! Planned tests of the memory map, the bank switch and the DMA view of the map
+//! Tests of the memory map, the bank switch and the DMA view of the map
 //! (`docs/design/system.md`, "Test plan").
 
-use super::{Machine, cart_16k, config, cpu_write, machine, machine_with, os_rom, set_portb};
+use super::{
+    Machine, cart_8k, cart_16k, config, cpu_read, cpu_write, machine, machine_with, maxflash,
+    os_rom, set_portb,
+};
 use crate::antic::DmaMemory as _;
 use crate::planned::planned;
 
 /// Verifies REQ-209: with `PORTB` pin 7 = 1, a CPU write and then a CPU read of each
 /// address in `$5000-$57FF` give the written value (RAM) (criterion 3).
 #[test]
-#[ignore = "planned: SLICE-04"]
 fn self_test_disabled_by_bit_7() {
-    planned();
+    let mut m = machine();
+    set_portb(&mut m, 0xFF);
+    for addr in 0x5000..=0x57FF_u16 {
+        let [lo, hi] = addr.to_le_bytes();
+        let value = lo ^ hi ^ 0xA5;
+        cpu_write(&mut m, addr, value);
+        assert_eq!(cpu_read(&mut m, addr), value, "RAM at ${addr:04X}");
+    }
 }
 
 /// Verifies REQ-210: with RD5 inactive, a CPU read of `$A000` gives BASIC byte `$0000` with
 /// `PORTB` pins = `$FD`, and RAM with `PORTB` pins = `$FF` (criterion 2).
 #[test]
-#[ignore = "planned: SLICE-04"]
 fn basic_after_cartridge_disabled() {
-    planned();
+    let mut basic = vec![0xBB; super::super::BASIC_ROM_SIZE];
+    basic[0] = 0xB0;
+    let mut m = Machine::new(super::MachineConfig {
+        basic_rom: Some(basic),
+        ..config(os_rom(), Some(maxflash()))
+    })
+    .unwrap();
+    m.poke_ram(0xA000, 0x5A);
+    set_portb(&mut m, 0xFD);
+    assert_eq!(
+        cpu_read(&mut m, 0xA000),
+        0x00,
+        "RD5 active: cartridge bank 0"
+    );
+    let _read = cpu_read(&mut m, 0xD510);
+    assert_eq!(
+        cpu_read(&mut m, 0xA000),
+        0xB0,
+        "RD5 inactive, BASIC on: BASIC byte $0000"
+    );
+    set_portb(&mut m, 0xFF);
+    assert_eq!(
+        cpu_read(&mut m, 0xA000),
+        0x5A,
+        "RD5 inactive, BASIC off: RAM"
+    );
 }
 
 /// Verifies REQ-210: with RD4 active, a CPU read of `$8000` gives the cartridge byte; with
 /// RD4 inactive, it gives RAM (criterion 3).
 #[test]
-#[ignore = "planned: SLICE-04"]
 fn cartridge_rd4_before_ram() {
-    planned();
+    let mut m = machine_with(Some(cart_16k()));
+    m.poke_ram(0x8000, 0x77);
+    assert_eq!(
+        cpu_read(&mut m, 0x8000),
+        0xCC,
+        "RD4 active: the cartridge byte"
+    );
+    let mut small = machine_with(Some(cart_8k()));
+    small.poke_ram(0x8000, 0x77);
+    assert_eq!(cpu_read(&mut small, 0x8000), 0x77, "RD4 inactive: RAM");
 }
 
 /// Verifies REQ-212: code in RAM: `STA $D301` with `$FE` disables the OS ROM, and the next
