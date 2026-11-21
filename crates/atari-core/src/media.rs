@@ -2,17 +2,19 @@
 //!
 //! Design: `docs/design/media.md`. Requirements: REQ-600 to REQ-643. The cartridge
 //! interface is decided in OI-003. The standard 8 KB and 16 KB cartridges, the Atarimax
-//! `MaxFlash` cartridges, the XEX parser, the XEX boot image and the CAS
-//! tape image loader exist now.
+//! `MaxFlash` cartridges, the XEX parser, the XEX boot image, the CAS
+//! tape image loader and the SIO DATA IN line of the SIO bus exist now.
 
 use core::error::Error;
 use core::fmt;
 
 mod disk;
+mod sio;
 mod tape;
 mod xex;
 
 pub use disk::{DiskImage, Geometry};
+pub use sio::SioBus;
 pub use tape::{Tape, TapeBlock};
 pub use xex::{SegmentDefect, Xex, XexDefect, XexSegment};
 

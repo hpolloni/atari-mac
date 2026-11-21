@@ -23,7 +23,7 @@ use core::fmt;
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
 use crate::gtia::{ConsoleKeys, Gtia};
-use crate::media::Cartridge;
+use crate::media::{Cartridge, SioBus};
 use crate::pia::Pia;
 use crate::pokey::Pokey;
 use crate::timing::VideoStandard;
@@ -327,6 +327,11 @@ pub struct Machine {
     pokey: Pokey,
     /// PIA.
     pia: Pia,
+    /// The SIO bus: the SIO DATA IN level for POKEY, the bytes from POKEY and the command
+    /// line (`docs/design/media.md`, "SIO bus and disk drive").
+    sio: SioBus,
+    /// The PIA CB2 level at the end of the last cycle, for the command line changes.
+    cb2: bool,
     /// The TV standard.
     standard: VideoStandard,
     /// The last value on the data bus (the floating bus value for an idle cycle).
@@ -369,6 +374,8 @@ impl Machine {
             gtia: Gtia::new(config.standard),
             pokey: Pokey::new(config.standard, config.audio_sample_rate),
             pia: Pia::new(),
+            sio: SioBus::new(config.standard),
+            cb2: true,
             standard: config.standard,
             data_bus: 0xFF,
             cycles: 0,
@@ -392,6 +399,8 @@ impl Machine {
         self.pokey.reset();
         self.pia.reset();
         self.mem.portb = self.pia.port_b_pins();
+        self.sio.reset();
+        self.cb2 = self.pia.cb2();
         if let Some(cart) = self.mem.cart.as_mut() {
             cart.cold_reset();
         }
@@ -420,9 +429,11 @@ impl Machine {
     pub fn run_cycle(&mut self) {
         // 1. ANTIC, with the memory map of the end of the last cycle.
         let out = self.antic.tick(&mut self.mem);
-        // 2. POKEY before the CPU access. The SIO bus is not in SLICE-01: DATA IN is idle
-        //    (high).
-        self.pokey.set_serial_in(true);
+        // 2. POKEY before the CPU access, with the SIO DATA IN level of this cycle. The bus
+        //    counts the cycles as `Pokey::cycle` and `cycle_count` do: this cycle is
+        //    number `cycles + 1`.
+        let now = self.cycles + 1;
+        self.pokey.set_serial_in(self.sio.data_in_level(now));
         self.pokey.tick();
         // 3. The IRQ line. The PIA level is the level of the end of the last cycle.
         self.cpu.set_irq(self.irq_line());
@@ -455,10 +466,17 @@ impl Machine {
         self.data_bus = data;
         self.antic.end_cycle(data);
         self.gtia.clock(&out, data);
-        // 6. The PIA, then the serial output. With no SIO bus in SLICE-01, the bytes that
-        //    POKEY sent are dropped.
+        // 6. The PIA, then the bytes that POKEY sent go to the SIO bus, then the command
+        //    line.
         self.pia.tick();
-        while self.pokey.take_serial_byte().is_some() {}
+        while let Some(byte) = self.pokey.take_serial_byte() {
+            self.sio.host_byte(byte);
+        }
+        let cb2 = self.pia.cb2();
+        if cb2 != self.cb2 {
+            self.cb2 = cb2;
+            self.sio.set_command_line(!cb2, now);
+        }
         // TRIG3 follows RD5 after each access that can switch the cartridge (REQ-232).
         self.update_trig3();
         // 7. The counters.
@@ -511,6 +529,18 @@ impl Machine {
     #[must_use]
     pub const fn frame_count(&self) -> u64 {
         self.frames
+    }
+
+    /// The SIO bus.
+    #[must_use]
+    pub const fn sio(&self) -> &SioBus {
+        &self.sio
+    }
+
+    /// The SIO bus, for the devices and for tests: a device sends its bytes on SIO DATA IN
+    /// with [`SioBus::send_device_byte`].
+    pub const fn sio_mut(&mut self) -> &mut SioBus {
+        &mut self.sio
     }
 
     /// The CPU (for debuggers and tests).

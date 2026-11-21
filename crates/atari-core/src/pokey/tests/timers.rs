@@ -1,74 +1,190 @@
 //! Tests of initialization mode and the timers (REQ-502 to REQ-508).
 //!
-//! The REQ-502 tests are stubs until their package writes them (`docs/design/pokey.md`,
-//! "Test plan").
+//! A read "on cycle N" is a `peek` after the tick of cycle N, as a CPU read in cycle N sees
+//! it.
 
+use super::serial::receive;
 use super::{
-    AUDC1, AUDC3, AUDCTL, AUDF1, AUDF2, AUDF3, AUDF4, IRQEN, LINE, SKCTL, STIMER, check_period,
-    clear_irq, fire_log, fires_of, irqst, new_pokey, run, run_checking, run_until, spacing,
-    timer_pokey,
+    AUDC1, AUDC3, AUDCTL, AUDF1, AUDF2, AUDF3, AUDF4, BIT, IRQEN, LINE, POTGO, SKCTL, SKSTAT,
+    STIMER, check_period, clear_irq, fire_log, fires_of, irqst, kbcode, key_is_down, new_pokey,
+    run, run_checking, run_until, spacing, timer_pokey,
 };
-use crate::planned::planned;
+use crate::keyboard;
 use crate::pokey::Pokey;
 use crate::timing::VideoStandard;
 
-/// Verifies REQ-502: Criterion 1: With `SKCTL` = `$00`, `IRQEN` = `$01`, `AUDF1` = `$00` and
-/// `AUDCTL` = `$00` (and again with `AUDCTL` = `$01`), and an `STIMER` write on cycle T, `IRQST`
-/// bit 0 reads 1 and the timer 1 counter (test accessor) does not change from cycle T+4 to cycle
-/// T+10000.
+/// `RANDOM` (read).
+const RANDOM: u8 = 0x0A;
+/// `SERIN` (read).
+const SERIN: u8 = 0x0D;
+/// `POT0` (read).
+const POT0: u8 = 0x00;
+/// `ALLPOT` (read).
+const ALLPOT: u8 = 0x08;
+
+/// Ticks once and writes `STIMER` on the new cycle. Returns T.
+fn stimer_now(p: &mut Pokey) -> u64 {
+    p.tick();
+    p.write(STIMER, 0x00);
+    p.cycle()
+}
+
+/// Verifies REQ-502: in initialization mode, the timers on the 64 kHz and 15 kHz clocks do
+/// not count.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn init_mode_stops_slow_clocks() {
-    planned();
+    for audctl in [0x00, 0x01] {
+        let mut p = new_pokey();
+        p.tick();
+        p.write(IRQEN, 0x01);
+        p.write(AUDF1, 0x00);
+        p.write(AUDCTL, audctl);
+        run(&mut p, 10);
+        let t = stimer_now(&mut p);
+        run(&mut p, 4);
+        let counter = p.test_counters()[0];
+        run_checking(&mut p, 10_000 - 4, "no count and no IRQ", |p| {
+            p.test_counters()[0] == counter && irqst(p) & 0x01 != 0
+        });
+        assert_eq!(p.cycle(), t + 10_000, "AUDCTL = {audctl:02X}: last cycle");
+    }
 }
 
-/// Verifies REQ-502: Criterion 2: With `SKCTL` = `$00`, `AUDCTL` = `$40`, `AUDF1` = `$00`, `IRQEN`
-/// = `$01` and an `STIMER` write on cycle T, `IRQST` bit 0 reads 0 from cycle T+8.
+/// Verifies REQ-502: in initialization mode, the timers on the 1.79 MHz clock run.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn init_mode_keeps_fast_timers() {
-    planned();
+    let mut p = new_pokey();
+    p.tick();
+    p.write(IRQEN, 0x01);
+    p.write(AUDF1, 0x00);
+    run(&mut p, 10);
+    p.tick();
+    p.write(AUDCTL, 0x40);
+    p.write(STIMER, 0x00);
+    let t = p.cycle();
+    run_checking(&mut p, 7, "IRQST bit 0 before T+8", |p| irqst(p) & 0x01 != 0);
+    run_checking(&mut p, 1000, "IRQST bit 0 from T+8", |p| irqst(p) & 0x01 == 0);
+    assert_eq!(p.cycle(), t + 1007, "cycle");
 }
 
-/// Verifies REQ-502: Criterion 3: Start state: `SKCTL` = `$03`, `AUDCTL` = `$01`, `AUDF1-4` =
-/// `$11`, `$22`, `$33`, `$44`, `AUDC1-4` = `$A1`, `$A2`, `$A3`, `$A4`, `IRQEN` = `$01` with `IRQST`
-/// bit 0 latched, `KBCODE` = `$3F` (A key registered) and `SERIN` = `$43` (one received frame). A
-/// write of `SKCTL` = `$00` on cycle I does not change `IRQEN`, `IRQST`, `KBCODE`, `SERIN`,
-/// `AUDF1-4`, `AUDC1-4`, `AUDCTL`, the four timer counters or the four channel output flip-flops.
-/// The test compares the values on cycle I-1 with the values on cycles I+1 and I+1000.
+/// The values that initialization mode keeps (REQ-502 criterion 3).
+#[derive(Debug, PartialEq, Eq)]
+struct Kept {
+    /// The write registers as stored.
+    regs: super::WriteRegs,
+    /// `IRQST`, `KBCODE` and `SERIN`.
+    reads: [u8; 3],
+    /// The timer counters.
+    counters: [u8; 4],
+    /// The channel output flip-flops.
+    flip_flops: [bool; 4],
+}
+
+/// The values of `p` that initialization mode keeps.
+fn kept(p: &Pokey) -> Kept {
+    Kept {
+        regs: p.test_write_regs(),
+        reads: [irqst(p), kbcode(p), p.peek(SERIN)],
+        counters: p.test_counters(),
+        flip_flops: p.test_flip_flops(),
+    }
+}
+
+/// Verifies REQ-502: initialization mode keeps the registers, the counters and the channel
+/// outputs.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn init_mode_keeps_registers() {
-    planned();
+    // One received frame for `SERIN` = `$43`.
+    let mut p = timer_pokey(0x13, 0x28, [0, 0, 0x28, 0]);
+    run(&mut p, 1000);
+    let _s = receive(&mut p, 0x43, true, BIT, |_| {});
+    assert_eq!(p.peek(SERIN), 0x43, "SERIN");
+    // The start state.
+    p.write(SKCTL, 0x03);
+    p.write(AUDCTL, 0x01);
+    for (reg, value) in [(AUDF1, 0x11), (AUDF2, 0x22), (AUDF3, 0x33), (AUDF4, 0x44)] {
+        p.write(reg, value);
+    }
+    for (reg, value) in [(AUDC1, 0xA1), (0x03, 0xA2), (AUDC3, 0xA3), (0x07, 0xA4)] {
+        p.write(reg, value);
+    }
+    p.write(IRQEN, 0x01);
+    p.set_key(keyboard::A, true);
+    let registered = run_until(&mut p, 200 * LINE, key_is_down);
+    assert!(registered.is_some(), "the A key registers");
+    p.set_key(keyboard::A, false);
+    let latched = run_until(&mut p, 20 * LINE, |p| irqst(p) & 0x01 == 0);
+    assert!(latched.is_some(), "IRQST bit 0 latches");
+    assert_eq!(kbcode(&p), keyboard::A, "KBCODE");
+    // I is 10 cycles after a fire of a timer: no 15 kHz pulse, fire or reload on I.
+    let fire = run_until(&mut p, 40 * LINE, |p| p.test_fired() != 0).expect("a timer fires");
+    run(&mut p, 9);
+    let mut before = kept(&p);
+    // Only `SKCTL` changes.
+    before.regs.skctl = 0x00;
+    p.tick();
+    let i = p.cycle();
+    assert_eq!(i, fire + 10, "cycle I");
+    p.write(SKCTL, 0x00);
+    p.tick();
+    assert_eq!(kept(&p), before, "on I+1");
+    run(&mut p, 999);
+    assert_eq!(p.cycle(), i + 1000, "cycle I+1000");
+    assert_eq!(kept(&p), before, "on I+1000");
 }
 
-/// Verifies REQ-502: Criterion 5: With `SKCTL` = `$03`, a `POTGO` write and no paddle on input 0,
-/// when `POT0` reads 10, a write of `SKCTL` = `$00` keeps `POT0` at 10 and `ALLPOT` bit 0 at 1 for
-/// 10 x 114 cycles.
+/// Verifies REQ-502: the slow pot counter stops in initialization mode.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn init_mode_stops_slow_pot_counter() {
-    planned();
+    let mut p = new_pokey();
+    p.tick();
+    p.write(SKCTL, 0x03);
+    p.set_pot(0, 228);
+    run(&mut p, 1000);
+    p.write(POTGO, 0x00);
+    let ten = run_until(&mut p, 20 * LINE, |p| p.peek(POT0) == 10);
+    assert!(ten.is_some(), "POT0 reaches 10");
+    p.write(SKCTL, 0x00);
+    run_checking(&mut p, 10 * LINE, "POT0 = 10 and ALLPOT bit 0 = 1", |p| {
+        p.peek(POT0) == 10 && p.peek(ALLPOT) & 0x01 != 0
+    });
 }
 
-/// Verifies REQ-502: Criterion 6: After a write of `SKCTL` = `$00` on cycle I (from `SKCTL` =
-/// `$03`), each read of `RANDOM` from cycle I+9 to cycle I+1000 returns `$FF`. This is true with
-/// `AUDCTL` = `$00` and with `AUDCTL` = `$80`.
+/// Verifies REQ-502: `RANDOM` reads `$FF` from 9 cycles after the entry to initialization
+/// mode.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn init_mode_random_ff_after_9_cycles() {
-    planned();
+    for audctl in [0x00, 0x80] {
+        let mut p = new_pokey();
+        p.tick();
+        p.write(SKCTL, 0x03);
+        p.write(AUDCTL, audctl);
+        run(&mut p, 1000);
+        p.tick();
+        let i = p.cycle();
+        p.write(SKCTL, 0x00);
+        run(&mut p, 8);
+        run_checking(&mut p, 1000 - 8, "RANDOM = $FF", |p| p.peek(RANDOM) == 0xFF);
+        assert_eq!(p.cycle(), i + 1000, "AUDCTL = {audctl:02X}: last cycle");
+    }
 }
 
-/// Verifies REQ-502: Criterion 8: With `SKCTL` = `$20` (initialization mode, input clock channel
-/// 4), `AUDCTL` = `$28`, `AUDF3` = `$28`, `AUDF4` = `$00` and `IRQEN` = `$20`, a frame for `$43`
-/// with 94-cycle bits on SIO DATA IN does not change `SERIN`. `IRQST` bit 5 and `SKSTAT` bit 1 read
-/// 1 during the frame and for 1000 cycles after it. The test sends a frame with `SKCTL` = `$20` and
-/// checks that `SERIN`, `IRQST` bit 5 and `SKSTAT` bit 1 do not change.
+/// Verifies REQ-502: in initialization mode, the serial input does not receive.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn init_mode_holds_serial_input() {
-    planned();
+    let mut p = timer_pokey(0x20, 0x28, [0, 0, 0x28, 0]);
+    p.write(IRQEN, 0x20);
+    run(&mut p, 1000);
+    let mut fires = 0;
+    let ok = |p: &Pokey| p.peek(SERIN) == 0x00 && irqst(p) & 0x20 != 0 && p.peek(SKSTAT) & 0x02 != 0;
+    let _s = receive(&mut p, 0x43, true, BIT, |p| {
+        assert!(ok(p), "the input changed on cycle {}", p.cycle());
+        if p.test_fired() & 0b1000 != 0 {
+            fires += 1;
+        }
+    });
+    run_checking(&mut p, 1000, "the input after the frame", ok);
+    assert!(fires > 15, "timer 4 runs: {fires} fires");
 }
 
 // ----------------------------------------------------------------------------------------

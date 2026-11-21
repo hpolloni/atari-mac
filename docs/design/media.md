@@ -226,6 +226,14 @@ impl SioBus {
     pub fn data_in_level(&self, now: u64) -> bool;
     /// The start cycle of the next scheduled device byte, for tests.
     pub fn next_device_byte_start(&self) -> Option<u64>;
+    /// Schedules a device byte on SIO DATA IN (start bit in cycle `start`, `bit_cycles`
+    /// per bit). The reply scheduling and the tests use it. A command line edge removes
+    /// the bytes that ended (SLICE-05 WP-1).
+    pub fn send_device_byte(&mut self, value: u8, start: u64, bit_cycles: u32);
+    /// The command line level, and the bytes from the computer since the command line
+    /// last went low (at most 300), for tests (SLICE-05 WP-1).
+    pub const fn command_line_low(&self) -> bool;
+    pub fn host_bytes(&self) -> &[u8];
     /// The scheduled device bytes as `(value, start, bit_cycles)`, for tests.
     pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)>;
     /// A complete transaction at once, for the SIOV shortcut (REQ-623).
@@ -291,6 +299,11 @@ Call contract for the machine:
 3. In each machine cycle, before the POKEY `tick`, the machine calls
    `pokey.set_serial_in(sio.data_in_level(now))`. POKEY receives the bits from the line
    level with its own serial timing (REQ-526, REQ-528). The interface is decided in OI-038.
+   `now` is the number of the cycle in the count of `Pokey::cycle` and
+   `Machine::cycle_count` (both count the cycles up to and including this one), so the
+   device bytes and `SerialByte` use the same cycles. `Machine::sio` and `Machine::sio_mut`
+   give the bus to the devices and the tests. SLICE-05 WP-1 has the line part of `SioBus`
+   (`media/sio.rs`); WP-2 adds the drive protocol, SLICE-08 WP-2 the deck.
 4. `SioBus` never reads the cycle counter by itself. All times come from the `now` and `start`
    arguments, so the core stays deterministic (REQ-014).
 

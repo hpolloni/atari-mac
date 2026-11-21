@@ -331,7 +331,8 @@ One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
 
 1. `let out = antic.tick(&mut memory)` gives the `CycleOutput` of cycle `c`. ANTIC DMA
    reads use the memory map as it was at the end of cycle `c - 1`.
-2. `pokey.set_serial_in(sio.data_in_level(c))`, then `pokey.tick()`. POKEY runs before the
+2. `pokey.set_serial_in(sio.data_in_level(c))`, then `pokey.tick()`. Here `c` is counted
+   as `Pokey::cycle` counts it after the tick (`cycle_count() + 1` before the cycle). POKEY runs before the
    CPU access, so a POKEY register access in cycle `c` sees the events of cycle `c`
    (`pokey.md`, call contract).
 3. `cpu.set_irq(pokey.irq() || pia.irq())`. The POKEY level is the level of cycle `c`. The
