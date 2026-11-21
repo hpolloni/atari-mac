@@ -45,6 +45,10 @@ const PORTB_SELF_TEST_OFF: u8 = 0x80;
 /// The bus ID of drive D1: (HRM 9.1), the first byte of its command frames.
 const DEVICE_D1: u8 = 0x31;
 
+/// The frames from the cold reset during which [`Machine::start_tape`] holds START
+/// (REQ-081 criterion 3).
+pub const TAPE_START_FRAMES: u64 = 60;
+
 /// The frames after the cold reset of [`Machine::start_xex`] at which the machine releases
 /// OPTION if D1: got no command: 3 seconds of emulated time, rounded to whole frames
 /// (`docs/design/media.md`, "XEX boot image", step 1).
@@ -362,6 +366,9 @@ pub struct Machine {
     /// While [`Machine::start_xex`] holds OPTION: the frame count at which the machine
     /// releases it if D1: got no command before (REQ-612).
     xex_option_until: Option<u64>,
+    /// While [`Machine::start_tape`] holds START: the frame count at which the machine
+    /// releases it (REQ-081 criterion 3).
+    tape_start_until: Option<u64>,
     /// The TV standard.
     standard: VideoStandard,
     /// The last value on the data bus (the floating bus value for an idle cycle).
@@ -410,6 +417,7 @@ impl Machine {
             fast_sio: config.fast_sio,
             console_keys: ConsoleKeys::default(),
             xex_option_until: None,
+            tape_start_until: None,
             standard: config.standard,
             data_bus: 0xFF,
             cycles: 0,
@@ -543,6 +551,10 @@ impl Machine {
             if self.xex_option_until.is_some() {
                 self.check_xex_option();
             }
+            if self.tape_start_until.is_some_and(|end| self.frames >= end) {
+                self.tape_start_until = None;
+                self.apply_console_keys();
+            }
         }
     }
 
@@ -650,10 +662,11 @@ impl Machine {
     }
 
     /// Gives GTIA the console keys of the frontend, with OPTION while
-    /// [`Machine::start_xex`] holds it.
+    /// [`Machine::start_xex`] holds it and START while [`Machine::start_tape`] holds it.
     const fn apply_console_keys(&mut self) {
         let mut keys = self.console_keys;
         keys.option |= self.xex_option_until.is_some();
+        keys.start |= self.tape_start_until.is_some();
         self.gtia.set_console_keys(keys);
     }
 
@@ -662,6 +675,18 @@ impl Machine {
     pub fn insert_tape(&mut self, tape: Tape) {
         let now = self.cycles + 1;
         self.sio.tape_deck_mut().insert(tape, now);
+    }
+
+    /// Inserts `tape` in the cassette deck, does a cold reset (the tape position is 0) and
+    /// holds START from the cold reset until frame [`TAPE_START_FRAMES`] (REQ-081 criterion
+    /// 3, `docs/design/media.md`, "Tape boot"). The machine then releases START at the end
+    /// of the frame. It presses no other key, so BASIC stays on (OI-050). The keys of
+    /// [`Machine::set_console_keys`] stay pressed.
+    pub fn start_tape(&mut self, tape: Tape) {
+        self.insert_tape(tape);
+        self.power_on();
+        self.tape_start_until = Some(TAPE_START_FRAMES);
+        self.apply_console_keys();
     }
 
     /// Removes the tape from the cassette deck and gives it back. SIO DATA IN then has no

@@ -14,7 +14,7 @@ packages:
     requirements: [REQ-641, REQ-642, REQ-227]
   - id: WP-3
     title: Tape boot and the --cas option
-    status: planned
+    status: in-progress
     requirements: [REQ-643, REQ-081, REQ-082]
 ---
 # SLICE-08: Cassette tape

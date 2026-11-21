@@ -33,6 +33,7 @@ Options:
   --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes, or a CAR file
   --xex <file>         Executable (XEX): boot it from D1: with BASIC disabled
   --disk <file>        ATR disk image in drive D1: (the OS boots it)
+  --cas <file>         CAS tape image: boot it (holds START at power-on)
   --bas <file>         Type a BASIC program from a text file at Ready, then RUN it
   --no-run             With --bas: type the program, but do not RUN it
   --pal                PAL machine (default: NTSC)
@@ -61,6 +62,8 @@ pub struct Options {
     pub xex: Option<PathBuf>,
     /// The ATR disk image file for D1: (`--disk`, REQ-012).
     pub disk: Option<PathBuf>,
+    /// The CAS tape image file (`--cas`, REQ-081). The machine boots it.
+    pub cas: Option<PathBuf>,
     /// Run without a window.
     pub headless: bool,
     /// The number of frames to run. `None` runs until the user quits.
@@ -89,6 +92,7 @@ impl Default for Options {
             cart: None,
             xex: None,
             disk: None,
+            cas: None,
             headless: false,
             frames: None,
             screenshot: None,
@@ -108,7 +112,7 @@ pub enum Command {
     /// Show the help text.
     Help,
     /// Run the emulator.
-    Run(Options),
+    Run(Box<Options>),
 }
 
 /// Makes a usage error.
@@ -142,8 +146,9 @@ fn number<T: FromStr>(
 ///
 /// # Errors
 ///
-/// [`FrontendError::Usage`] for an argument that is not valid, and for `--xex` with
-/// `--disk` (both use D1:) or with `--bas` (an executable starts with BASIC disabled).
+/// [`FrontendError::Usage`] for an argument that is not valid, for `--xex` with `--disk`
+/// (both use D1:) or with `--bas` (an executable starts with BASIC disabled), and for `--cas`
+/// with `--bas` or `--xex` (each makes key presses at the start, REQ-081 criterion 6).
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, FrontendError> {
     let mut args = args.into_iter();
     let mut options = Options::default();
@@ -155,6 +160,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--cart" => options.cart = Some(value(&mut args, "--cart")?.into()),
             "--xex" => options.xex = Some(value(&mut args, "--xex")?.into()),
             "--disk" => options.disk = Some(value(&mut args, "--disk")?.into()),
+            "--cas" => options.cas = Some(value(&mut args, "--cas")?.into()),
             "--headless" => options.headless = true,
             "--pal" => options.standard = VideoStandard::Pal,
             "--frames" => options.frames = Some(number(&mut args, "--frames")?),
@@ -198,8 +204,20 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
                 .to_owned(),
         ));
     }
+    if options.cas.is_some() && options.bas.is_some() {
+        return Err(usage(
+            "--cas and --bas cannot be used together: both make key presses at the start"
+                .to_owned(),
+        ));
+    }
+    if options.cas.is_some() && options.xex.is_some() {
+        return Err(usage(
+            "--cas and --xex cannot be used together: both make key presses at the start"
+                .to_owned(),
+        ));
+    }
     check_filters(&options)?;
-    Ok(Command::Run(options))
+    Ok(Command::Run(Box::new(options)))
 }
 
 /// The name of a video standard in messages.
@@ -247,7 +265,7 @@ mod tests {
 
     fn parse_ok(list: &[&str]) -> Options {
         match parse(args(list)) {
-            Ok(Command::Run(options)) => options,
+            Ok(Command::Run(options)) => *options,
             other => panic!("{list:?} gave {other:?}"),
         }
     }
@@ -308,6 +326,7 @@ mod tests {
                 cart: Some("c.car".into()),
                 xex: None,
                 disk: Some("d.atr".into()),
+                cas: None,
                 headless: true,
                 frames: Some(180),
                 screenshot: Some("out.png".into()),
@@ -341,6 +360,7 @@ mod tests {
             (&["--headless"], "--headless needs --frames"),
             (&["--bas"], "--bas needs a value"),
             (&["--disk"], "--disk needs a value"),
+            (&["--cas"], "--cas needs a value"),
             (&["--no-run"], "--no-run needs --bas"),
         ] {
             let error = parse_err(list);
@@ -409,6 +429,27 @@ mod tests {
             parse_err(&["--bas", "a.bas", "--xex", "a.xex"])
                 .starts_with("--xex and --bas cannot be used together"),
             "--xex with --bas"
+        );
+    }
+
+    /// `--cas` sets the tape file, and `--cas` with `--bas` or `--xex` is a usage error that
+    /// names both options.
+    #[test]
+    fn cas_option() {
+        assert_eq!(
+            parse_ok(&["--cas", "game.cas"]).cas,
+            Some(PathBuf::from("game.cas")),
+            "--cas"
+        );
+        assert!(
+            parse_err(&["--cas", "a.cas", "--bas", "a.bas"])
+                .starts_with("--cas and --bas cannot be used together"),
+            "--cas with --bas"
+        );
+        assert!(
+            parse_err(&["--xex", "a.xex", "--cas", "a.cas"])
+                .starts_with("--cas and --xex cannot be used together"),
+            "--cas with --xex"
         );
     }
 }

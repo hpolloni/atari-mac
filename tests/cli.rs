@@ -235,12 +235,6 @@ fn usage_errors_and_help() {
     );
 }
 
-/// Fails the test that calls it. A planned stub calls this function, so that the stub never
-/// passes when it runs (`cargo test -- --include-ignored`).
-fn planned() {
-    panic!("planned test: a package replaces this stub with the real test");
-}
-
 /// A valid executable: one segment with `JMP $0600` at `$0600`, and `RUNAD` = `$0600`.
 const VALID_XEX: [u8; 15] = [
     0xFF, 0xFF, 0x00, 0x06, 0x02, 0x06, 0x4C, 0x00, 0x06, 0xE0, 0x02, 0xE1, 0x02, 0x00, 0x06,
@@ -314,53 +308,222 @@ fn rejects_bad_cart_xex_and_disk() {
     }
 }
 
+/// One CAS chunk: the 8-byte header (`kind`, the data length, `aux`) and `data`.
+fn cas_chunk(kind: [u8; 4], aux: u16, data: &[u8]) -> Vec<u8> {
+    let mut bytes = kind.to_vec();
+    bytes.extend(
+        u16::try_from(data.len())
+            .expect("chunk length")
+            .to_le_bytes(),
+    );
+    bytes.extend(aux.to_le_bytes());
+    bytes.extend(data);
+    bytes
+}
+
+/// One tape record: `55 55 FC`, the 128 bytes of `data` (`$00` after its end) and the
+/// checksum of the 131 bytes before it (REQ-616: the sum with the carry added back).
+fn cas_record(data: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0x55, 0x55, 0xFC];
+    bytes.extend(data);
+    bytes.resize(131, 0);
+    let sum = bytes.iter().fold(0_u8, |sum, &byte| {
+        let (value, carry) = sum.overflowing_add(byte);
+        value + u8::from(carry)
+    });
+    bytes.push(sum);
+    bytes
+}
+
+/// Writes the boot test tape of REQ-643 (a CAS file) in the directory of `test` and gives
+/// its path.
+fn boot_tape_file(test: &str) -> PathBuf {
+    let mut file = cas_chunk(*b"FUJI", 0, b"");
+    file.extend(cas_chunk(*b"baud", 600, &[]));
+    file.extend(cas_chunk(
+        *b"data",
+        20_000,
+        &cas_record(&[0x00, 0x02, 0x00, 0x07, 0x86, 0x07, 0x4C, 0x80, 0x07]),
+    ));
+    file.extend(cas_chunk(
+        *b"data",
+        3_000,
+        &cas_record(&[0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x18, 0x60]),
+    ));
+    let path = temp_dir(test).join("boot.cas");
+    fs::write(&path, file).expect("write the CAS file");
+    path
+}
+
+/// The options of a run with the free ROMs and the tape `cas`.
+fn cas_options(cas: &Path, standard: VideoStandard) -> Options {
+    Options {
+        os: OS_ROM.into(),
+        basic: BASIC_ROM.into(),
+        cas: Some(cas.to_owned()),
+        standard,
+        ..Options::default()
+    }
+}
+
 /// Verifies REQ-081: `--headless --frames 1 --cas <file>` exits with status 0 for the boot
 /// test tape of REQ-643 (criterion 1).
 #[test]
-#[ignore = "planned: SLICE-08"]
 fn cas_loads_tape() {
-    planned();
+    let tape = boot_tape_file("cas_loads_tape");
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "1",
+        "--cas",
+        tape.to_str().expect("UTF-8 path"),
+    ]);
+    assert!(
+        output.status.success(),
+        "exit status {}: {}",
+        output.status,
+        stderr(&output)
+    );
 }
 
 /// Verifies REQ-081: a file of 100 bytes of `$00` gives exit code 2 and a message that names
 /// the file and `CasSignature`; a missing file gives exit code 2 and a message that names
 /// the file (criterion 2).
 #[test]
-#[ignore = "planned: SLICE-08"]
 fn cas_rejects_bad_files() {
-    planned();
+    let dir = temp_dir("cas_rejects_bad_files");
+    let zeros = dir.join("zeros.cas");
+    fs::write(&zeros, [0_u8; 100]).expect("write the 100-byte file");
+    let missing = dir.join("missing.cas");
+    for (path, name) in [(&zeros, "CasSignature"), (&missing, "missing.cas")] {
+        let output = run(&[
+            "--headless",
+            "--frames",
+            "1",
+            "--cas",
+            path.to_str().expect("UTF-8 path"),
+        ]);
+        let message = stderr(&output);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{}: exit status",
+            path.display()
+        );
+        assert!(
+            message.contains(path.to_str().expect("UTF-8 path")),
+            "the message names the file: {message}"
+        );
+        assert!(
+            message.contains(name),
+            "the message names {name}: {message}"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "the machine does not start: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
 }
 
 /// Verifies REQ-081: with `--cas`, START is held from the power-on cold reset until frame
 /// 60; OPTION, RETURN and the other keys are not pressed, so BASIC stays on (criterion 3).
+///
+/// The test reads `CONSOL` (`$D01F`, bit 0 is 0 while START is down) and `SKSTAT` bit 2 (0
+/// while a key is down) after each frame, and at the end the BASIC ROM at `$A000`.
 #[test]
-#[ignore = "planned: SLICE-08"]
 fn cas_key_presses() {
-    planned();
+    let tape = boot_tape_file("cas_key_presses");
+    let mut frontend = start(&cas_options(&tape, VideoStandard::Ntsc)).expect("start");
+    assert_eq!(frontend.machine().frame_count(), 0, "the cold reset");
+    for frame in 0..300 {
+        let consol = frontend.machine().peek(0xD01F) & 0x07;
+        let expected = if frame < 60 { 0x06 } else { 0x07 };
+        assert_eq!(consol, expected, "CONSOL in frame {frame}");
+        assert_ne!(
+            frontend.machine().peek(0xD20F) & 0x04,
+            0,
+            "no key is down in frame {frame}"
+        );
+        frontend.run_frames(1).expect("run");
+    }
+    let basic = fs::read(BASIC_ROM).expect("BASIC ROM");
+    let visible: Vec<u8> = (0xA000..0xA100)
+        .map(|a| frontend.machine().peek(a))
+        .collect();
+    assert_eq!(visible, basic[..0x100], "BASIC stays on");
 }
 
 /// Verifies REQ-081: with the boot test tape, the test presses RETURN in frames 180-186
 /// (NTSC) or 150-156 (PAL); then `$0600` holds `$A5` within 2,400 frames (NTSC) and 2,000
 /// frames (PAL) after the start (criterion 4).
+///
+/// Ignored: with `AltirraOS`, the boot of the tape of REQ-643 does not end. After the two
+/// records, the OS reads one more record (the EOF record, as TRN SRC-MONITP line 3927 "GET
+/// EOF RECORD, BUT DON'T USE IT"), and the tape has none. The lead changes the tape of the
+/// requirement.
 #[test]
 #[ignore = "planned: SLICE-08"]
 fn cas_boots_tape() {
-    planned();
+    let tape = boot_tape_file("cas_boots_tape");
+    for (standard, press, limit) in [
+        (VideoStandard::Ntsc, 180, 2_400),
+        (VideoStandard::Pal, 150, 2_000),
+    ] {
+        let mut frontend = start(&cas_options(&tape, standard)).expect("start");
+        let mut done = None;
+        for frame in 0..limit {
+            if frame == press {
+                frontend
+                    .machine_mut()
+                    .key_down(ascii_to_kbcode('\n').expect("RETURN"));
+            }
+            if frame == press + 6 {
+                frontend.machine_mut().key_up();
+            }
+            frontend.run_frames(1).expect("run");
+            if frontend.machine().peek_ram(0x0600) == 0xA5 {
+                done = Some(frame + 1);
+                break;
+            }
+        }
+        assert!(
+            done.is_some(),
+            "{standard:?}: no $A5 at $0600 after {limit} frames"
+        );
+    }
 }
 
 /// Verifies REQ-081: `--help` lists `--cas <file>` (criterion 5).
 #[test]
-#[ignore = "planned: SLICE-08"]
 fn cas_help_lists_option() {
-    planned();
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--cas <file>"),
+        "--help lists --cas <file>"
+    );
 }
 
 /// Verifies REQ-081: `--cas` with `--bas` gives exit code 2 and a message that names both
 /// options (criterion 6).
 #[test]
-#[ignore = "planned: SLICE-08"]
 fn cas_with_bas_rejected() {
-    planned();
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "1",
+        "--cas",
+        "a.cas",
+        "--bas",
+        "a.bas",
+    ]);
+    let message = stderr(&output);
+    assert_eq!(output.status.code(), Some(2), "exit status");
+    assert!(
+        message.contains("--cas") && message.contains("--bas"),
+        "the message names both options: {message}"
+    );
 }
 
 /// Runs `--headless --frames 240 --screenshot` with `flags` and returns the PNG pixels as

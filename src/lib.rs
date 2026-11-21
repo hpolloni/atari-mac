@@ -131,6 +131,7 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
                     .as_deref()
                     .or(options.xex.as_deref())
                     .or(options.disk.as_deref())
+                    .or(options.cas.as_deref())
                     .or(options.bas.as_deref()),
             ),
             options,

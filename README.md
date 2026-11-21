@@ -21,9 +21,9 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | in-progress | 41 | 0 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
-| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 5 | 3 | 0 | 0 |
+| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 8 | 0 | 0 | 0 |
 
-All 280 requirements: 272 tested, 3 pending, 0 missing, 5 not a test requirement. Implemented: 223. Open items with the status `open`: 29.
+All 280 requirements: 275 tested, 0 pending, 0 missing, 5 not a test requirement. Implemented: 223. Open items with the status `open`: 29.
 
 <!-- END GENERATED: status -->
 
@@ -61,6 +61,7 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | `--cart <file>` | Insert a cartridge: a raw image of 8 KB or 16 KB, or a CAR file (type 1, 2, 41 or 42) |
 | `--xex <file>` | Start an executable (XEX): it boots from drive D1: with BASIC disabled (not with `--disk` or `--bas`) |
 | `--disk <file>` | Insert an ATR disk image in drive D1: (the OS boots it at power-on) |
+| `--cas <file>` | Boot a CAS tape image (holds START at power-on; press RETURN after the tone) |
 | `--pal` | PAL machine (default: NTSC) |
 | `--scale <n>` | Window scale, 1 to 8 (default: 2) |
 | `--artifacting` | NTSC artifacting filter: false colors for hi-res pixel patterns |

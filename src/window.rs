@@ -20,7 +20,7 @@ use minifb::{Key, Window, WindowOptions};
 use crate::audio::{AudioOutput, AudioSink};
 use crate::cli::Options;
 use crate::error::FrontendError;
-use crate::frontend::{Flow, Frontend, Pacing, render, window_size};
+use crate::frontend::{Flow, Frontend, Pacing, after_step, render, window_size};
 
 /// The time that the window loop waits when it has no new frame to show.
 const IDLE: Duration = Duration::from_millis(2);
@@ -46,8 +46,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// part of it (REQ-007).
 ///
 /// `options.scale` is the window scale, and `options.filters` are the display filters of the
-/// window (REQ-019). While a BASIC program is typed, the frames run in turbo ([`Pacing`],
-/// REQ-080).
+/// window (REQ-019). While a BASIC program is typed, and while the tape motor runs, the
+/// frames run in turbo ([`Pacing`], [`Frontend::turbo`], REQ-080, REQ-082).
 ///
 /// After each frame, the audio samples of the frame go to `audio`, and the level of its
 /// ring corrects the wait (REQ-011). While the emulation is paused or in turbo, the sound
@@ -118,8 +118,8 @@ pub fn run(
 }
 
 /// The emulation thread: runs the frames at real-time speed (or in turbo while a BASIC
-/// program is typed) until the user quits, `frames` frames have run or the window stops.
-/// Returns the time from the first frame to the end.
+/// program is typed or the tape motor runs) until the user quits, `frames` frames have run
+/// or the window stops. Returns the time from the first frame to the end.
 #[expect(
     clippy::disallowed_methods,
     reason = "the frontend owns the host clock; the core reads no clock (REQ-014)"
@@ -130,6 +130,7 @@ fn emulate(
     audio: &AudioSink,
     frames: Option<u64>,
 ) -> Result<Duration, FrontendError> {
+    let mut audio = audio.clone();
     let start = Instant::now();
     let mut pacing = Pacing::new(frontend.machine().standard(), start);
     let mut keys = Vec::new();
@@ -138,14 +139,7 @@ fn emulate(
         if frontend.step(&keys)? == Flow::Quit {
             break;
         }
-        let turbo = frontend.typist().is_some();
-        if turbo || frontend.paused() {
-            audio.stop();
-        } else {
-            audio.push(frontend.audio());
-            pacing.correct(audio.correction());
-        }
-        let after = pacing.after_frame(turbo, Instant::now());
+        let after = after_step(frontend, &mut pacing, &mut audio, Instant::now());
         if after.present {
             let mut frame = Vec::with_capacity(frontend.machine().frame().len());
             frame.extend_from_slice(frontend.machine().frame());
