@@ -475,7 +475,9 @@ impl Gtia {
         let bits = code.bits();
         if matches!(bits, 0b001..=0b011) {
             if bits & 0b010 != 0 {
-                self.hires = bits == 0b011;
+                // REQ-432: a GTIA mode holds the hires state off (HRM 6.8). The last HPOS
+                // at which `%011` sets it is open (OI-054).
+                self.hires = bits == 0b011 && self.prior & 0xC0 == 0;
             }
             return Playfield {
                 blank: true,
