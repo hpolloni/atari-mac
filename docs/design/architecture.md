@@ -34,6 +34,7 @@ files, the clock of the host, the window and the audio device (REQ-014).
 | `timing` | Clock and frame constants | This document |
 | `state` | The byte format of the save states | This document, "Save states" |
 | `events` (crate-private) | The `log` targets and the record macro of the machine event log (REQ-084) | This document, "Logging and statistics" |
+| `disasm`, `debug` | The disassembler, the CPU hook types of the trace and the monitor | [debugger.md](debugger.md) |
 
 A module talks to another module only through the public interface in its design document.
 

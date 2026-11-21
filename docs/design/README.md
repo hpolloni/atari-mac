@@ -14,6 +14,7 @@ it covers.
 | [gtia.md](gtia.md) | GTIA and palette | 400 to 499 |
 | [pokey.md](pokey.md) | POKEY | 500 to 599 |
 | [media.md](media.md) | Cartridges, executables, SIO, disk drives | 600 to 699 |
+| [debugger.md](debugger.md) | Disassembler, CPU trace, monitor | REQ-086 to REQ-090 |
 | [spec-gates.md](spec-gates.md) | Specification gates and traceability | REQ-027, REQ-043 to REQ-055 |
 
 ## Template

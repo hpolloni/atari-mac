@@ -344,6 +344,8 @@ One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
    `portb_pins`. A PIA write updates `portb_pins` at the end of the access. A GTIA write
    also calls `pokey.set_speaker(!gtia.speaker())`: a `CONSOL` bit written as 1 pulls its
    line down (HRM 6.11), so the speaker line is high when bit 3 was written as 0.
+   In the hooked run (`debugger.md`, "Hooked run and the cycle order"), the hook calls
+   come after the SIOV shortcut and before `cpu.tick`, and a stop holds the cycle here.
 4a. `cpu.end_cycle(antic.nmi_level())`, also when `out.halt` is true. ANTIC computes the NMI
    level of cycle `c` after the CPU access, so a `NMIEN` write in cycle `c` is included
    (OI-017). The CPU latches the NMI edge and makes its interrupt poll for cycle `c` here.
