@@ -19,10 +19,6 @@ use crate::cli::Options;
 use crate::error::FrontendError;
 use crate::keymap::InputState;
 
-/// The audio sample rate that the machine is configured with. Audio output is not part of
-/// this version; the frontend does not drain the samples.
-const AUDIO_SAMPLE_RATE: u32 = 48_000;
-
 /// Reads a whole file.
 fn read(path: &Path) -> Result<Vec<u8>, FrontendError> {
     fs::read(path).map_err(|source| FrontendError::Read {
@@ -31,13 +27,14 @@ fn read(path: &Path) -> Result<Vec<u8>, FrontendError> {
     })
 }
 
-/// Creates the machine from the ROM and media files of `options` (REQ-004, REQ-012).
+/// Creates the machine from the ROM and media files of `options` (REQ-004, REQ-012), with
+/// the audio sample rate `sample_rate` (the rate of the audio stream, REQ-011).
 ///
 /// # Errors
 ///
 /// [`FrontendError::Read`] when a file cannot be read, [`FrontendError::Rom`] for a ROM
 /// with the wrong size and [`FrontendError::Media`] for a cartridge that is not valid.
-pub fn load_machine(options: &Options) -> Result<Machine, FrontendError> {
+pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, FrontendError> {
     let os_rom = read(&options.os)?;
     let basic_rom = read(&options.basic)?;
     let cartridge = match &options.cart {
@@ -56,7 +53,7 @@ pub fn load_machine(options: &Options) -> Result<Machine, FrontendError> {
         basic_rom: Some(basic_rom),
         cartridge,
         standard: options.standard,
-        audio_sample_rate: AUDIO_SAMPLE_RATE,
+        audio_sample_rate: sample_rate,
     })
     .map_err(|error| FrontendError::Rom {
         path: match error {
@@ -203,6 +200,8 @@ pub struct Frontend {
     last_frame_cycles: u64,
     /// The typing of the BASIC program, until all keys are typed.
     typist: Option<Typist>,
+    /// The audio samples of the last frame that ran (REQ-011).
+    audio: Vec<f32>,
 }
 
 impl Frontend {
@@ -216,6 +215,7 @@ impl Frontend {
             frames_run: 0,
             last_frame_cycles: 0,
             typist: None,
+            audio: Vec::new(),
         }
     }
 
@@ -263,7 +263,17 @@ impl Frontend {
         self.last_frame_cycles
     }
 
+    /// The audio samples of the frame that the last [`Frontend::step`] ran, from
+    /// `Machine::drain_audio`. Empty when the step ran no frame (pause), and while the core
+    /// makes no samples (REQ-011).
+    #[must_use]
+    pub fn audio(&self) -> &[f32] {
+        &self.audio
+    }
+
     /// Runs one frame and counts it. Before the frame, the typist presses or releases a key.
+    /// After the frame, the audio samples of the frame replace the samples of the last frame,
+    /// so that they do not collect in headless mode.
     fn run_frame(&mut self) -> Result<(), FrontendError> {
         if let Some(typist) = &mut self.typist {
             typist.before_frame(&mut self.machine).map_err(|NotReady| {
@@ -279,6 +289,8 @@ impl Frontend {
         self.machine.run_frame();
         self.last_frame_cycles = self.machine.cycle_count() - start;
         self.frames_run += 1;
+        self.audio.clear();
+        self.machine.drain_audio(&mut self.audio);
         Ok(())
     }
 
@@ -290,6 +302,7 @@ impl Frontend {
     ///
     /// [`FrontendError::BasicNotStarted`] when the typist does not see the `Ready` prompt.
     pub fn step(&mut self, keys: &[Key]) -> Result<Flow, FrontendError> {
+        self.audio.clear();
         let input = InputState::from_keys(keys, &self.input);
         if input.quit {
             return Ok(Flow::Quit);
@@ -355,7 +368,16 @@ pub struct Pacer {
     period: Duration,
     /// The time at which the next frame starts.
     next: Instant,
+    /// The last frame ended after the start time of the next frame.
+    late: bool,
 }
+
+/// The largest delay that the pacing catches up.
+///
+/// When the frontend is more late than this (for example after a stop of the host), the
+/// pacing starts again from the current time. A smaller delay is caught up: the frames run
+/// without a wait until they are on time again.
+pub const MAX_LATE: Duration = Duration::from_millis(100);
 
 impl Pacer {
     /// Starts the pacing at `now` for the frame rate of `standard`.
@@ -365,6 +387,7 @@ impl Pacer {
         Self {
             period,
             next: now + period,
+            late: false,
         }
     }
 
@@ -374,20 +397,45 @@ impl Pacer {
         self.period
     }
 
+    /// Moves the time of the next frame by `seconds` (positive: later). The audio output
+    /// gives this correction from the level of its ring (REQ-011,
+    /// `SampleRing::correction`), so that the frames follow the clock of the audio device.
+    pub fn correct(&mut self, seconds: f64) {
+        if !seconds.is_finite() {
+            return;
+        }
+        let shift = Duration::from_secs_f64(seconds.abs().min(1.0));
+        if seconds > 0.0 {
+            self.next += shift;
+        } else {
+            self.next = self.next.checked_sub(shift).unwrap_or(self.next);
+        }
+    }
+
     /// Called at `now`, after a frame: returns the time to wait until the next frame. When
-    /// the frontend is more than one frame late, the pacing starts again from `now`.
+    /// the frontend is more than [`MAX_LATE`] late, the pacing starts again from `now`.
     pub fn wait(&mut self, now: Instant) -> Duration {
         let wait = self.next.saturating_duration_since(now);
-        if now > self.next + self.period {
+        if now > self.next + MAX_LATE {
             self.next = now + self.period;
+            self.late = false;
         } else {
+            self.late = now > self.next;
             self.next += self.period;
         }
         wait
     }
+
+    /// The last [`Pacer::wait`] was called after the start time of the next frame, by at
+    /// most [`MAX_LATE`]: the next frame must run at once to catch up.
+    #[must_use]
+    pub const fn late(&self) -> bool {
+        self.late
+    }
 }
 
-/// The host time after which the window shows the next frame in turbo (REQ-080).
+/// The host time after which the window shows the next frame in turbo (REQ-080), or while
+/// the real-time pacing catches up (REQ-007).
 ///
 /// While the window types a BASIC program (criterion 7), one frame and one window update
 /// take much less than 50 ms, so the window shows a frame at least every 100 ms.
@@ -404,9 +452,12 @@ pub struct AfterFrame {
 
 /// The frame pacing of the window: real time or turbo.
 ///
-/// Real time is [`Pacer`] (REQ-007). Turbo is used while a BASIC program is typed (REQ-080
-/// criterion 7). In turbo, the frames run without a wait, and the
-/// window shows a frame each [`TURBO_PRESENT_INTERVAL`] of host time.
+/// Real time is [`Pacer`] (REQ-007). When a frame ends late (for example because the
+/// window update waited for the display), the window does not show the next frame, so
+/// that the frames catch up; it still shows a frame each [`TURBO_PRESENT_INTERVAL`]. Turbo
+/// is used while a BASIC program is typed (REQ-080 criterion 7). In turbo, the frames run
+/// without a wait, and the window shows a frame each [`TURBO_PRESENT_INTERVAL`] of host
+/// time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pacing {
     /// The video standard, for a new [`Pacer`] after turbo.
@@ -431,6 +482,14 @@ impl Pacing {
         }
     }
 
+    /// Moves the time of the next real-time frame by `seconds` ([`Pacer::correct`]). In
+    /// turbo, it has no effect.
+    pub fn correct(&mut self, seconds: f64) {
+        if !self.turbo {
+            self.pacer.correct(seconds);
+        }
+    }
+
     /// Called at `now`, after a frame. `turbo` is `true` while the BASIC program is typed
     /// ([`Frontend::typist`]). After turbo, the real-time pacing starts again from `now`.
     pub fn after_frame(&mut self, turbo: bool, now: Instant) -> AfterFrame {
@@ -450,11 +509,13 @@ impl Pacing {
             self.turbo = false;
             self.pacer = Pacer::new(self.standard, now);
         }
-        self.last_present = now;
-        AfterFrame {
-            present: true,
-            wait: self.pacer.wait(now),
+        let wait = self.pacer.wait(now);
+        let present = !self.pacer.late()
+            || now.saturating_duration_since(self.last_present) >= TURBO_PRESENT_INTERVAL;
+        if present {
+            self.last_present = now;
         }
+        AfterFrame { present, wait }
     }
 }
 
@@ -474,6 +535,7 @@ mod tests {
         DisplayFilters, Flow, Frontend, Pacer, Pacing, TURBO_PRESENT_INTERVAL, convert_row,
         load_machine, render, window_size, window_title,
     };
+    use crate::audio::SampleRing;
     use crate::bas::{CH, READY_TIMEOUT_FRAMES, Typist, program_codes};
     use crate::cli::Options;
     use crate::error::FrontendError;
@@ -559,7 +621,7 @@ mod tests {
             cart: Some(cart),
             ..Options::default()
         };
-        assert!(load_machine(&options).is_ok(), "valid files");
+        assert!(load_machine(&options, 48_000).is_ok(), "valid files");
         for (bad, expect_path) in [
             (
                 Options {
@@ -576,7 +638,7 @@ mod tests {
                 &small,
             ),
         ] {
-            match load_machine(&bad) {
+            match load_machine(&bad, 48_000) {
                 Err(FrontendError::Rom { path, .. }) => assert_eq!(&path, expect_path, "ROM"),
                 other => panic!("{bad:?} gave {other:?}"),
             }
@@ -586,7 +648,7 @@ mod tests {
             ..options.clone()
         };
         assert!(
-            matches!(load_machine(&bad_cart), Err(FrontendError::Media { path, .. }) if path == small),
+            matches!(load_machine(&bad_cart, 48_000), Err(FrontendError::Media { path, .. }) if path == small),
             "cartridge"
         );
         let missing = Options {
@@ -594,7 +656,10 @@ mod tests {
             ..options
         };
         assert!(
-            matches!(load_machine(&missing), Err(FrontendError::Read { .. })),
+            matches!(
+                load_machine(&missing, 48_000),
+                Err(FrontendError::Read { .. })
+            ),
             "missing file"
         );
     }
@@ -789,6 +854,233 @@ mod tests {
         );
     }
 
+    /// A fake audio device: it takes `chunk` samples from the ring each `chunk / rate`
+    /// seconds of the fake clock, as the `cpal` callback does.
+    struct FakeDevice {
+        /// The sample rate of the device clock (it can differ from the nominal rate).
+        rate: f64,
+        /// The samples of one callback.
+        chunk: u32,
+        /// The time of the next callback, in seconds from the start.
+        next: f64,
+    }
+
+    impl FakeDevice {
+        /// Runs the callbacks up to `until` seconds from the start.
+        fn run_until(&mut self, ring: &mut SampleRing, until: f64) {
+            loop {
+                if self.next > until {
+                    break;
+                }
+                ring.fill_with(usize::try_from(self.chunk).unwrap(), |_| {});
+                self.next += f64::from(self.chunk) / self.rate;
+            }
+        }
+    }
+
+    /// The result of [`simulate`].
+    struct Simulated {
+        /// The fake host time of all frames.
+        elapsed: Duration,
+        /// The ring after the frames.
+        ring: SampleRing,
+    }
+
+    /// Runs `frames` frames of the window loop (architecture.md steps 2, 4 and 5) with a
+    /// fake clock: each frame takes 3 ms of host time and makes `sample_rate / frame rate`
+    /// samples (none when `sample_rate` is 0, as the core before POKEY audio). The ring
+    /// gets the samples, its level corrects the wait, and `device` takes the samples.
+    fn simulate(standard: VideoStandard, sample_rate: u32, device: FakeDevice) -> Simulated {
+        simulate_frames(standard, sample_rate, device, 600, Duration::ZERO)
+    }
+
+    /// [`simulate`] with `frames` frames, and a window update that takes `present` of host
+    /// time for each shown frame (as the window waits for the display). The wait after a
+    /// shown frame is the wait minus the update time, as in `window::run`.
+    fn simulate_frames(
+        standard: VideoStandard,
+        sample_rate: u32,
+        mut device: FakeDevice,
+        frames: u32,
+        present: Duration,
+    ) -> Simulated {
+        let rate = if sample_rate == 0 {
+            48_000
+        } else {
+            sample_rate
+        };
+        let mut ring = SampleRing::new(rate);
+        let start = Instant::now();
+        let mut pacing = Pacing::new(standard, start);
+        let mut clock = start;
+        let per_frame = f64::from(sample_rate) / standard.frames_per_second();
+        let mut made = 0.0_f64;
+        let mut pushed = 0_u64;
+        let mut samples = Vec::new();
+        for _ in 0..frames {
+            clock += Duration::from_millis(3);
+            device.run_until(&mut ring, (clock - start).as_secs_f64());
+            made += per_frame;
+            samples.clear();
+            loop {
+                if f64::from(u32::try_from(pushed).unwrap()) + 1.0 > made {
+                    break;
+                }
+                samples.push(0.25);
+                pushed += 1;
+            }
+            ring.push(&samples);
+            pacing.correct(ring.correction(rate));
+            let after = pacing.after_frame(false, clock);
+            let mut wait = after.wait;
+            if after.present {
+                clock += present;
+                device.run_until(&mut ring, (clock - start).as_secs_f64());
+                wait = wait.saturating_sub(present);
+            }
+            clock += wait;
+            device.run_until(&mut ring, (clock - start).as_secs_f64());
+        }
+        Simulated {
+            elapsed: clock - start,
+            ring,
+        }
+    }
+
+    /// The device of a host: `rate` Hz, callbacks of 512 samples.
+    const fn device(rate: f64) -> FakeDevice {
+        FakeDevice {
+            rate,
+            chunk: 512,
+            next: 0.0,
+        }
+    }
+
+    /// Verifies REQ-007: 600 frames take 600 frame periods of host time (10.013 s NTSC,
+    /// 12.034 s PAL) within 1 percent, with the audio level correction on (a device at
+    /// the nominal rate, at 0.2 percent off, and with callbacks of 2048 samples), and
+    /// exactly without audio samples (criterion 1, with a fake clock). A window update
+    /// that takes 15 ms (frame and update longer than one frame period) does not slow
+    /// the emulation: the late frames are not shown.
+    #[test]
+    fn paced_frames_keep_the_frame_rate() {
+        for standard in [VideoStandard::Ntsc, VideoStandard::Pal] {
+            let expected = 600.0 / standard.frames_per_second();
+            for rate in [0, 48_000] {
+                let slow = simulate_frames(
+                    standard,
+                    rate,
+                    device(48_000.0),
+                    600,
+                    Duration::from_millis(15),
+                );
+                let seconds = slow.elapsed.as_secs_f64();
+                assert!(
+                    (seconds - expected).abs() <= expected * 0.01,
+                    "{standard:?} {rate} Hz, slow window: {seconds} s, not {expected} s"
+                );
+                assert_eq!(slow.ring.underruns(), 0, "slow window: no underrun");
+            }
+            let expected = 600.0 / standard.frames_per_second();
+            let cases = [
+                (48_000, device(48_000.0)),
+                (44_100, device(44_100.0)),
+                (48_000, device(48_096.0)),
+                (48_000, device(47_904.0)),
+                (
+                    48_000,
+                    FakeDevice {
+                        rate: 48_000.0,
+                        chunk: 2048,
+                        next: 0.0,
+                    },
+                ),
+            ];
+            for (rate, dev) in cases {
+                let dev_rate = dev.rate;
+                let run = simulate(standard, rate, dev);
+                let seconds = run.elapsed.as_secs_f64();
+                assert!(
+                    (seconds - expected).abs() <= expected * 0.01,
+                    "{standard:?} {rate} Hz on a {dev_rate} Hz device: {seconds} s, not {expected} s"
+                );
+                assert!(
+                    run.ring.playing(),
+                    "{standard:?} {rate} Hz: the sound plays"
+                );
+            }
+            let silent = simulate(standard, 0, device(48_000.0));
+            assert!(
+                (silent.elapsed.as_secs_f64() - expected).abs() < 1e-3,
+                "{standard:?} without samples: {:?}",
+                silent.elapsed
+            );
+            assert!(!silent.ring.playing(), "no samples, no sound");
+        }
+    }
+
+    /// Verifies REQ-011: with the samples of each frame in the ring and the level
+    /// correction of the frame wait, the device callbacks have no underrun at real-time
+    /// speed: for 10 s and for 10 minutes, at the nominal device rate and with a device
+    /// clock 0.2 percent fast or slow (criterion 1, with a fake clock and a fake device).
+    /// Without samples (the core before POKEY audio), nothing blocks and no underrun is
+    /// counted.
+    #[test]
+    fn audio_ring_has_no_underruns() {
+        for (frames, dev_rate, chunk) in [
+            (600, 48_000.0, 512),
+            (600, 48_096.0, 512),
+            (600, 47_904.0, 512),
+            (600, 48_000.0, 2048),
+            (36_000, 48_096.0, 512),
+            (36_000, 47_904.0, 512),
+        ] {
+            let dev = FakeDevice {
+                rate: dev_rate,
+                chunk,
+                next: 0.0,
+            };
+            let run = simulate_frames(VideoStandard::Ntsc, 48_000, dev, frames, Duration::ZERO);
+            assert_eq!(
+                run.ring.underruns(),
+                0,
+                "{frames} frames on a {dev_rate} Hz device, callbacks of {chunk}"
+            );
+            assert_eq!(run.ring.dropped(), 0, "{frames} frames: no sample dropped");
+            assert!(
+                run.ring.queued() <= run.ring.target() * 2,
+                "{frames} frames: the level stays near the target: {}",
+                run.ring.queued()
+            );
+        }
+        let silent = simulate(VideoStandard::Ntsc, 0, device(48_000.0));
+        assert_eq!(silent.ring.underruns(), 0, "no samples: no underrun");
+        assert_eq!(silent.ring.received(), 0, "no samples");
+    }
+
+    /// Verifies REQ-011: each step gives the samples of its own frame from
+    /// `Machine::drain_audio` (at most one frame of samples, none while paused), so that
+    /// they do not collect. The core before POKEY audio gives none.
+    #[test]
+    fn step_hands_over_the_frame_audio() {
+        let mut frontend = Frontend::new(machine());
+        let most = 48_000.0 / VideoStandard::Ntsc.frames_per_second() + 2.0;
+        for _ in 0..5 {
+            step(&mut frontend, &[]);
+            let count = f64::from(u32::try_from(frontend.audio().len()).unwrap());
+            assert!(count <= most, "one frame of samples, not {count}");
+        }
+        frontend.run_frames(10).unwrap();
+        let count = f64::from(u32::try_from(frontend.audio().len()).unwrap());
+        assert!(count <= most, "headless: one frame of samples, not {count}");
+        step(&mut frontend, &[Key::F9]);
+        assert!(frontend.paused(), "paused");
+        step(&mut frontend, &[]);
+        assert!(frontend.audio().is_empty(), "no samples while paused");
+    }
+
+    /// Verifies REQ-007: the pacer waits one frame period, and an audio correction moves
+    /// the time of the next frame.
     #[test]
     fn pacer_keeps_the_frame_rate() {
         let start = Instant::now();
@@ -811,6 +1103,35 @@ mod tests {
         let late = now + period * 10;
         assert_eq!(pacer.wait(late), Duration::ZERO, "late frame");
         assert_eq!(pacer.wait(late), period, "pacing restarted");
+        // The audio level moves the next frame later or earlier.
+        let now = late + period;
+        pacer.correct(0.001);
+        let wait = pacer.wait(now);
+        assert!(
+            wait.abs_diff(period + Duration::from_millis(1)) < Duration::from_micros(1),
+            "later: {wait:?}"
+        );
+        let now = now + wait;
+        pacer.correct(-0.001);
+        let wait = pacer.wait(now);
+        assert!(
+            wait.abs_diff(period.checked_sub(Duration::from_millis(1)).unwrap())
+                < Duration::from_micros(1),
+            "earlier: {wait:?}"
+        );
+        // In turbo, the correction has no effect.
+        let mut pacing = Pacing::new(VideoStandard::Ntsc, start);
+        assert_eq!(
+            pacing.after_frame(true, start).wait,
+            Duration::ZERO,
+            "turbo"
+        );
+        pacing.correct(0.001);
+        assert_eq!(
+            pacing.after_frame(true, start).wait,
+            Duration::ZERO,
+            "turbo: no wait"
+        );
     }
 
     /// Verifies REQ-411, REQ-412: converts a frame with the default frontend settings and

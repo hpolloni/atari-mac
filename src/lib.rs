@@ -4,6 +4,7 @@
 //!
 //! | Module | Contents |
 //! | --- | --- |
+//! | [`audio`] | The audio output: the ring buffer, the frame wait correction, the `cpal` stream (REQ-011) |
 //! | [`cli`] | The command line |
 //! | [`bas`] | A BASIC program from a text file, typed at the `Ready` prompt (REQ-080) |
 //! | [`keymap`] | Host key to Atari key (REQ-009, REQ-010, REQ-017) |
@@ -16,6 +17,7 @@
     reason = "bitflags 1 comes only from sdl2, which orbclient uses on non-Redox hosts; minifb uses orbclient only on Redox, so it is never built (cargo-deny checks only the real targets)"
 )]
 
+pub mod audio;
 pub mod bas;
 pub mod cli;
 pub mod error;
@@ -26,11 +28,12 @@ mod planned;
 pub mod window;
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{self, Write};
 use std::time::Instant;
 
 pub use atari_core;
 
+use crate::audio::{AudioOutput, DEFAULT_SAMPLE_RATE};
 use crate::bas::Typist;
 use crate::cli::{Command, Options, USAGE};
 use crate::error::FrontendError;
@@ -52,41 +55,65 @@ pub fn run(
     }
 }
 
-/// Creates the frontend for `options`: reads and checks the BASIC program file of `--bas`
-/// first (REQ-080 criteria 4 and 5), then creates the machine.
+/// Creates the frontend for `options` with the audio sample rate [`DEFAULT_SAMPLE_RATE`]
+/// ([`start_at`]).
+///
+/// # Errors
+///
+/// The errors of [`start_at`].
+pub fn start(options: &Options) -> Result<Frontend, FrontendError> {
+    start_at(options, DEFAULT_SAMPLE_RATE)
+}
+
+/// Creates the frontend for `options` with the audio sample rate `sample_rate`: reads and
+/// checks the BASIC program file of `--bas` first (REQ-080 criteria 4 and 5), then creates
+/// the machine.
 ///
 /// # Errors
 ///
 /// The errors of [`bas::load`] and [`load_machine`].
-pub fn start(options: &Options) -> Result<Frontend, FrontendError> {
+pub fn start_at(options: &Options, sample_rate: u32) -> Result<Frontend, FrontendError> {
     let codes = options
         .bas
         .as_deref()
         .map(|path| bas::load(path, !options.no_run))
         .transpose()?;
-    let frontend = Frontend::new(load_machine(options)?);
+    let frontend = Frontend::new(load_machine(options, sample_rate)?);
     Ok(match codes {
         Some(codes) => frontend.with_typist(Typist::new(codes)),
         None => frontend,
     })
 }
 
-/// Runs the machine with the window or headless, then writes the elapsed time and the
-/// screenshot.
+/// Runs the machine with the window or headless, then writes the elapsed time, the audio
+/// numbers (`--audio-stats`) and the screenshot.
+///
+/// The window opens the audio stream on the default output device before it creates the
+/// machine, so that the machine makes samples at the rate of the stream. Without a device,
+/// a warning goes to standard error and the emulator runs without sound (REQ-011).
 fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendError> {
-    let mut frontend = start(options)?;
+    let audio = if options.headless {
+        AudioOutput::off("--headless")
+    } else {
+        let audio = AudioOutput::open_default();
+        if let Some(reason) = audio.error() {
+            writeln!(io::stderr(), "atari-mac: warning: no sound: {reason}")
+                .map_err(FrontendError::Output)?;
+        }
+        audio
+    };
+    let mut frontend = start_at(options, audio.sample_rate())?;
     let elapsed = match options.frames {
         Some(frames) if options.headless => {
             let start = Instant::now();
             frontend.run_frames(frames)?;
             start.elapsed()
         }
-        frames => window::run(
+        _ => window::run(
             &mut frontend,
             &window_title(options.cart.as_deref().or(options.bas.as_deref())),
-            options.scale,
-            options.filters,
-            frames,
+            options,
+            &audio,
         )?,
     };
     if options.frames.is_some() {
@@ -99,6 +126,9 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
             frontend.last_frame_cycles()
         )
         .map_err(FrontendError::Output)?;
+    }
+    if options.audio_stats {
+        writeln!(out, "{}", audio.stats()).map_err(FrontendError::Output)?;
     }
     if let Some(path) = &options.screenshot {
         let machine = frontend.machine();

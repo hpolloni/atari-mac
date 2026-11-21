@@ -94,6 +94,61 @@ The frontend loop:
 5. Wait until the time of the next frame. The audio buffer level corrects the wait time,
    so that the audio does not have gaps (REQ-011).
 
+### Emulation thread and frame pacing (REQ-007)
+
+`window::run` runs the frame loop on an emulation thread and the window on the main thread
+(macOS needs the window on the main thread). The window thread reads the host keys, gives
+them to the emulation thread, and shows the last frame that the emulation thread gives. A
+`minifb` window update waits for the display, and macOS can stop it for up to 1 s (measured
+2026-11-20: one stop of 1.0 s in 3 of 4 runs of 300 or 600 frames). Before
+this change, the loop ran in one thread, and `--frames 600` took 11.0 s instead of 10.0 s.
+On its own thread, the emulation keeps the frame rate and gives the audio samples in time
+while the window waits.
+
+`Pacer` waits until the start time of the next frame. When a frame ends late by at most
+`MAX_LATE` (100 ms), the next frame runs at once, and the emulation thread does not give it
+to the window (at least one frame each `TURBO_PRESENT_INTERVAL` is still shown), so that the
+frames catch up. When a frame ends more than `MAX_LATE` late, the pacing starts again from
+the current time. `--frames` measures the time from the first frame to the end of the last
+frame on the emulation thread.
+
+### Audio output (REQ-007, REQ-011)
+
+The module `audio` of the frontend owns the sound. `AudioOutput::open_default` opens a
+`cpal` output stream on the default output device of the host, with the default sample rate,
+channel count and sample format of the device. The frontend opens the stream before it
+creates the machine, and `MachineConfig::audio_sample_rate` is the rate of the stream, so that
+no resampling is necessary and the frontend does not change the rate of the device. Each
+channel of the stream gets the same mono sample.
+
+- `Frontend` takes the samples of each frame with `Machine::drain_audio` after the frame
+  (`Frontend::audio`). The samples of the last frame replace the samples before them, also
+  in headless mode, so that they do not collect. A step without a frame (pause) has no
+  samples.
+- `SampleRing` is the ring buffer between the frame loop and the audio callback (a
+  `VecDeque<f32>` in a `Mutex`; the frame loop holds the lock only to copy one frame of
+  samples). The ring is silent until it holds the target level: 50 ms of audio (`TARGET_MS`),
+  or two callback requests when they are larger. Then it plays. When a callback asks for more
+  samples than the ring holds, that is one underrun: the ring holds the last sample value for
+  the rest of the request and is silent until it reaches the target level again. The ring
+  holds at most 250 ms (`CAPACITY_MS`); more samples drop the oldest.
+- Step 5: after each frame, `SampleRing::correction` moves the time of the next frame by
+  `CORRECTION_GAIN` (0.05) of the level error (the level minus the target, in seconds of
+  audio), at most 1 ms (`MAX_CORRECTION`). When the ring holds more than the target, the next
+  frame comes later. So the frames follow the clock of the audio device, and the level stays
+  near the target. The correction is 0 while the ring does not play, so a machine that makes
+  no samples runs on the host clock only (`Pacer`).
+- `AudioOutput` keeps the stream on the main thread; the emulation thread uses its
+  `AudioSink` (`AudioOutput::sink`) for steps 4 and 5.
+- While the emulation is paused or in turbo (REQ-080), the frame loop calls `AudioSink::stop`:
+  the ring is emptied and is silent. This is not an underrun.
+- No audio device, or a stream that cannot start: the frontend writes
+  `atari-mac: warning: no sound: <reason>` to standard error and runs without sound and
+  without the correction. `--headless` opens no stream.
+- `--audio-stats` writes one line at exit, for example
+  `audio: 48000 Hz, 2 channels, 480512 samples, 0 underruns, 0 dropped`, or
+  `audio: off (<reason>)` without a stream.
+
 ### Key mapping (REQ-009, REQ-010, REQ-017)
 
 | Host key | Atari key |
@@ -247,8 +302,8 @@ file error.
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
-| REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md` |
-| REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md` |
+| REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md`. The pacing logic: `src/frontend.rs` unit tests `paced_frames_keep_the_frame_rate` (1, fake clock), `pacer_keeps_the_frame_rate` |
+| REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md`. The ring and the wait correction: `src/audio.rs` unit tests `ring_plays_samples_in_order`, `ring_without_samples_is_silent`, `ring_counts_underruns`, `ring_drops_oldest_when_full`, `correction_follows_the_level`; `src/frontend.rs` unit tests `audio_ring_has_no_underruns` (1, fake clock and device), `step_hands_over_the_frame_audio` |
 | REQ-008 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-008.md` |
 | REQ-001 | Inspection: a review of the repository against the acceptance criteria; evidence `docs/verification/REQ-001.md` |
 | REQ-015 | Inspection: a review of the repository against the acceptance criteria; evidence `docs/verification/REQ-015.md` |

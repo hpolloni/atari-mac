@@ -39,6 +39,7 @@ Options:
   --scale <n>          Window scale, 1 to 8 (default: 2)
   --frames <n>         Run n frames, then print the elapsed time and exit
   --headless           No window and no audio (needs --frames)
+  --audio-stats        At exit, print the audio sample rate and the underrun count
   --screenshot <file>  At exit, save the last frame as a PNG file
   --artifacting        NTSC artifacting filter: false colors for hires pixel patterns
   --pal-blending       PAL chroma blending filter (needs a PAL machine)
@@ -72,6 +73,8 @@ pub struct Options {
     pub bas: Option<PathBuf>,
     /// Type the program, but do not type `RUN` (`--no-run`, REQ-080).
     pub no_run: bool,
+    /// At exit, print the audio numbers (`--audio-stats`, REQ-011).
+    pub audio_stats: bool,
 }
 
 impl Default for Options {
@@ -88,6 +91,7 @@ impl Default for Options {
             filters: DisplayFilters::default(),
             bas: None,
             no_run: false,
+            audio_stats: false,
         }
     }
 }
@@ -153,6 +157,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--pal-blending" => options.filters.pal_blending = true,
             "--bas" => options.bas = Some(value(&mut args, "--bas")?.into()),
             "--no-run" => options.no_run = true,
+            "--audio-stats" => options.audio_stats = true,
             "--scale" => {
                 let scale = number(&mut args, "--scale")?;
                 if !(1..=MAX_SCALE).contains(&scale) {
@@ -275,6 +280,7 @@ mod tests {
             "--bas",
             "game.bas",
             "--no-run",
+            "--audio-stats",
         ]);
         assert_eq!(
             options,
@@ -290,6 +296,7 @@ mod tests {
                 filters: DisplayFilters::default(),
                 bas: Some("game.bas".into()),
                 no_run: true,
+                audio_stats: true,
             },
             "all options"
         );
