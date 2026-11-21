@@ -7,6 +7,8 @@
 //! 5-bit counters are XNOR counters, and the 9/17-bit counter is stored so that `RANDOM`
 //! reads its bits inverted (HRM 14.4 `RANDOM` table, OI-031).
 
+use crate::state::impl_state;
+
 /// The noise bits that one audio channel sees in a cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct NoiseBits {
@@ -32,6 +34,14 @@ pub(super) struct Noise {
     /// The output bits of the 5-bit counter: bit k is the output of k cycles ago.
     hist5: u8,
 }
+
+impl_state!(Noise {
+    poly4,
+    poly5,
+    poly17,
+    hist4,
+    hist5
+});
 
 impl Noise {
     /// The power-on state: all counters zero.

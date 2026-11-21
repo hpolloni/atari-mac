@@ -4,6 +4,8 @@
 //! Design: `docs/design/pokey.md`, "Audio output". The HRM does not cover host audio. The
 //! machine clock rates come from HRM 3.3, the output stages from HRM E.2 to E.5.
 
+use crate::state::impl_state;
+
 /// The DAC weights of the volume bits 0-3 (HRM E.2, REQ-541).
 const DAC_WEIGHTS: [f64; 4] = [0.12, 0.26, 0.56, 1.12];
 /// The normalizing divisor of the DAC sum: the sum of the weights of four channels.
@@ -76,6 +78,22 @@ pub(super) struct Audio {
     /// A cache: the mix level `x` of `level_key`.
     level: f64,
 }
+
+impl_state!(Audio {
+    clock_hz,
+    sample_rate,
+    nonlinear,
+    phase,
+    acc_pokey,
+    acc_spk,
+    hp1,
+    hp2,
+    a1,
+    a2,
+    samples,
+    level_key,
+    level,
+});
 
 /// The `level_key` that no `volumes` can give (each volume is 0-15).
 const NO_LEVEL: u32 = u32::MAX;

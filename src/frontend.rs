@@ -534,6 +534,10 @@ impl Pacing {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the pacing tests measure the host time; the core reads no clock (REQ-014)"
+)]
 mod tests {
     use std::env::temp_dir;
     use std::fs::{create_dir_all, write};

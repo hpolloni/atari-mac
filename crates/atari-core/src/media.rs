@@ -8,6 +8,8 @@
 use core::error::Error;
 use core::fmt;
 
+use crate::state::{FNV_START, Reader, State, StateError, Writer, fnv1a};
+
 mod disk;
 mod tape;
 mod xex;
@@ -195,6 +197,26 @@ pub struct Cartridge {
     /// tests (`docs/design/system.md`, "Test plan").
     #[cfg(test)]
     pub(crate) control_accesses: u32,
+}
+
+// The ROM and the kind come from the configuration: the state holds the hash of the ROM,
+// and a load into a machine with another cartridge fails. The test counter
+// `control_accesses` is not saved.
+impl State for Cartridge {
+    fn save(&self, w: &mut Writer) {
+        fnv1a(FNV_START, &self.rom).save(w);
+        self.bank.save(w);
+        self.enabled.save(w);
+    }
+    fn load(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        let mut hash = 0_u64;
+        hash.load(r)?;
+        if hash != fnv1a(FNV_START, &self.rom) {
+            return Err(StateError::Config);
+        }
+        self.bank.load(r)?;
+        self.enabled.load(r)
+    }
 }
 
 /// The big-endian `u32` at `offset` of `bytes`, or 0 if `bytes` is too short.

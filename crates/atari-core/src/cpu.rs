@@ -17,6 +17,8 @@ mod tests;
 
 use core::mem;
 
+use crate::state::{impl_state, impl_state_enum};
+
 use decode::{Am, Kind, Op, TABLE};
 
 /// The CPU's view of the system. Each call is the bus access of one CPU cycle.
@@ -64,6 +66,8 @@ pub struct Registers {
     pub pc: u16,
 }
 
+impl_state!(Registers { a, x, y, s, p, pc });
+
 /// The result of [`Cpu::step`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -102,10 +106,19 @@ enum Mode {
     Jammed,
 }
 
+impl_state_enum!(Mode {
+    Fetch,
+    Execute,
+    Interrupt,
+    Reset,
+    Jammed
+});
+
 /// How a cycle ends, for the interrupt poll.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum End {
     /// The instruction continues. The poll result of this cycle replaces the old one.
+    #[default]
     Continue,
     /// The instruction continues, but the poll result of this cycle is not used: the second
     /// cycle of a taken branch (REQ-121).
@@ -113,6 +126,12 @@ enum End {
     /// This was the last cycle. The poll result of the cycle before is used.
     Done,
 }
+
+impl_state_enum!(End {
+    Continue,
+    Hold,
+    Done
+});
 
 /// The first value of `Cpu::cycle` in the cycles at the effective address.
 const OPERAND: u8 = 0x40;
@@ -174,6 +193,28 @@ pub struct Cpu {
     /// sampled at its end is lost (REQ-122).
     discard_nmi: bool,
 }
+
+impl_state!(Cpu {
+    regs,
+    opcode,
+    cycle,
+    mode,
+    addr,
+    base_hi,
+    crossed,
+    data,
+    nmi_level,
+    nmi_edge,
+    nmi_pending,
+    irq_level,
+    poll,
+    vector,
+    brk,
+    no_poll_next,
+    jam_cycle,
+    tick_end,
+    discard_nmi,
+});
 
 /// A bus that forwards each access and records whether it was a write. `tick` uses it when
 /// RDY is low (REQ-126).

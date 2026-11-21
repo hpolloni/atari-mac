@@ -850,17 +850,70 @@ fn pinned_references_are_ignored() {
     );
 }
 
-/// Fails the test that calls it. A planned stub calls this function, so that the stub never
-/// passes when it runs (`cargo test -- --include-ignored`).
-#[expect(clippy::panic, reason = "a planned test stub must fail when it runs")]
-fn planned() {
-    panic!("planned test: a package replaces this stub with the real test");
+/// The jobs of a GitHub workflow: the key of each job and its lines (the lines after
+/// `jobs:` with an indent of 2 spaces start a job).
+fn workflow_jobs(workflow: &str) -> Vec<(String, Vec<&str>)> {
+    let mut jobs: Vec<(String, Vec<&str>)> = Vec::new();
+    let mut in_jobs = false;
+    for line in workflow.lines() {
+        if !line.starts_with(' ') && !line.is_empty() {
+            in_jobs = line == "jobs:";
+            continue;
+        }
+        if !in_jobs {
+            continue;
+        }
+        if let Some(key) = line.strip_prefix("  ").and_then(|l| l.strip_suffix(':'))
+            && !key.starts_with([' ', '#'])
+        {
+            jobs.push((key.to_owned(), Vec::new()));
+        } else if let Some((_, lines)) = jobs.last_mut() {
+            lines.push(line);
+        }
+    }
+    jobs
 }
 
 /// Verifies REQ-042: the CI job `Coverage (cargo-llvm-cov)` in `.github/workflows/ci.yml`
-/// runs `cargo llvm-cov` on the workspace with `--fail-under-lines 80` (criterion 1).
+/// runs `cargo llvm-cov` on the workspace with `--fail-under-lines 80` (criterion 1). The
+/// job `CI success` needs it, and `make coverage` uses the same threshold.
 #[test]
-#[ignore = "planned: SLICE-06"]
 fn coverage_job_needs_80_percent() {
-    planned();
+    let root = data::repo_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+    let jobs = workflow_jobs(&workflow);
+    let named = |name: &str| {
+        jobs.iter()
+            .find(|(_, lines)| lines.iter().any(|l| l.trim() == format!("name: {name}")))
+            .unwrap_or_else(|| panic!("no CI job {name}"))
+    };
+    let (coverage_key, coverage) = named("Coverage (cargo-llvm-cov)");
+    let run = coverage
+        .iter()
+        .filter_map(|l| l.trim().strip_prefix("- run: "))
+        .find(|command| command.starts_with("cargo llvm-cov"))
+        .expect("the coverage job runs cargo llvm-cov");
+    let words: Vec<&str> = run.split_whitespace().collect();
+    assert!(words.contains(&"--workspace"), "{run}: --workspace");
+    assert!(
+        words.windows(2).any(|w| w == ["--fail-under-lines", "80"]),
+        "{run}: --fail-under-lines 80"
+    );
+    let (_, success) = named("CI success");
+    let needs = success
+        .iter()
+        .find_map(|l| l.trim().strip_prefix("needs: "))
+        .expect("CI success needs the other jobs");
+    assert!(
+        needs
+            .trim_matches(['[', ']'])
+            .split(',')
+            .any(|job| job.trim() == coverage_key),
+        "CI success needs {coverage_key}: {needs}"
+    );
+    let makefile = fs::read_to_string(root.join("Makefile")).unwrap();
+    assert!(
+        makefile.lines().any(|l| l == "COVERAGE_MIN := 80"),
+        "make coverage uses 80 percent"
+    );
 }

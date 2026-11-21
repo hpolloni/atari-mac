@@ -4,6 +4,8 @@
 //! Design: `docs/design/system.md`, "pia.rs". Requirements: REQ-218 to REQ-231. Hardware:
 //! HRM 2.5 and HRM 14.5.
 
+use crate::state::impl_state;
+
 /// `PACTL`/`PBCTL` bit 0: the CA1/CB1 interrupt is enabled.
 const CTL_C1_ENABLE: u8 = 0x01;
 /// `PACTL`/`PBCTL` bit 1: CA1/CB1 detects a positive edge (0 = negative edge).
@@ -105,6 +107,31 @@ pub struct Pia {
     /// Cycles until each floating bit reads 0. Index = bit number.
     float_timer: [u32; 8],
 }
+
+impl_state!(Pia {
+    ddra,
+    ddrb,
+    ora,
+    orb,
+    pactl,
+    pbctl,
+    irqa1,
+    irqa2,
+    irqb1,
+    irqb2,
+    port_a_in,
+    ca1,
+    cb1,
+    ca2_in,
+    cb2_in,
+    ca2_low,
+    cb2_low,
+    ca2_pulse,
+    cb2_pulse,
+    cb2_rose,
+    float_high,
+    float_timer,
+});
 
 impl Default for Pia {
     fn default() -> Self {
