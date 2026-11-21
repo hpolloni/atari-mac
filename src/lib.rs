@@ -37,7 +37,7 @@ use crate::audio::{AudioOutput, DEFAULT_SAMPLE_RATE};
 use crate::bas::Typist;
 use crate::cli::{Command, Options, USAGE};
 use crate::error::FrontendError;
-use crate::frontend::{Frontend, load_machine, window_title, write_png};
+use crate::frontend::{Frontend, load_machine, load_xex, window_title, write_png, xex_warnings};
 
 /// Runs the frontend with the command line arguments `args` (without the program name).
 /// Normal output goes to `out`.
@@ -106,6 +106,16 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
         }
         audio
     };
+    if let Some(path) = &options.xex {
+        for warning in xex_warnings(&load_xex(path)?) {
+            writeln!(
+                io::stderr(),
+                "atari-mac: warning: {}: {warning}",
+                path.display()
+            )
+            .map_err(FrontendError::Output)?;
+        }
+    }
     let mut frontend = start_at(options, audio.sample_rate())?;
     let elapsed = match options.frames {
         Some(frames) if options.headless => {
@@ -119,6 +129,7 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
                 options
                     .cart
                     .as_deref()
+                    .or(options.xex.as_deref())
                     .or(options.disk.as_deref())
                     .or(options.bas.as_deref()),
             ),

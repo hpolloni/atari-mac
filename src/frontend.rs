@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-use atari_core::media::{Cartridge, DiskImage, MediaError};
+use atari_core::media::{Cartridge, DiskImage, MediaError, Xex};
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
 use minifb::Key;
 
@@ -41,14 +41,50 @@ pub fn cartridge_from_file(bytes: Vec<u8>) -> Result<Cartridge, MediaError> {
     }
 }
 
+/// Reads and parses the executable file of `--xex` (REQ-012, REQ-610, REQ-611).
+///
+/// # Errors
+///
+/// [`FrontendError::Read`] when the file cannot be read, and [`FrontendError::Media`] when
+/// it is not a valid XEX file.
+pub fn load_xex(path: &Path) -> Result<Xex, FrontendError> {
+    Xex::parse(&read(path)?).map_err(|error| FrontendError::Media {
+        path: path.to_owned(),
+        error,
+    })
+}
+
+/// The warnings for an executable that loads, but not completely.
+///
+/// They name the first defect of the file (REQ-611) and a segment that overlaps the loader
+/// memory (REQ-612 Notes), as `docs/design/media.md`, "Executable files", gives.
+#[must_use]
+pub fn xex_warnings(xex: &Xex) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if let Some(defect) = xex.defect() {
+        warnings.push(format!(
+            "{} at offset {}: the segments after it do not load",
+            defect.kind.describe(),
+            defect.offset
+        ));
+    }
+    if let Some(start) = xex.loader_conflict() {
+        warnings.push(format!(
+            "the segment at ${start:04X} overlaps the loader memory $0700-$08FF"
+        ));
+    }
+    warnings
+}
+
 /// Creates the machine from the ROM and media files of `options` (REQ-004, REQ-012), with
 /// the audio sample rate `sample_rate` (the rate of the audio stream, REQ-011).
 ///
 /// # Errors
 ///
 /// [`FrontendError::Read`] when a file cannot be read, [`FrontendError::Rom`] for a ROM
-/// with the wrong size and [`FrontendError::Media`] for a cartridge or a disk image that is
-/// not valid.
+/// with the wrong size and [`FrontendError::Media`] for a cartridge, an executable or a disk
+/// image that is not valid. With `--xex`, the machine starts the executable
+/// ([`Machine::start_xex`], REQ-612).
 pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, FrontendError> {
     let os_rom = read(&options.os)?;
     let basic_rom = read(&options.basic)?;
@@ -74,7 +110,8 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
         }
         None => None,
     };
-    Machine::new(MachineConfig {
+    let xex = options.xex.as_deref().map(load_xex).transpose()?;
+    let mut machine = Machine::new(MachineConfig {
         os_rom,
         basic_rom: Some(basic_rom),
         cartridge,
@@ -89,7 +126,11 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
             ConfigError::BasicRomSize(_) => options.basic.clone(),
         },
         error,
-    })
+    })?;
+    if let Some(xex) = &xex {
+        machine.start_xex(xex);
+    }
+    Ok(machine)
 }
 
 /// The window title (REQ-008): the file name of the loaded media, or `atari-mac`.
@@ -560,13 +601,13 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-    use atari_core::media::{CartKind, MediaError};
+    use atari_core::media::{CartKind, MediaError, Xex};
     use atari_core::{Machine, MachineConfig, VideoStandard, keyboard, palette};
     use minifb::Key;
 
     use super::{
         DisplayFilters, Flow, Frontend, Pacer, Pacing, TURBO_PRESENT_INTERVAL, cartridge_from_file,
-        convert_row, load_machine, render, window_size, window_title,
+        convert_row, load_machine, render, window_size, window_title, xex_warnings,
     };
     use crate::audio::SampleRing;
     use crate::bas::{CH, READY_TIMEOUT_FRAMES, Typist, program_codes};
@@ -672,6 +713,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn xex_warnings_name_defect_and_loader_conflict() {
+        let good = Xex::parse(&[0xFF, 0xFF, 0x00, 0x20, 0x00, 0x20, 0x60]).unwrap();
+        assert!(xex_warnings(&good).is_empty(), "a complete file");
+        let bad = Xex::parse(&[
+            0xFF, 0xFF, 0x00, 0x08, 0x00, 0x08, 0x60, 0x00, 0x30, 0x10, 0x30,
+        ])
+        .unwrap();
+        let warnings = xex_warnings(&bad);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].contains("at offset 7"), "{warnings:?}");
+        assert!(warnings[1].contains("$0800"), "{warnings:?}");
     }
 
     #[test]

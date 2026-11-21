@@ -649,51 +649,196 @@ fn planned() {
     panic!("planned test: a package replaces this stub with the real test");
 }
 
-/// Planned executable file system tests (`docs/design/media.md`, "System test method for
-/// disks and executables").
+/// Executable file system tests (`docs/design/media.md`, "System test method for disks and
+/// executables"): `AltirraOS` and the BASIC ROM start an XEX file with
+/// `Machine::start_xex`, with the SIOV shortcut off and on, and the test waits for the
+/// marker byte that the run code writes.
 #[cfg(test)]
-mod planned_executables {
-    use super::planned;
+mod executables {
+    use atari_core::media::Xex;
+    use atari_core::{Machine, MachineConfig, VideoStandard};
+    use atari_harness::data::{basic_rom, os_rom};
+    use atari_harness::system::{TEST_SAMPLE_RATE, run_until};
+
+    /// The frame limit of REQ-612 to REQ-614.
+    const MAX_FRAMES: u32 = 600;
+
+    /// The run code of REQ-612: `LDA #$A5`, `STA $0600`, `JMP $3005`.
+    const RUN: [u8; 8] = [0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x4C, 0x05, 0x30];
+
+    /// The `RUNAD` segment data: `$3000`.
+    const RUNAD_3000: [u8; 2] = [0x00, 0x30];
+
+    /// An XEX file of `segments`.
+    fn xex_file(segments: &[(u16, &[u8])]) -> Vec<u8> {
+        let mut file = vec![0xFF, 0xFF];
+        for &(start, data) in segments {
+            let end = start + u16::try_from(data.len() - 1).unwrap();
+            file.extend(start.to_le_bytes());
+            file.extend(end.to_le_bytes());
+            file.extend(data);
+        }
+        file
+    }
+
+    /// A machine with `AltirraOS`, the BASIC ROM, no disk and the SIOV shortcut `fast_sio`,
+    /// after power-on. `ram` is written before the start.
+    fn machine(fast_sio: bool, ram: &[(u16, u8)]) -> Machine {
+        let mut m = Machine::new(MachineConfig {
+            os_rom: os_rom().unwrap(),
+            basic_rom: Some(basic_rom().unwrap()),
+            cartridge: None,
+            disk: None,
+            fast_sio,
+            standard: VideoStandard::Ntsc,
+            audio_sample_rate: TEST_SAMPLE_RATE,
+        })
+        .unwrap();
+        for &(addr, value) in ram {
+            m.poke_ram(addr, value);
+        }
+        m
+    }
+
+    /// Starts `file` (REQ-612) on [`machine`] and runs until `marker` is not `$00`, for at
+    /// most 600 frames. The test fails if the program does not start.
+    fn start(file: &[u8], fast_sio: bool, ram: &[(u16, u8)], marker: u16) -> Machine {
+        let mut m = machine(fast_sio, ram);
+        m.start_xex(&Xex::parse(file).unwrap());
+        let frames = run_until(&mut m, MAX_FRAMES, |m| m.peek_ram(marker) != 0x00);
+        assert!(
+            frames.is_some(),
+            "fast SIO {fast_sio}: ${marker:04X} is $00 after {MAX_FRAMES} frames"
+        );
+        m
+    }
 
     /// Verifies REQ-612: the segments at `$2000` and `$A000` are in RAM when the program
     /// starts, BASIC is off and RAM was cleared by a cold reset, with fast SIO off and on
     /// (criteria 1-3, 5).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req612_xex_loads_segments() {
-        planned();
+        let page: Vec<u8> = (0..=0xFF).collect();
+        let high: Vec<u8> = (0xF0..=0xFF).collect();
+        let file = xex_file(&[
+            (0x2000, &page),
+            (0xA000, &high),
+            (0x3000, &RUN),
+            (0x02E0, &RUNAD_3000),
+        ]);
+        let basic = basic_rom().unwrap();
+        assert_ne!(basic[0], 0xF0, "the BASIC ROM byte at $A000 is not $F0");
+        for fast_sio in [false, true] {
+            let m = start(&file, fast_sio, &[(0x7000, 0x77)], 0x0600);
+            assert_eq!(m.peek_ram(0x0600), 0xA5, "fast SIO {fast_sio}: the marker");
+            for k in 0..=0xFF_u8 {
+                assert_eq!(
+                    m.peek_ram(0x2000 + u16::from(k)),
+                    k,
+                    "1, fast SIO {fast_sio}: $2000 + {k}"
+                );
+            }
+            for k in 0..16_u8 {
+                assert_eq!(
+                    m.peek_ram(0xA000 + u16::from(k)),
+                    0xF0 + k,
+                    "1, fast SIO {fast_sio}: $A000 + {k}"
+                );
+            }
+            assert_eq!(
+                m.peek(0xA000),
+                0xF0,
+                "2, fast SIO {fast_sio}: a CPU read of $A000 sees RAM, not BASIC"
+            );
+            assert_eq!(
+                m.peek_ram(0x7000),
+                0x00,
+                "3, fast SIO {fast_sio}: the cold reset cleared $7000"
+            );
+        }
     }
 
     /// Verifies REQ-612: two segments at `$4000` load in file order, so `$4000` holds `$22`,
     /// with fast SIO off and on (criteria 4, 5).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req612_xex_file_order() {
-        planned();
+        let file = xex_file(&[
+            (0x4000, &[0x11]),
+            (0x4000, &[0x22]),
+            (0x3000, &RUN),
+            (0x02E0, &RUNAD_3000),
+        ]);
+        for fast_sio in [false, true] {
+            let m = start(&file, fast_sio, &[], 0x0600);
+            assert_eq!(m.peek_ram(0x0600), 0xA5, "fast SIO {fast_sio}: the marker");
+            assert_eq!(
+                m.peek_ram(0x4000),
+                0x22,
+                "4, fast SIO {fast_sio}: the later segment wins"
+            );
+        }
     }
 
-    /// Verifies REQ-613: the OS calls `INITAD` after the segment that sets it: `$0600` holds
-    /// `$11` within 600 frames, with fast SIO off and on (criteria 1, 2).
+    /// Verifies REQ-613: the loader calls `INITAD` after segments C and E of the test file:
+    /// `$0600` holds `$11` when `$0601` holds `$A5`, within 600 frames, with fast SIO off
+    /// and on (criteria 1, 2).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req613_initad_called_per_segment() {
-        planned();
+        let file = xex_file(&[
+            (0x0600, &[0x00]),
+            (0x2000, &[0xEE, 0x00, 0x06, 0x60]),
+            (0x02E2, &[0x00, 0x20]),
+            (0x0600, &[0x10]),
+            (0x02E2, &[0x00, 0x20]),
+            (0x3000, &[0xA9, 0xA5, 0x8D, 0x01, 0x06, 0x4C, 0x05, 0x30]),
+            (0x02E0, &RUNAD_3000),
+        ]);
+        for fast_sio in [false, true] {
+            let m = start(&file, fast_sio, &[], 0x0601);
+            assert_eq!(m.peek_ram(0x0601), 0xA5, "fast SIO {fast_sio}: the marker");
+            assert_eq!(
+                m.peek_ram(0x0600),
+                0x11,
+                "1, fast SIO {fast_sio}: INITAD after C and E only"
+            );
+        }
     }
 
     /// Verifies REQ-614: a `RUNAD` segment starts the program at `$3000`: `$0600` holds
     /// `$A5`, with fast SIO off and on (criteria 1, 3).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req614_runad() {
-        planned();
+        let file = xex_file(&[
+            (0x2000, &[0xA9, 0x5A, 0x8D, 0x00, 0x06, 0x4C, 0x05, 0x20]),
+            (0x3000, &RUN),
+            (0x02E0, &RUNAD_3000),
+        ]);
+        for fast_sio in [false, true] {
+            let m = start(&file, fast_sio, &[], 0x0600);
+            assert_eq!(
+                m.peek_ram(0x0600),
+                0xA5,
+                "1, fast SIO {fast_sio}: the program at RUNAD ran"
+            );
+        }
     }
 
     /// Verifies REQ-614: with no `RUNAD` segment, the program starts at the first segment
     /// (`$2000`): `$0600` holds `$A5`, with fast SIO off and on (criteria 2, 3).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req614_run_first_segment() {
-        planned();
+        let file = xex_file(&[
+            (0x2000, &[0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x4C, 0x05, 0x20]),
+            (0x3000, &[0xA9, 0x5A, 0x8D, 0x00, 0x06, 0x4C, 0x05, 0x30]),
+        ]);
+        for fast_sio in [false, true] {
+            let m = start(&file, fast_sio, &[], 0x0600);
+            assert_eq!(
+                m.peek_ram(0x0600),
+                0xA5,
+                "2, fast SIO {fast_sio}: the first segment ran"
+            );
+        }
     }
 }
 

@@ -14,7 +14,7 @@ packages:
     requirements: [REQ-016, REQ-615, REQ-616, REQ-617, REQ-618, REQ-619, REQ-620, REQ-621, REQ-622, REQ-623, REQ-624, REQ-625, REQ-626, REQ-627, REQ-628, REQ-629, REQ-630, REQ-631, REQ-632, REQ-633, REQ-634, REQ-635, REQ-636, REQ-637, REQ-638]
   - id: WP-3
     title: Executable boot
-    status: planned
+    status: done
     requirements: [REQ-612, REQ-613, REQ-614, REQ-012]
 ---
 # SLICE-05: Disk drive

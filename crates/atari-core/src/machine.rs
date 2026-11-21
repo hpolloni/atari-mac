@@ -23,7 +23,7 @@ use core::fmt;
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
 use crate::gtia::{ConsoleKeys, Gtia};
-use crate::media::{Cartridge, DiskImage, SioBus};
+use crate::media::{Cartridge, DiskImage, SioBus, Xex};
 use crate::pia::Pia;
 use crate::pokey::Pokey;
 use crate::state::StateError;
@@ -41,6 +41,19 @@ const PORTB_OS_ROM: u8 = 0x01;
 const PORTB_BASIC_OFF: u8 = 0x02;
 /// `PORTB` bit 7: self-test ROM disabled.
 const PORTB_SELF_TEST_OFF: u8 = 0x80;
+
+/// The bus ID of drive D1: (HRM 9.1), the first byte of its command frames.
+const DEVICE_D1: u8 = 0x31;
+
+/// The frames after the cold reset of [`Machine::start_xex`] at which the machine releases
+/// OPTION if D1: got no command: 3 seconds of emulated time, rounded to whole frames
+/// (`docs/design/media.md`, "XEX boot image", step 1).
+const fn xex_option_frames(standard: VideoStandard) -> u64 {
+    match standard {
+        VideoStandard::Ntsc => 180,
+        VideoStandard::Pal => 150,
+    }
+}
 
 /// The configuration of a [`Machine`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,6 +353,11 @@ pub struct Machine {
     cb2: bool,
     /// The SIOV shortcut is on (REQ-623). A setting of the frontend, not in the save state.
     fast_sio: bool,
+    /// The console keys of the last [`Machine::set_console_keys`] (the frontend input).
+    console_keys: ConsoleKeys,
+    /// While [`Machine::start_xex`] holds OPTION: the frame count at which the machine
+    /// releases it if D1: got no command before (REQ-612).
+    xex_option_until: Option<u64>,
     /// The TV standard.
     standard: VideoStandard,
     /// The last value on the data bus (the floating bus value for an idle cycle).
@@ -385,6 +403,8 @@ impl Machine {
             sio: SioBus::new(config.standard),
             cb2: true,
             fast_sio: config.fast_sio,
+            console_keys: ConsoleKeys::default(),
+            xex_option_until: None,
             standard: config.standard,
             data_bus: 0xFF,
             cycles: 0,
@@ -502,6 +522,9 @@ impl Machine {
         self.last_out = out;
         if out.frame_done {
             self.frames += 1;
+            if self.xex_option_until.is_some() {
+                self.check_xex_option();
+            }
         }
     }
 
@@ -578,6 +601,42 @@ impl Machine {
     #[must_use]
     pub const fn disk(&self) -> Option<&DiskImage> {
         self.sio.drive().image()
+    }
+
+    /// Puts the boot image of `xex` in D1:, does a cold reset and holds OPTION (REQ-612,
+    /// `docs/design/media.md`, "XEX boot image"). The XL/XE OS disables BASIC when OPTION is
+    /// held at a cold start. The machine releases OPTION at the end of the frame in which
+    /// D1: gets its first command (on the serial path or with the SIOV shortcut), or 3
+    /// seconds of emulated time after the cold reset. The keys of
+    /// [`Machine::set_console_keys`] stay pressed.
+    pub fn start_xex(&mut self, xex: &Xex) {
+        self.insert_disk(xex.boot_image());
+        self.power_on();
+        self.xex_option_until = Some(xex_option_frames(self.standard));
+        self.apply_console_keys();
+    }
+
+    /// Releases the OPTION key of [`Machine::start_xex`] when D1: got a command or the time
+    /// is over. The bus keeps the bytes of the last command frame until the next one.
+    fn check_xex_option(&mut self) {
+        let command = self.sio.host_bytes().first() == Some(&DEVICE_D1);
+        if command || self.xex_option_until.is_some_and(|end| self.frames >= end) {
+            self.release_xex_option();
+        }
+    }
+
+    /// Releases the OPTION key of [`Machine::start_xex`].
+    const fn release_xex_option(&mut self) {
+        self.xex_option_until = None;
+        self.apply_console_keys();
+    }
+
+    /// Gives GTIA the console keys of the frontend, with OPTION while
+    /// [`Machine::start_xex`] holds it.
+    const fn apply_console_keys(&mut self) {
+        let mut keys = self.console_keys;
+        keys.option |= self.xex_option_until.is_some();
+        self.gtia.set_console_keys(keys);
     }
 
     /// Turns the SIOV shortcut on or off (REQ-623).
@@ -662,7 +721,8 @@ impl Machine {
 
     /// Sets the console keys (START, SELECT, OPTION).
     pub const fn set_console_keys(&mut self, keys: ConsoleKeys) {
-        self.gtia.set_console_keys(keys);
+        self.console_keys = keys;
+        self.apply_console_keys();
     }
 
     /// Sets the state of joystick `port` (0 or 1) (REQ-439, REQ-440).

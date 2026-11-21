@@ -35,7 +35,11 @@ impl_state!(Machine {
     last_access,
 } skip {
     // A setting of the frontend: a load keeps the setting of the running machine.
-    fast_sio
+    fast_sio,
+    // Inputs of the frontend: GTIA has the console keys that the machine sees, and the
+    // OPTION hold of `start_xex` is a key press of the frontend start.
+    console_keys,
+    xex_option_until
 });
 
 impl State for Memory {
