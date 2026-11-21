@@ -18,6 +18,8 @@ extend-ignore-re = ["`[0-9A-Fa-f]{2}`", "\\b[0-9A-F]{2}\\b"]
 # Crate names, for example flate2.
 flate = "flate"
 # Atari hardware register names.
+# STRIG is the BASIC function and the OS shadow name of the triggers.
+STRIG = "STRIG"
 CONSOL = "CONSOL"
 consol = "consol"
 # 6502 mnemonics.
