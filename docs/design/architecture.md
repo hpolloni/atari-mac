@@ -33,6 +33,7 @@ files, the clock of the host, the window and the audio device (REQ-014).
 | `media` | Cartridges, executables, disk images, SIO devices | [media.md](media.md) |
 | `timing` | Clock and frame constants | This document |
 | `state` | The byte format of the save states | This document, "Save states" |
+| `disasm`, `debug` | The disassembler, the CPU hook types of the trace and the monitor | [debugger.md](debugger.md) |
 
 A module talks to another module only through the public interface in its design document.
 

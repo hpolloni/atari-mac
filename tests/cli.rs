@@ -1108,3 +1108,208 @@ fn bas_typed_listing_keeps_lower_case() {
     let file: Vec<&str> = LOWER_CASE_PROGRAM.lines().collect();
     assert_eq!(listing, file, "the listing on the screen: {rows:#?}");
 }
+
+/// Fails the test that calls it. A planned stub calls this function, so that the stub never
+/// passes when it runs (`cargo test -- --include-ignored`).
+fn planned() {
+    panic!("planned test: a package replaces this stub with the real test");
+}
+
+/// Verifies REQ-086: `InstructionLine` and `SequenceLine` of fixed events give the
+/// example lines of `docs/design/debugger.md`, "Trace writer":
+/// `1 8 42 30822 E477: A9 00    LDA #$00  A=00 X=FF Y=01 S=FD P=N.-B.IZ.` and
+/// `1 248 7 58147 NMI vector $E7B2` (criteria 1 and 2).
+#[test]
+#[ignore = "planned: SLICE-10"]
+fn trace_line_format() {
+    planned();
+}
+
+/// Verifies REQ-086: `--headless --frames 3 --trace <file> --trace-from 1
+/// --trace-frames 1` writes a line for each instruction that starts in frame 1 and only these.
+/// The first line is the first instruction of frame 1. The cycle of each line minus the cycle
+/// of the line before is at least the base cycle count of the instruction before it, and equals
+/// the value of a cycle-by-cycle run of the same boot (criteria 3 and 4).
+#[test]
+#[ignore = "planned: SLICE-10"]
+fn trace_writes_selected_frame() {
+    planned();
+}
+
+/// Verifies REQ-086: the frame buffer and the RAM after 3 frames are the same
+/// with and without the trace (criterion 5).
+#[test]
+#[ignore = "planned: SLICE-10"]
+fn trace_does_not_change_machine() {
+    planned();
+}
+
+/// Verifies REQ-086: `--trace` with a file in a directory that does not exist gives
+/// exit code 2 and a message on standard error that names the file (criterion 6).
+#[test]
+#[ignore = "planned: SLICE-10"]
+fn trace_file_error_exit_code() {
+    planned();
+}
+
+/// Verifies REQ-086: `--help` lists `--trace <file>`, `--trace-from <frame>` and
+/// `--trace-frames <n>` (criterion 7).
+#[test]
+#[ignore = "planned: SLICE-10"]
+fn trace_help_lists_options() {
+    planned();
+}
+
+/// Verifies REQ-088: `Monitor::open` on a running machine stops it before
+/// an instruction (`Machine::is_held`) and gives the instruction line of REQ-086 criterion 1 of
+/// `Machine::held_instruction` (criterion 1).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_open_shows_next_instruction() {
+    planned();
+}
+
+/// Verifies REQ-088: the command `s` runs one instruction and shows the next
+/// instruction line. Its cycle minus the old cycle is the cycle count of the instruction plus
+/// the halt cycles before the next opcode fetch (criterion 2).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_step_runs_one_instruction() {
+    planned();
+}
+
+/// Verifies REQ-088: the command `f` stops at the first instruction of the next
+/// frame: the line has the next frame number, and no instruction of that frame comes before it
+/// (criterion 3).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_frame_runs_to_next_frame() {
+    planned();
+}
+
+/// Verifies REQ-088: the command `g` gives `Reply::resume` true, closes the monitor,
+/// and the next frame runs to its end (criterion 4).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_go_continues() {
+    planned();
+}
+
+/// Verifies REQ-088: 20 `s` commands, 2 `f` commands and a `g` in
+/// frame 2, then a run to the cycle count of 5 frames, give the frame buffer and the RAM of a
+/// plain run to the same cycle count (criterion 5).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_steps_keep_machine_deterministic() {
+    planned();
+}
+
+/// Verifies REQ-088: while the monitor is open, `Frontend::step` runs no frame,
+/// the audio sink gets `stop_sound`, and no underrun is counted (criterion 6).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_open_silences_audio() {
+    planned();
+}
+
+/// Verifies REQ-089: `b <address>` at an instruction of a test
+/// program stops the run before that instruction, with `PC` at the address and the line of
+/// REQ-088 criterion 1 (criterion 1).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_breakpoint_stops_before_instruction() {
+    planned();
+}
+
+/// Verifies REQ-089: `ww` and `wr` on a RAM address of a test program stop
+/// the run after the instruction that writes or reads it. The output names the address, the
+/// value and the instruction line (criterion 2).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_watches_stop_after_access() {
+    planned();
+}
+
+/// Verifies REQ-089: `bl` lists the breakpoints and the watches with the
+/// numbers 1, 2 and 3. `bd 2` deletes the second, and the next `bl` shows the numbers 1 and 2
+/// (criterion 3).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_lists_and_deletes_points() {
+    planned();
+}
+
+/// Verifies REQ-089: `--break 0600` and `--break $E477` parse to
+/// `Options::breaks` `[$0600, $E477]`, and the monitor has the two breakpoints before the
+/// first frame (criterion 4).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn break_option_sets_breakpoint() {
+    planned();
+}
+
+/// Verifies REQ-089: with a breakpoint at `$0600`, the boot of the boot
+/// test tape of REQ-643 stops with `PC` = `$0600`, before the first instruction of the boot
+/// program (criterion 5).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_breakpoint_at_boot_tape_start() {
+    planned();
+}
+
+/// Verifies REQ-089: with no breakpoints and no watches, `Monitor::active` is
+/// false and the frontend runs the frames with `Machine::run_frame` (criterion 6).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn no_points_use_plain_run() {
+    planned();
+}
+
+/// Verifies REQ-090: the command `x` shows `PC`, `A`, `X`, `Y`, `S` and `P` in the
+/// format of REQ-086 criterion 1, and the scan line and the horizontal position (criterion 1).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_shows_registers() {
+    planned();
+}
+
+/// Verifies REQ-090: `m 0600` shows 8 lines of 16 bytes (the default length 128), in
+/// hexadecimal and in ATASCII; `m 0600 20` shows 2 lines (criterion 2).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_shows_memory() {
+    planned();
+}
+
+/// Verifies REQ-090: `d E477` shows 16 instruction lines (the default count), and
+/// `d E477 3` shows 3, each line at the address of the line before plus its length
+/// (criterion 3).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_disassembles_memory() {
+    planned();
+}
+
+/// Verifies REQ-090: `e 0600 A9 00` writes the two bytes to RAM, and `r`
+/// changes each of `A`, `X`, `Y`, `S`, `P` and `PC` (criterion 4).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_changes_memory_and_registers() {
+    planned();
+}
+
+/// Verifies REQ-090: `m D000 2048` and `d D000 100` leave the machine equal
+/// to a copy from before, and `$D500` shows `--` (criterion 5).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_reads_without_side_effects() {
+    planned();
+}
+
+/// Verifies REQ-090: `m G000`, `e 10000 1` and `r Q 1` each give a line
+/// `error: ...` and change nothing (criterion 6).
+#[test]
+#[ignore = "planned: SLICE-11"]
+fn monitor_rejects_bad_input() {
+    planned();
+}
