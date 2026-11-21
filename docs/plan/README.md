@@ -19,7 +19,7 @@ implements, the work packages, and the conditions that tell when it is done.
 | [SLICE-05](SLICE-05.md) | Disk drive D1: with ATR images (needs SLICE-04) | In progress |
 | [SLICE-06](SLICE-06.md) | Exact interrupt and PIA timing, power-on state, save states and product qualities | In progress |
 | [SLICE-07](SLICE-07.md) | Run a BASIC program from a text file with `--bas` | Done |
-| [SLICE-08](SLICE-08.md) | Cassette tape: boot a CAS tape image with `--cas` (needs SLICE-05) | In progress |
+| [SLICE-08](SLICE-08.md) | Cassette tape: boot a CAS tape image with `--cas` (needs SLICE-05) | Done |
 | [SLICE-09](SLICE-09.md) | Logging and speed statistics: `--stats` and `--log` | In progress |
 | [SLICE-10](SLICE-10.md) | CPU instruction trace with `--trace` (needs SLICE-09) | In progress |
 | [SLICE-11](SLICE-11.md) | Monitor: stop, step, breakpoints, memory (needs SLICE-10) | Planned |
