@@ -115,7 +115,13 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
         }
         _ => window::run(
             &mut frontend,
-            &window_title(options.cart.as_deref().or(options.bas.as_deref())),
+            &window_title(
+                options
+                    .cart
+                    .as_deref()
+                    .or(options.disk.as_deref())
+                    .or(options.bas.as_deref()),
+            ),
             options,
             &audio,
         )?,

@@ -276,6 +276,8 @@ mod tests {
             os_rom: vec![0xEA; 0x4000],
             basic_rom: None,
             cartridge: None,
+            disk: None,
+            fast_sio: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,
         })

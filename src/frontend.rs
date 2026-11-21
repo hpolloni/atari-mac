@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-use atari_core::media::{Cartridge, MediaError};
+use atari_core::media::{Cartridge, DiskImage, MediaError};
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
 use minifb::Key;
 
@@ -47,7 +47,8 @@ pub fn cartridge_from_file(bytes: Vec<u8>) -> Result<Cartridge, MediaError> {
 /// # Errors
 ///
 /// [`FrontendError::Read`] when a file cannot be read, [`FrontendError::Rom`] for a ROM
-/// with the wrong size and [`FrontendError::Media`] for a cartridge that is not valid.
+/// with the wrong size and [`FrontendError::Media`] for a cartridge or a disk image that is
+/// not valid.
 pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, FrontendError> {
     let os_rom = read(&options.os)?;
     let basic_rom = read(&options.basic)?;
@@ -62,10 +63,23 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
         }
         None => None,
     };
+    let disk = match &options.disk {
+        Some(path) => {
+            Some(
+                DiskImage::from_atr(&read(path)?).map_err(|error| FrontendError::Media {
+                    path: path.clone(),
+                    error,
+                })?,
+            )
+        }
+        None => None,
+    };
     Machine::new(MachineConfig {
         os_rom,
         basic_rom: Some(basic_rom),
         cartridge,
+        disk,
+        fast_sio: false,
         standard: options.standard,
         audio_sample_rate: sample_rate,
     })
@@ -564,6 +578,8 @@ mod tests {
             os_rom: vec![0xEA; 0x4000],
             basic_rom: None,
             cartridge: None,
+            disk: None,
+            fast_sio: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,
         })

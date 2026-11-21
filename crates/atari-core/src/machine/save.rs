@@ -11,7 +11,7 @@ use crate::state::{FNV_START, Reader, State, StateError, Writer, fnv1a, impl_sta
 const SIGNATURE: [u8; 8] = *b"A65XEST\x1A";
 
 /// The format version. A change of the format increments it.
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 
 /// The length of the RAM.
 const RAM_SIZE: usize = 0x1_0000;
@@ -25,12 +25,17 @@ impl_state!(Machine {
     gtia,
     pokey,
     pia,
+    sio,
+    cb2,
     standard,
     data_bus,
     cycles,
     frames,
     last_out,
     last_access,
+} skip {
+    // A setting of the frontend: a load keeps the setting of the running machine.
+    fast_sio
 });
 
 impl State for Memory {

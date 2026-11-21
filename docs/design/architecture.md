@@ -99,16 +99,16 @@ with `#[cfg(test)]`), and `impl_state_enum!(Type { Variant, ... })` for an enum 
 data. The struct macro destructures the struct without `..`, so a new field that is in no
 list does not compile. An enum with data or a struct with a field from the configuration
 has a manual `State` implementation (`antic::DmaKind`, `media::Cartridge`,
-`machine::Memory`).
+`machine::Memory`, `media::DiskDrive`, the SIO bus phase).
 
 The format, all numbers little-endian:
 
 | Part | Contents |
 | --- | --- |
 | Signature | 8 bytes `A65XEST` and `$1A` |
-| Version | `u16`, 1 |
+| Version | `u16`, 2 (version 2 adds the SIO bus) |
 | Configuration hash | FNV-1a 64 of the video standard, the audio sample rate, the OS ROM, the BASIC ROM and whether a cartridge is inserted |
-| Machine | The fields of `Machine` in their order: CPU, memory (RAM, then the cartridge: the FNV-1a 64 hash of its ROM, the bank and the enable flag; then `portb`), ANTIC, GTIA, POKEY, PIA, and the machine counters. A `Vec` or `VecDeque` is its length as `u64` and the elements. An enum is the index of the variant as `u64`. |
+| Machine | The fields of `Machine` in their order: CPU, memory (RAM, then the cartridge: the FNV-1a 64 hash of its ROM, the bank and the enable flag; then `portb`), ANTIC, GTIA, POKEY, PIA, the SIO bus (`media.md`, "State": all `SioBus` fields except `timing`, with drive D1: and its complete disk image), the PIA CB2 level, and the machine counters. A `Vec` or `VecDeque` is its length as `u64` and the elements. An enum is the index of the variant as `u64`. |
 | Checksum | FNV-1a 64 of all bytes before it |
 
 `load_state` checks the signature, the version, the checksum and the configuration hash in

@@ -1,8 +1,8 @@
 //! The four timer counters, their reloads and their fires (HRM 5.3, HRM 5.4).
 //!
-//! SLICE-01 has the unlinked timers, which the `IRQEN`/`IRQST` logic needs (REQ-515), and
-//! the linked pairs (REQ-505), which the serial clock of the OS SIO code needs. The two-tone
-//! resync and the asynchronous receive hold come with the timer package.
+//! The unlinked timers (REQ-504), the linked pairs (REQ-505), `STIMER` (REQ-507), the
+//! asynchronous receive hold of timers 3 and 4 (REQ-528) and the two-tone resync of timers 1
+//! and 2 (REQ-533).
 //!
 //! Design: `docs/design/pokey.md`, "Clocks and timers".
 
@@ -60,26 +60,46 @@ impl Timers {
         self.counter
     }
 
-    /// Runs cycle `now`. `clocked[n]` is true if timer n gets a count pulse in this cycle.
-    /// `linked[0]` links timers 1 and 2, `linked[1]` links timers 3 and 4 (REQ-505). A reload
-    /// reads `audf`. Returns the timers that fire on `now` (bit n = timer n).
-    pub(super) fn tick(
+    /// The fires of cycle `now` (bit n = timer n). The caller runs `advance` for the same
+    /// cycle after it: a two-tone resync (`resync`) between the two calls stops the count
+    /// of timers 1 and 2 in this cycle.
+    pub(super) fn take_fires(&mut self, now: u64) -> u8 {
+        let mut fired = 0;
+        for (n, slots) in self.fire_at.iter_mut().enumerate() {
+            for slot in slots {
+                if *slot == now {
+                    *slot = NEVER;
+                    fired |= 1 << n;
+                }
+            }
+        }
+        fired
+    }
+
+    /// The reloads and counts of cycle `now`. `clocked[n]` is true if timer n gets a count
+    /// pulse in this cycle. `linked[0]` links timers 1 and 2, `linked[1]` links timers 3 and
+    /// 4 (REQ-505). A reload reads `audf`. A timer in `held` (bit n = timer n) is held in
+    /// reset: its counter is `audf`, and it does not count, reload or fire (the asynchronous
+    /// receive mode, REQ-528).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the inputs of one timer cycle: the clock pulses, the links, AUDF and the hold"
+    )]
+    pub(super) fn advance(
         &mut self,
         now: u64,
         clocked: [bool; 4],
         linked: [bool; 2],
         audf: [u8; 4],
-    ) -> u8 {
-        let mut fired = 0;
+        held: u8,
+    ) {
         for n in 0..4 {
-            let [first, second] = &mut self.fire_at[n];
-            if *first == now {
-                *first = NEVER;
-                fired |= 1 << n;
-            }
-            if *second == now {
-                *second = NEVER;
-                fired |= 1 << n;
+            if held & (1 << n) != 0 {
+                self.counter[n] = audf[n];
+                self.reload_at[n] = NEVER;
+                self.fire_at[n] = [NEVER; 2];
+                self.link_at[n] = NEVER;
+                continue;
             }
             let pair_linked = linked[n / 2];
             let high = !n.is_multiple_of(2);
@@ -99,7 +119,6 @@ impl Timers {
                 self.count(n, now, pair_linked);
             }
         }
-        fired
     }
 
     /// One count pulse of timer `n` on cycle `now`.
@@ -125,7 +144,16 @@ impl Timers {
     /// An `STIMER` write on cycle `now` (REQ-507): cancels the fires that would be visible on
     /// `now + 4` or later, and reloads all four timers on `now + 3`.
     pub(super) fn stimer(&mut self, now: u64) {
+        self.restart(0b1111, now);
+    }
+
+    /// The `STIMER` action for the timers in `mask` only (bit n = timer n). The start edge of
+    /// the asynchronous receive mode restarts timers 3 and 4 this way (REQ-528).
+    pub(super) fn restart(&mut self, mask: u8, now: u64) {
         for n in 0..4 {
+            if mask & (1 << n) == 0 {
+                continue;
+            }
             for slot in &mut self.fire_at[n] {
                 // `NEVER` is above each cycle, so a free slot stays free.
                 if *slot >= now + FIRE_DELAY {
@@ -133,6 +161,23 @@ impl Timers {
                 }
             }
             self.reload_at[n] = now + RELOAD_DELAY;
+            self.link_at[n] = NEVER;
+        }
+    }
+
+    /// The two-tone resync for a toggle by a fire visible on cycle `now` (REQ-533, HRM 5.6
+    /// Two-tone resync timing): timers 1 and 2 reload on `now + 1`, two cycles after the
+    /// reload of the timer that fired. Like `STIMER`, the reload is not a fire. A fire of
+    /// timer 1 or 2 that would be visible on `now + 2` or later is cancelled, so a timer
+    /// that fires up to one cycle after the resyncing timer still fires.
+    pub(super) fn resync(&mut self, now: u64) {
+        for n in 0..2 {
+            for slot in &mut self.fire_at[n] {
+                if *slot >= now + 2 {
+                    *slot = NEVER;
+                }
+            }
+            self.reload_at[n] = now + 1;
             self.link_at[n] = NEVER;
         }
     }

@@ -5,13 +5,23 @@
 //! `SioBus` has the byte timing. [`DiskDrive`] has the command semantics. `SioBus` never
 //! reads a clock: all times come from the `now` arguments and the cycles of the host bytes,
 //! so the core stays deterministic (REQ-014).
+//!
+//! The machine calls [`SioBus::data_in_level`] before each POKEY tick, gives each byte that
+//! POKEY sent to [`SioBus::host_byte`] and each change of PIA CB2 to
+//! [`SioBus::set_command_line`] (OI-038, `docs/design/system.md`, "Timing"). Other devices
+//! (the tests now, the cassette deck of SLICE-08 later) put their bytes on SIO DATA IN with
+//! [`SioBus::send_device_byte`]. The line is the wired AND of all device outputs.
 
 use core::mem;
 use std::collections::VecDeque;
 
 use super::drive::{Accept, Completion, DiskDrive};
 use crate::pokey::SerialByte;
+use crate::state::{Reader, State, StateError, Writer, impl_state};
 use crate::timing::VideoStandard;
+
+/// The number of bytes from the computer that the bus keeps for `host_bytes`.
+const HOST_BYTES: usize = 300;
 
 /// The bus ID of drive D1: (REQ-624).
 const DEVICE_D1: u8 = 0x31;
@@ -73,7 +83,7 @@ pub fn sio_checksum(bytes: &[u8]) -> u8 {
 }
 
 /// A command frame without its checksum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CommandFrame {
     /// The bus ID of the device.
     pub device: u8,
@@ -84,6 +94,13 @@ pub struct CommandFrame {
     /// AUX2: the high byte of the sector number for the sector commands.
     pub aux2: u8,
 }
+
+impl_state!(CommandFrame {
+    device,
+    command,
+    aux1,
+    aux2,
+});
 
 /// The data frame of an SIOV request (REQ-623).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,10 +137,10 @@ pub enum SioOutcome {
 }
 
 /// The cycle counts of the SIO timing for one video standard (Timing section).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SioTiming {
-    /// The CPU clock in Hz.
-    clock_hz: f64,
+    /// The video standard, for the CPU clock.
+    standard: VideoStandard,
     /// `ACK_DELAY` in machine cycles.
     ack_delay: u64,
     /// `DATA_ACK_DELAY` in machine cycles.
@@ -142,7 +159,7 @@ impl SioTiming {
         let clock_hz = standard.cpu_clock_hz();
         let cycles = |us| Self::to_cycles(clock_hz, us, false);
         Self {
-            clock_hz,
+            standard,
             ack_delay: cycles(ACK_DELAY_US),
             data_ack_delay: cycles(DATA_ACK_DELAY_US),
             complete_min: Self::to_cycles(clock_hz, COMPLETE_MIN_US, true),
@@ -165,12 +182,12 @@ impl SioTiming {
 
     /// `us` µs in machine cycles, rounded.
     fn cycles(&self, us: u32) -> u64 {
-        Self::to_cycles(self.clock_hz, us, false)
+        Self::to_cycles(self.standard.cpu_clock_hz(), us, false)
     }
 }
 
-/// A byte that the device sends on SIO DATA IN.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A byte that a device sends on SIO DATA IN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct DeviceByte {
     /// The 8 data bits.
     value: u8,
@@ -178,6 +195,25 @@ struct DeviceByte {
     start: u64,
     /// The cycles of each bit.
     bit_cycles: u32,
+}
+
+impl_state!(DeviceByte {
+    value,
+    start,
+    bit_cycles,
+});
+
+/// The level of a queue of device bytes in start order in machine cycle `now` (`true` =
+/// mark): the level of the last byte that started, while it lasts, else mark.
+fn queue_level(queue: &VecDeque<DeviceByte>, now: u64) -> bool {
+    if queue.is_empty() {
+        return true;
+    }
+    let index = queue.partition_point(|byte| byte.start <= now);
+    match index.checked_sub(1).and_then(|last| queue.get(last)) {
+        Some(&byte) if now < byte.end() => byte.level(now),
+        _ => true,
+    }
 }
 
 impl DeviceByte {
@@ -223,11 +259,55 @@ enum BusPhase {
     Reply,
 }
 
+// An enum with data: the index of the variant as `u64`, then the data of the variant.
+impl State for BusPhase {
+    fn save(&self, w: &mut Writer) {
+        match *self {
+            Self::Idle => 0_usize.save(w),
+            Self::Command { bad } => {
+                1_usize.save(w);
+                bad.save(w);
+            }
+            Self::DataIn { frame, len } => {
+                2_usize.save(w);
+                frame.save(w);
+                len.save(w);
+            }
+            Self::Reply => 3_usize.save(w),
+        }
+    }
+
+    fn load(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        let mut index = 0_usize;
+        index.load(r)?;
+        *self = match index {
+            0 => Self::Idle,
+            1 => {
+                let mut bad = false;
+                bad.load(r)?;
+                Self::Command { bad }
+            }
+            2 => {
+                let mut frame = CommandFrame::default();
+                let mut len = 0_usize;
+                frame.load(r)?;
+                len.load(r)?;
+                Self::DataIn { frame, len }
+            }
+            3 => Self::Reply,
+            _ => return Err(StateError::Invalid),
+        };
+        Ok(())
+    }
+}
+
 /// The SIO bus with the disk drive D1: (REQ-615 to REQ-624).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SioBus {
     /// Drive D1:.
     drive: DiskDrive,
+    /// Drive D1: is on the bus. With `false`, no device answers a frame for D1:.
+    drive_connected: bool,
     /// The cycle counts of the Timing section.
     timing: SioTiming,
     /// The command line level: `true` = low (asserted).
@@ -242,7 +322,28 @@ pub struct SioBus {
     data_in: Vec<u8>,
     /// The scheduled device bytes of the current transaction, in start order.
     out: VecDeque<DeviceByte>,
+    /// The values of the bytes from the computer since the command line last went low (at
+    /// most `HOST_BYTES`), for `host_bytes`.
+    host: Vec<u8>,
+    /// The device bytes of `send_device_byte`, in start order.
+    external: VecDeque<DeviceByte>,
 }
+
+// The timing comes from the video standard of the configuration.
+impl_state!(SioBus {
+    drive,
+    drive_connected,
+    command_low,
+    phase,
+    frame,
+    frame_len,
+    data_in,
+    out,
+    host,
+    external,
+} skip {
+    timing
+});
 
 impl SioBus {
     /// An idle bus with an empty drive D1:, with the timing of `standard`.
@@ -250,6 +351,7 @@ impl SioBus {
     pub fn new(standard: VideoStandard) -> Self {
         Self {
             drive: DiskDrive::default(),
+            drive_connected: true,
             timing: SioTiming::new(standard),
             command_low: false,
             phase: BusPhase::Idle,
@@ -257,6 +359,8 @@ impl SioBus {
             frame_len: 0,
             data_in: Vec::new(),
             out: VecDeque::new(),
+            host: Vec::new(),
+            external: VecDeque::new(),
         }
     }
 
@@ -271,15 +375,33 @@ impl SioBus {
         &mut self.drive
     }
 
+    /// Connects drive D1: to the bus or removes it (`docs/design/media.md`, "Machine
+    /// configuration"). A new bus has the drive connected. A removed drive answers no
+    /// frame, and `transact` gives `NoDevice` for D1:.
+    pub const fn set_drive_connected(&mut self, on: bool) {
+        self.drive_connected = on;
+    }
+
+    /// Drive D1: is on the bus.
+    #[must_use]
+    pub const fn drive_connected(&self) -> bool {
+        self.drive_connected
+    }
+
     /// The PIA CB2 output changed. `low` = command line asserted. A falling edge starts a
     /// new command frame and stops the current transaction (HRM 9.1). A rising edge ends the
-    /// command frame: a valid frame for D1: gets its reply.
+    /// command frame: a valid frame for D1: gets its reply. Each call removes the bytes of
+    /// `send_device_byte` that ended before `now`.
     pub fn set_command_line(&mut self, low: bool, now: u64) {
+        while self.external.front().is_some_and(|byte| byte.end() <= now) {
+            let _done = self.external.pop_front();
+        }
         if low == self.command_low {
             return;
         }
         self.command_low = low;
         if low {
+            self.host.clear();
             self.frame_len = 0;
             self.data_in.clear();
             self.out.clear();
@@ -299,6 +421,7 @@ impl SioBus {
         if usize::from(self.frame_len) != FRAME_LEN
             || sio_checksum(&[device, command, aux1, aux2]) != checksum
             || device != DEVICE_D1
+            || !self.drive_connected
         {
             return;
         }
@@ -362,8 +485,17 @@ impl SioBus {
         self.phase = BusPhase::Reply;
     }
 
+    /// The command line is asserted (low).
+    #[must_use]
+    pub const fn command_line_low(&self) -> bool {
+        self.command_low
+    }
+
     /// POKEY finished sending `byte` (from `Pokey::take_serial_byte`).
     pub fn host_byte(&mut self, byte: SerialByte) {
+        if self.host.len() < HOST_BYTES {
+            self.host.push(byte.value);
+        }
         match &mut self.phase {
             BusPhase::Command { bad } => {
                 let length = byte.end_cycle.saturating_sub(byte.start_cycle);
@@ -408,30 +540,64 @@ impl SioBus {
     /// The level of the SIO DATA IN line in machine cycle `now` (`true` = mark). The bus
     /// makes the start bit, the 8 data bits (LSB first) and the stop bit of each scheduled
     /// device byte. The line is high when no byte is in progress.
+    /// The bytes of `send_device_byte` are on the same line: a space of any device gives a
+    /// space (wired AND).
     #[must_use]
     pub fn data_in_level(&self, now: u64) -> bool {
-        let index = self.out.partition_point(|byte| byte.start <= now);
-        match index.checked_sub(1).and_then(|last| self.out.get(last)) {
-            Some(&byte) if now < byte.end() => byte.level(now),
-            _ => true,
+        queue_level(&self.out, now) && queue_level(&self.external, now)
+    }
+
+    /// Schedules a byte on SIO DATA IN for a device that is not D1: (the tests, and the
+    /// cassette deck of SLICE-08): its start bit begins in cycle `start`, and each bit has
+    /// `bit_cycles` cycles. The start must not be before the end of the last byte of
+    /// `send_device_byte`. Each command line change removes the bytes that ended. The drive
+    /// protocol does not change these bytes.
+    ///
+    /// # Panics
+    ///
+    /// If `bit_cycles` is 0 or the byte overlaps the last byte of `send_device_byte`.
+    pub fn send_device_byte(&mut self, value: u8, start: u64, bit_cycles: u32) {
+        assert!(bit_cycles > 0, "a bit cell needs at least one cycle");
+        if let Some(last) = self.external.back() {
+            assert!(start >= last.end(), "device bytes must not overlap");
+        }
+        self.external.push_back(DeviceByte {
+            value,
+            start,
+            bit_cycles,
+        });
+    }
+
+    /// The values of the bytes from the computer since the command line last went low (the
+    /// first 300), for tests.
+    #[must_use]
+    pub fn host_bytes(&self) -> &[u8] {
+        &self.host
+    }
+
+    /// The start cycle of the first scheduled device byte (of the current transaction or of
+    /// `send_device_byte`), for tests.
+    #[must_use]
+    pub fn next_device_byte_start(&self) -> Option<u64> {
+        let first = |queue: &VecDeque<DeviceByte>| queue.front().map(|byte| byte.start);
+        match (first(&self.out), first(&self.external)) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         }
     }
 
-    /// The start cycle of the first scheduled device byte of the current transaction, for
-    /// tests.
-    #[must_use]
-    pub fn next_device_byte_start(&self) -> Option<u64> {
-        self.out.front().map(|byte| byte.start)
-    }
-
-    /// The scheduled device bytes of the current transaction as `(value, start,
-    /// bit_cycles)`, for tests.
+    /// The scheduled device bytes (of the current transaction and of `send_device_byte`)
+    /// as `(value, start, bit_cycles)` in start order, for tests.
     #[must_use]
     pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)> {
-        self.out
+        let mut bytes: Vec<(u8, u64, u32)> = self
+            .out
             .iter()
+            .chain(&self.external)
             .map(|byte| (byte.value, byte.start, byte.bit_cycles))
-            .collect()
+            .collect();
+        bytes.sort_by_key(|&(_, start, _)| start);
+        bytes
     }
 
     /// A complete transaction at once, for the SIOV shortcut (REQ-623). It takes no emulated
@@ -439,7 +605,7 @@ impl SioBus {
     /// of the "SIOV shortcut" table of the design.
     pub fn transact(&mut self, request: &SioRequest<'_>) -> SioOutcome {
         let frame = request.frame;
-        if frame.device != DEVICE_D1 {
+        if frame.device != DEVICE_D1 || !self.drive_connected {
             return SioOutcome::NoDevice;
         }
         let done = |status, data| SioOutcome::Done { status, data };
@@ -495,5 +661,52 @@ impl SioBus {
         self.frame_len = 0;
         self.data_in.clear();
         self.out.clear();
+        self.host.clear();
+        self.external.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SioBus;
+    use crate::timing::VideoStandard;
+
+    /// Verifies REQ-526: the bus makes the frame of each device byte on SIO DATA IN, which
+    /// POKEY receives through `set_serial_in` (the machine contract of OI-038).
+    #[test]
+    fn device_bytes_on_data_in() {
+        let mut bus = SioBus::new(VideoStandard::Ntsc);
+        assert!(bus.data_in_level(0), "idle");
+        bus.send_device_byte(0x43, 100, 94);
+        bus.send_device_byte(0xA5, 1040, 94);
+        let mut levels = Vec::new();
+        for now in 0..2100 {
+            levels.push(bus.data_in_level(now));
+        }
+        for (value, start) in [(0x43_u8, 100_usize), (0xA5, 1040)] {
+            for bit in 0..10 {
+                let want = match bit {
+                    0 => false,
+                    9 => true,
+                    n => (value >> (n - 1)) & 1 != 0,
+                };
+                let cells = &levels[start + 94 * bit..start + 94 * (bit + 1)];
+                assert!(cells.iter().all(|l| *l == want), "{value:02X} bit {bit}");
+            }
+        }
+        assert!(levels[..100].iter().all(|l| *l), "idle before");
+        assert!(levels[2000..].iter().all(|l| *l), "idle after");
+        assert_eq!(bus.next_device_byte_start(), Some(100), "first byte");
+        assert_eq!(
+            bus.scheduled_device_bytes(),
+            vec![(0x43, 100, 94), (0xA5, 1040, 94)],
+            "schedule"
+        );
+        // A command line edge removes the bytes that ended.
+        bus.set_command_line(true, 1500);
+        assert_eq!(bus.next_device_byte_start(), Some(1040), "after the edge");
+        assert!(bus.host_bytes().is_empty(), "no host bytes");
+        bus.reset();
+        assert_eq!(bus.scheduled_device_bytes(), Vec::new(), "reset");
     }
 }

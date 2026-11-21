@@ -331,12 +331,16 @@ One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
 
 1. `let out = antic.tick(&mut memory)` gives the `CycleOutput` of cycle `c`. ANTIC DMA
    reads use the memory map as it was at the end of cycle `c - 1`.
-2. `pokey.set_serial_in(sio.data_in_level(c))`, then `pokey.tick()`. POKEY runs before the
-   CPU access, so a POKEY register access in cycle `c` sees the events of cycle `c`
-   (`pokey.md`, call contract).
+2. `pokey.set_serial_in(sio.data_in_level(c))`, then `pokey.tick()`. Here `c` is counted
+   as `Pokey::cycle` counts it after the tick (`cycle_count() + 1` before the cycle). The
+   level is the wired AND of the reply of D1: and the bytes of `sio.send_device_byte`
+   (`media.md`, "SIO bus and disk drive"). POKEY runs before the CPU access, so a POKEY
+   register access in cycle `c` sees the events of cycle `c` (`pokey.md`, call contract).
 3. `cpu.set_irq(pokey.irq() || pia.irq())`. The POKEY level is the level of cycle `c`. The
    PIA level is the level from the end of cycle `c - 1`.
-4. If `out.halt` is false: `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
+4. If `out.halt` is false: first the SIOV shortcut, if it is on and
+   `cpu.at_opcode_fetch()` (`media.md`, "SIOV shortcut"; it takes no emulated time), then
+   `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
    `portb_pins`. A PIA write updates `portb_pins` at the end of the access. A GTIA write
    also calls `pokey.set_speaker(!gtia.speaker())`: a `CONSOL` bit written as 1 pulls its
    line down (HRM 6.11), so the speaker line is high when bit 3 was written as 0.

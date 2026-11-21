@@ -216,6 +216,9 @@ impl SioBus {
     pub fn new(standard: VideoStandard) -> Self;
     pub const fn drive(&self) -> &DiskDrive;
     pub const fn drive_mut(&mut self) -> &mut DiskDrive;
+    /// Connects D1: to the bus or removes it. A new bus has D1: connected.
+    pub const fn set_drive_connected(&mut self, on: bool);
+    pub const fn drive_connected(&self) -> bool;
     /// The PIA CB2 output changed. `low` = command line asserted.
     pub fn set_command_line(&mut self, low: bool, now: u64);
     /// POKEY finished sending `byte` (from `Pokey::take_serial_byte`).
@@ -226,8 +229,18 @@ impl SioBus {
     pub fn data_in_level(&self, now: u64) -> bool;
     /// The start cycle of the first scheduled device byte of the current transaction, for tests.
     pub fn next_device_byte_start(&self) -> Option<u64>;
-    /// The scheduled device bytes of the current transaction as `(value, start, bit_cycles)`,
-    /// for tests. A falling edge of the command line clears them.
+    /// Schedules a byte on SIO DATA IN for a device that is not D1: (the tests, later the
+    /// cassette deck): start bit in cycle `start`, `bit_cycles` per bit. These bytes are in
+    /// their own queue `external`: the drive protocol does not change them, and each
+    /// command line change removes the bytes that ended. The bytes must not overlap.
+    pub fn send_device_byte(&mut self, value: u8, start: u64, bit_cycles: u32);
+    /// The command line level, and the bytes from the computer since the command line
+    /// last went low (at most 300), for tests (SLICE-05 WP-1).
+    pub const fn command_line_low(&self) -> bool;
+    pub fn host_bytes(&self) -> &[u8];
+    /// The scheduled device bytes of the current transaction and of `send_device_byte` as
+    /// `(value, start, bit_cycles)` in start order, for tests. A falling edge of the
+    /// command line clears the bytes of the transaction.
     pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)>;
     /// A complete transaction at once, for the SIOV shortcut (REQ-623).
     pub fn transact(&mut self, request: &SioRequest<'_>) -> SioOutcome;
@@ -292,6 +305,12 @@ Call contract for the machine:
 3. In each machine cycle, before the POKEY `tick`, the machine calls
    `pokey.set_serial_in(sio.data_in_level(now))`. POKEY receives the bits from the line
    level with its own serial timing (REQ-526, REQ-528). The interface is decided in OI-038.
+   `now` is the number of the cycle in the count of `Pokey::cycle` and
+   `Machine::cycle_count` (both count the cycles up to and including this one), so the
+   device bytes and `SerialByte` use the same cycles. `Machine::sio` and `Machine::sio_mut`
+   give the bus to the devices and the tests. The level is the wired AND of the drive
+   reply (`out`) and the bytes of `send_device_byte` (`external`): a space of either gives
+   a space.
 4. `SioBus` never reads the cycle counter by itself. All times come from the `now` and `start`
    arguments, so the core stays deterministic (REQ-014).
 
@@ -305,8 +324,9 @@ impl Machine {
 }
 ```
 
-At each instruction boundary (before the opcode fetch cycle), the machine checks these
-conditions:
+At each instruction boundary (before the opcode fetch cycle: `Cpu::at_opcode_fetch`, in a
+cycle where ANTIC does not halt the CPU, `system.md` "Timing" step 4), the machine checks
+these conditions:
 
 1. The SIOV shortcut is on.
 2. `regs.pc == 0xE459` (SIOV).
@@ -315,7 +335,8 @@ conditions:
 If all are true, the machine reads the device control block at `$0300-$030B` with no side
 effects. The bus ID is `DDEVIC + DUNIT - 1`, with 8-bit wrap. A `DDEVIC` of `$5F` is never
 intercepted. The data direction comes from `DSTATS`: bit 7 = send, bit 6 = receive, neither =
-no data. The machine then calls `SioBus::transact`.
+no data. With both bits set, the direction is send. `DBYT` gives the length, and the send
+bytes are read from `DBUF` with no side effects. The machine then calls `SioBus::transact`.
 
 If the result is `NoDevice`, the machine does nothing and the CPU executes the OS code. Else
 the machine:
@@ -426,6 +447,10 @@ pub tape: Option<Tape>,
 
 ```rust
 pub fn insert_disk(&mut self, image: DiskImage);
+/// The SIOV shortcut (REQ-623). `MachineConfig::fast_sio` gives the power-on value. It is a
+/// setting, not machine state: a save state does not contain it.
+pub fn set_fast_sio(&mut self, on: bool);
+pub fn fast_sio(&self) -> bool;
 pub fn eject_disk(&mut self) -> Option<DiskImage>;
 pub fn disk(&self) -> Option<&DiskImage>;
 /// Puts the boot image of `xex` in D1:, does a cold reset and holds OPTION (REQ-612).
@@ -441,6 +466,12 @@ pub fn tape_motor_on(&self) -> bool;
 /// the cold reset.
 pub fn start_tape(&mut self, tape: Tape);
 ```
+
+D1: is on the bus when the configuration has a disk or after the first `insert_disk`
+(`SioBus::set_drive_connected`). With no disk in the configuration and no `insert_disk`,
+no device answers a frame for D1:, so the OS boot sees an empty bus and BASIC starts after
+the timeouts (REQ-005). `eject_disk` leaves the empty drive on the bus: it then answers as
+REQ-633 gives. A cold reset does not change the connection or the image.
 
 ## State
 
@@ -487,12 +518,15 @@ pub fn start_tape(&mut self, tape: Tape);
 | Field | Type | Power-on value | Contents |
 | --- | --- | --- | --- |
 | `drive` | `DiskDrive` | See above | Drive D1: |
+| `drive_connected` | `bool` | `true` for `SioBus::new`; the machine sets it (see "Machine configuration") | D1: is on the bus. With `false`, D1: answers no frame and `transact` gives `NoDevice`. |
 | `timing` | `SioTiming` | From the video standard | The cycle counts of the Timing section |
 | `command_low` | `bool` | `false` | Command line level |
 | `phase` | `BusPhase` | `Idle` | Protocol state |
 | `frame` | `[u8; 5]`, `u8` | Empty | Command frame bytes and count |
 | `data_in` | `Vec<u8>` | Empty | Data frame from the computer |
 | `out` | `VecDeque<DeviceByte>` | Empty | Scheduled device bytes. `DeviceByte { value, start, bit_cycles }` is private to `SioBus`; its last cycle is `start + 10 * bit_cycles`. |
+| `host` | `Vec<u8>` | Empty | The values of the bytes from the computer since the last falling edge of the command line, at most 300 (`host_bytes`) |
+| `external` | `VecDeque<DeviceByte>` | Empty | The bytes of `send_device_byte`, in start order |
 
 ```rust
 enum BusPhase {
@@ -505,6 +539,10 @@ enum BusPhase {
     Reply,
 }
 ```
+
+The save state (REQ-018) has each `SioBus` field except `timing`, which comes from the video
+standard. The `DiskDrive` fields are in it with the complete `DiskImage` (all its fields),
+because writes change the image and the frontend can insert another image.
 
 `SioBus` also has the field `deck: TapeDeck` (power-on: the tape of the configuration, at
 position 0, motor off).
@@ -1018,3 +1056,15 @@ The seek model of REQ-638 exists (SLICE-05 WP-2), so the REQ-638 tests run. The 
     `Machine::start_xex` need D1: (REQ-636): the SIO bus, the disk drive and the POKEY serial
     input (SLICE-05). SLICE-04 WP-1 has the parser, the boot image and the loader, and tests
     the loader with a synthetic OS. The system tests are planned in SLICE-05 WP-3.
+18. REQ-623 criterion 5 fails with AltirraOS (SLICE-05 WP-2). The shortcut does not handle
+    `DDEVIC` = `$5F`, but the AltirraOS SIO routine sends the request with `DDEVIC` = `$5F`
+    and `DUNIT` = `$D3` on the bus as bus ID `$31`, also with the shortcut off. D1: answers
+    on the real serial path and fills the buffer. A request with `DDEVIC` = `$60` and `DUNIT`
+    = 1 does not reach D1:. See OI-046. `req623_fast_sio_not_intercepted` is ignored until
+    the criterion is decided; its criteria 4 and 6 pass.
+19. `req623_fast_sio_xl_os` reads the user-supplied ROM from `roms/atari-xl-os.rom` (not in
+    git). It follows criterion 7 (a message and no check when the file is missing) and stays
+    ignored until OI-040 is decided.
+20. `--xex` is not wired (`Machine::start_xex`, WP-3), so the REQ-012 tests
+    `loads_cart_xex_and_disk` and `rejects_bad_cart_xex_and_disk` stay ignored. Their
+    `--cart` and `--disk` parts pass.

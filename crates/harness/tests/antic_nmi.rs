@@ -131,6 +131,8 @@ mod timing {
             os_rom: rom,
             basic_rom: None,
             cartridge: None,
+            disk: None,
+            fast_sio: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })

@@ -32,7 +32,7 @@ Options:
   --basic <file>       BASIC ROM, 8192 bytes (default: roms/altirra-basic.rom)
   --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes, or a CAR file
   --xex <file>         Executable (not supported yet)
-  --disk <file>        ATR disk image (not supported yet)
+  --disk <file>        ATR disk image in drive D1: (the OS boots it)
   --bas <file>         Type a BASIC program from a text file at Ready, then RUN it
   --no-run             With --bas: type the program, but do not RUN it
   --pal                PAL machine (default: NTSC)
@@ -57,6 +57,8 @@ pub struct Options {
     pub basic: PathBuf,
     /// The cartridge file.
     pub cart: Option<PathBuf>,
+    /// The ATR disk image file for D1: (`--disk`, REQ-012).
+    pub disk: Option<PathBuf>,
     /// Run without a window.
     pub headless: bool,
     /// The number of frames to run. `None` runs until the user quits.
@@ -83,6 +85,7 @@ impl Default for Options {
             os: PathBuf::from(DEFAULT_OS_ROM),
             basic: PathBuf::from(DEFAULT_BASIC_ROM),
             cart: None,
+            disk: None,
             headless: false,
             frames: None,
             screenshot: None,
@@ -137,7 +140,7 @@ fn number<T: FromStr>(
 /// # Errors
 ///
 /// [`FrontendError::Usage`] for an argument that is not valid, and
-/// [`FrontendError::Unsupported`] for `--xex` and `--disk`.
+/// [`FrontendError::Unsupported`] for `--xex`.
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, FrontendError> {
     let mut args = args.into_iter();
     let mut options = Options::default();
@@ -148,7 +151,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--basic" => options.basic = value(&mut args, "--basic")?.into(),
             "--cart" => options.cart = Some(value(&mut args, "--cart")?.into()),
             "--xex" => return Err(FrontendError::Unsupported("--xex")),
-            "--disk" => return Err(FrontendError::Unsupported("--disk")),
+            "--disk" => options.disk = Some(value(&mut args, "--disk")?.into()),
             "--headless" => options.headless = true,
             "--pal" => options.standard = VideoStandard::Pal,
             "--frames" => options.frames = Some(number(&mut args, "--frames")?),
@@ -269,6 +272,8 @@ mod tests {
             "b.rom",
             "--cart",
             "c.car",
+            "--disk",
+            "d.atr",
             "--headless",
             "--frames",
             "180",
@@ -288,6 +293,7 @@ mod tests {
                 os: "a.rom".into(),
                 basic: "b.rom".into(),
                 cart: Some("c.car".into()),
+                disk: Some("d.atr".into()),
                 headless: true,
                 frames: Some(180),
                 screenshot: Some("out.png".into()),
@@ -320,6 +326,7 @@ mod tests {
             (&["--fast"], "unknown argument \"--fast\""),
             (&["--headless"], "--headless needs --frames"),
             (&["--bas"], "--bas needs a value"),
+            (&["--disk"], "--disk needs a value"),
             (&["--no-run"], "--no-run needs --bas"),
         ] {
             let error = parse_err(list);
@@ -369,13 +376,11 @@ mod tests {
     }
 
     #[test]
-    fn xex_and_disk_are_not_supported() {
-        for flag in ["--xex", "--disk"] {
-            let result = parse(args(&[flag, "game"]));
-            assert!(
-                matches!(result, Err(FrontendError::Unsupported(f)) if f == flag),
-                "{flag}"
-            );
-        }
+    fn xex_is_not_supported() {
+        let result = parse(args(&["--xex", "game"]));
+        assert!(
+            matches!(result, Err(FrontendError::Unsupported(f)) if f == "--xex"),
+            "--xex"
+        );
     }
 }

@@ -33,6 +33,8 @@ mod system {
             os_rom: test_os_rom(&program),
             basic_rom: Some(vec![0xBB; 0x2000]),
             cartridge,
+            disk: None,
+            fast_sio: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })

@@ -61,6 +61,8 @@ fn machine(cartridge: Option<Cartridge>, standard: VideoStandard) -> Result<Mach
         os_rom: data::os_rom()?,
         basic_rom: Some(data::basic_rom()?),
         cartridge,
+        disk: None,
+        fast_sio: false,
         standard,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })?)

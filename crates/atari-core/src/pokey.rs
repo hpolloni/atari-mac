@@ -7,9 +7,9 @@
 //! (REQ-518 to REQ-522), the unlinked and linked timers (REQ-504, REQ-505) and the serial
 //! output (REQ-525) that the OS SIO code needs to send its command frames. SLICE-03 adds the
 //! audio channels, the noise generators, `RANDOM` and the host audio output (REQ-503 to
-//! REQ-514, REQ-538 to REQ-541). SLICE-04 adds the pot scan (REQ-534 to REQ-537). The
-//! serial input comes in a later slice. Its registers are stored, and its inputs and outputs
-//! keep the idle levels.
+//! REQ-514, REQ-538 to REQ-541). SLICE-04 adds the pot scan (REQ-534 to REQ-537). SLICE-05
+//! adds initialization mode (REQ-502), the serial input, the serial clock modes, the
+//! asynchronous receive mode, force break and two-tone mode (REQ-525 to REQ-533).
 
 mod audio;
 mod kbscan;
@@ -27,7 +27,7 @@ use audio::Audio;
 use kbscan::{KeyboardScan, ScanInput};
 use noise::Noise;
 use pot::PotScan;
-use serial::{OutputClock, SerialOut};
+use serial::{InputClock, OutputClock, Sample, SerialIn, SerialOut};
 use timers::Timers;
 
 /// `IRQST`/`IRQEN` bit 0: timer 1.
@@ -40,13 +40,19 @@ const IRQ_TIMER4: u8 = 0x04;
 const IRQ_SERIAL_DONE: u8 = 0x08;
 /// `IRQST`/`IRQEN` bit 4: serial output needed.
 const IRQ_SERIAL_NEEDED: u8 = 0x10;
+/// `IRQST`/`IRQEN` bit 5: serial input ready.
+const IRQ_SERIAL_IN: u8 = 0x20;
 /// `IRQST`/`IRQEN` bit 6: keyboard.
 const IRQ_KEY: u8 = 0x40;
 /// `IRQST`/`IRQEN` bit 7: BREAK key.
 const IRQ_BREAK: u8 = 0x80;
 
+/// `SKSTAT` bit 5: 0 = serial input overrun (HRM 5.6, HRM 15.2 Errata).
+const SK_SERIAL_OVERRUN: u8 = 0x20;
 /// `SKSTAT` bit 6: 0 = keyboard overrun.
 const SK_KEY_OVERRUN: u8 = 0x40;
+/// `SKSTAT` bit 7: 0 = serial input framing error.
+const SK_FRAMING: u8 = 0x80;
 /// `SKSTAT` bits 5-7 with no error.
 const SK_NO_ERRORS: u8 = 0xE0;
 
@@ -56,6 +62,10 @@ const SKCTL_DEBOUNCE: u8 = 0x01;
 const SKCTL_KEY_SCAN: u8 = 0x02;
 /// `SKCTL` bits 0-1: both 0 = initialization mode (HRM 5.2).
 const SKCTL_INIT_MASK: u8 = 0x03;
+/// `SKCTL` bit 3: two-tone mode.
+const SKCTL_TWO_TONE: u8 = 0x08;
+/// `SKCTL` bit 4: asynchronous receive mode.
+const SKCTL_ASYNC: u8 = 0x10;
 /// `SKCTL` bits 4-6: the serial clock mode (HRM Table 10).
 const SKCTL_CLOCK_MODE: u8 = 0x70;
 /// `SKCTL` bit 7: force break.
@@ -158,6 +168,10 @@ struct WriteRegs {
 
 /// The POKEY chip of the 65XE.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the input lines, the speaker level, the two-tone flip-flop and the cache flag are independent"
+)]
 pub struct Pokey {
     /// The TV standard (it sets the audio clock rate).
     standard: VideoStandard,
@@ -213,8 +227,16 @@ pub struct Pokey {
     scan: KeyboardScan,
     /// The serial output shift register and its clock.
     serial: SerialOut,
+    /// The serial input shift register and its clock.
+    serial_in: SerialIn,
     /// SIO DATA IN.
     in_level: bool,
+    /// SIO CLOCK IN, as an input.
+    clk_in_level: bool,
+    /// SIO CLOCK IN in the last cycle, for the edges of the external clock.
+    clk_in_last: bool,
+    /// The two-tone output flip-flop (REQ-533).
+    tone_ff: bool,
     /// Sent bytes for the SIO model.
     sent: VecDeque<SerialByte>,
     /// The console speaker level.
@@ -250,7 +272,11 @@ impl_state!(Pokey {
     typed_mods,
     scan,
     serial,
+    serial_in,
     in_level,
+    clk_in_level,
+    clk_in_last,
+    tone_ff,
     sent,
     speaker,
     audio,
@@ -297,7 +323,11 @@ impl Pokey {
             typed_mods: 0,
             scan: KeyboardScan::new(),
             serial: SerialOut::new(),
+            serial_in: SerialIn::new(),
             in_level: true,
+            clk_in_level: true,
+            clk_in_last: true,
+            tone_ff: false,
             sent: VecDeque::new(),
             speaker: false,
             audio: Audio::new(clock_hz, sample_rate),
@@ -325,7 +355,17 @@ impl Pokey {
             self.audctl & AUDCTL_LINK12 != 0,
             self.audctl & AUDCTL_LINK34 != 0,
         ];
-        let fired = self.timers.tick(now, clocked, linked, self.audf);
+        let fired = self.timers.take_fires(now);
+        if self.skctl & SKCTL_TWO_TONE != 0 {
+            self.two_tone(fired, now);
+        }
+        // REQ-528: timers 3 and 4 are held while the asynchronous input waits.
+        let held = if self.skctl & SKCTL_ASYNC != 0 && !self.serial_in.running() {
+            0b1100
+        } else {
+            0
+        };
+        self.timers.advance(now, clocked, linked, self.audf, held);
         self.fired = fired;
         // HRM 5.7: timers 1, 2 and 4 have an IRQ; timer 3 has none. The `IRQST` bits of
         // the fires latch together, without a branch for each fire.
@@ -480,17 +520,39 @@ impl Pokey {
         self.in_level = high;
     }
 
-    /// The SIO DATA OUT level. `true` = high (mark).
+    /// The SIO DATA OUT level. `true` = high (mark). In two-tone mode it is the two-tone
+    /// flip-flop (REQ-533). Else force break makes it 0 (REQ-532).
     #[must_use]
     pub const fn serial_out(&self) -> bool {
-        self.skctl & SKCTL_FORCE_BREAK == 0 && self.serial.level()
+        if self.skctl & SKCTL_TWO_TONE != 0 {
+            self.tone_ff
+        } else {
+            self.skctl & SKCTL_FORCE_BREAK == 0 && self.serial.level()
+        }
     }
 
-    /// The SIO CLOCK OUT level: the serial output clock flip-flop (HRM 5.6). The external
-    /// clock modes have no edges yet (`docs/design/pokey.md`, open issue 17).
+    /// The SIO CLOCK OUT level: the serial output clock flip-flop (HRM 5.6). In the modes
+    /// with the external output clock, the flip-flop does not change.
     #[must_use]
     pub const fn serial_clock_out(&self) -> bool {
         self.serial.clock()
+    }
+
+    /// The SIO CLOCK IN level as an input (`true` = high). The new level applies from the
+    /// next `tick`. POKEY uses it in the modes with an external clock (REQ-527).
+    pub const fn set_serial_clock_in(&mut self, high: bool) {
+        self.clk_in_level = high;
+    }
+
+    /// The level that POKEY drives on the bidirectional SIO CLOCK IN line: the input clock
+    /// flip-flop of timer 4 in modes `010` and `110`, else `None` (the line is an input,
+    /// REQ-527 criterion 4).
+    #[must_use]
+    pub const fn serial_clock_in_drive(&self) -> Option<bool> {
+        match (self.skctl >> 4) & 0x07 {
+            0b010 | 0b110 => Some(self.serial_in.clock()),
+            _ => None,
+        }
     }
 
     /// Removes and returns the oldest byte that was sent completely. The FIFO holds
@@ -610,8 +672,9 @@ impl Pokey {
             | ((self.in_level as u8) << 4)
             | ((!self.scan.shift_latch() as u8) << 3)
             | ((!self.scan.key_down() as u8) << 2)
-            // Bit 1: the serial input is not busy. Bit 0 is always 1.
-            | 0x03
+            // Bit 1: the serial input is not busy (REQ-526). Bit 0 is always 1 (REQ-530).
+            | ((!self.serial_in.busy() as u8) << 1)
+            | 0x01
     }
 
     /// POKEY is in initialization mode (HRM 5.2).
@@ -626,10 +689,17 @@ impl Pokey {
         }
         self.skctl = value;
         if value & SKCTL_CLOCK_MODE == 0 {
+            // REQ-531: mode `000` resets the clock flip-flops, not the shift registers.
             self.serial.reset_clock();
+            self.serial_in.reset_clock();
+        }
+        if value & SKCTL_TWO_TONE == 0 {
+            // HRM 5.6 Serial port reset: clearing bit 3 resets the two-tone flip-flop.
+            self.tone_ff = false;
         }
         if self.init_mode() {
             self.serial.stop();
+            self.serial_in.stop();
         }
         if value & SKCTL_KEY_SCAN == 0 {
             self.scan.disable();
@@ -664,24 +734,77 @@ impl Pokey {
         ]
     }
 
-    /// The serial output for this cycle (HRM 5.6), after the timer fires of the cycle.
+    /// The two-tone output for the fires of cycle `now` (REQ-533, HRM 5.6 Two-tone mode): a
+    /// fire of timer 2, or a fire of timer 1 while the data bit is 1, toggles the output and
+    /// resyncs timers 1 and 2. Force break makes the data bit 0. It runs before the counts
+    /// of the cycle, so that the resync also stops them.
+    fn two_tone(&mut self, fired: u8, now: u64) {
+        let data = self.skctl & SKCTL_FORCE_BREAK == 0 && self.serial.level();
+        let toggle = fired & 0b0010 != 0 || (data && fired & 0b0001 != 0);
+        if toggle {
+            self.tone_ff = !self.tone_ff;
+            self.timers.resync(now);
+        }
+    }
+
+    /// The serial port for this cycle (HRM 5.6), after the timer fires of the cycle.
     fn serial_tick(&mut self) {
         let fired = self.fired;
+        let start_edge = self.serial_in.note_level(self.in_level);
+        let clk = self.clk_in_level;
+        let clk_rose = clk && !self.clk_in_last;
+        let clk_fell = !clk && self.clk_in_last;
+        self.clk_in_last = clk;
         if self.init_mode() {
             self.serial.stop();
+            self.serial_in.stop();
             return;
         }
+        self.serial_output(fired, clk_rose);
+        let fall = match InputClock::from_skctl(self.skctl) {
+            InputClock::External => clk_fell,
+            InputClock::Timer4 => fired & 0b1000 != 0 && self.serial_in.toggle(),
+            InputClock::Async => {
+                if start_edge {
+                    // REQ-528: the start edge starts timers 3 and 4 like an `STIMER` write.
+                    self.serial_in.start_async();
+                    self.timers.restart(0b1100, self.cycle);
+                }
+                fired & 0b1000 != 0 && self.serial_in.toggle()
+            }
+        };
+        if fall {
+            self.serial_input(self.in_level);
+        }
+    }
+
+    /// One falling edge of the serial input clock (REQ-526, REQ-529).
+    const fn serial_input(&mut self, level: bool) {
+        if let Sample::Done(byte) = self.serial_in.sample(level) {
+            self.serin = byte.value;
+            if !byte.stop_ok {
+                self.sk_err &= !SK_FRAMING;
+            }
+            // REQ-529: a byte while the input IRQ is still active is an overrun.
+            if self.irqst & IRQ_SERIAL_IN == 0 {
+                self.sk_err &= !SK_SERIAL_OVERRUN;
+            }
+            self.latch(IRQ_SERIAL_IN);
+        }
+    }
+
+    /// The serial output for this cycle (REQ-525, REQ-527). `clk_rose` is a rising edge of
+    /// SIO CLOCK IN.
+    fn serial_output(&mut self, fired: u8, clk_rose: bool) {
         let force_break = self.skctl & SKCTL_FORCE_BREAK != 0;
         self.serial.note_break(force_break);
-        let edge = match OutputClock::from_skctl(self.skctl) {
-            OutputClock::Timer4 => fired & 0b1000 != 0,
-            OutputClock::Timer2 => fired & 0b0010 != 0,
-            OutputClock::External => false,
+        let now = self.cycle;
+        let event = match OutputClock::from_skctl(self.skctl) {
+            OutputClock::Timer4 if fired & 0b1000 != 0 => self.serial.toggle(now, force_break),
+            OutputClock::Timer2 if fired & 0b0010 != 0 => self.serial.toggle(now, force_break),
+            OutputClock::External if clk_rose => self.serial.rise(now, force_break),
+            _ => return,
         };
-        if !edge {
-            return;
-        }
-        let event = self.serial.toggle(self.cycle, force_break);
         if let Some(frame) = event.sent {
             if self.sent.len() == SERIAL_FIFO {
                 let _lost = self.sent.pop_front();
@@ -689,7 +812,7 @@ impl Pokey {
             self.sent.push_back(SerialByte {
                 value: frame.value,
                 start_cycle: frame.start_cycle,
-                end_cycle: self.cycle,
+                end_cycle: now,
             });
         }
         if event.loaded {
