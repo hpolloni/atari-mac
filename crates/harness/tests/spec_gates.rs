@@ -501,6 +501,34 @@ mod gates {
         );
     }
 
+    /// Verifies REQ-044: a section that appears twice fails, also a second `## Requirement`
+    /// after `## Acceptance criteria`, where the first occurrences are in the correct order.
+    #[test]
+    fn structure_gate_rejects_duplicate_sections() {
+        fixture_passes();
+        let one = Fixture::req_file(1);
+        rejects(
+            structure,
+            44,
+            "the section `## Requirement` appears 2 times",
+            |f| {
+                f.replace(
+                    &one,
+                    "## Notes",
+                    "## Requirement\n\nThe emulator shall do two things.\n\n## Notes",
+                );
+            },
+        );
+        rejects(
+            structure,
+            44,
+            "the section `## Notes` appears 2 times",
+            |f| {
+                f.replace(&one, "A note.\n", "A note.\n\n## Notes\n\nMore.\n");
+            },
+        );
+    }
+
     /// Verifies REQ-045: the requirement statements and criteria of the repository have no
     /// vague words.
     #[test]
@@ -897,6 +925,50 @@ mod gates {
         );
     }
 
+    /// Verifies REQ-047 criterion 3: only the whole words `withdrawn` and `merged` excuse a
+    /// withdrawn requirement, and `not withdrawn` or `not merged` does not.
+    #[test]
+    fn references_gate_matches_whole_words() {
+        fixture_passes();
+        let design = "docs/design/demo.md";
+        let three = req(3);
+        // The violations of the references gate on line 3 of the design, with `line` there
+        // and REQ-003 withdrawn. The test file names REQ-003 too, so the line must be checked.
+        let on_line = |line: &str| -> Vec<Violation> {
+            let fixture = Fixture::new();
+            fixture.replace(&Fixture::req_file(3), "status: draft", "status: withdrawn");
+            fixture.replace(
+                design,
+                "# Demo design\n",
+                &format!("# Demo design\n\n{line}\n"),
+            );
+            fixture
+                .run(spec::references)
+                .into_iter()
+                .filter(|v| v.file.ends_with(design) && v.line == Some(3))
+                .collect()
+        };
+        let withdrawn = format!("`{three}` is withdrawn");
+        for line in [
+            format!("{three} emerged later."),
+            format!("{three} is unmerged."),
+            format!("{three} is not withdrawn."),
+            format!("{three} was not merged."),
+            format!("{three} is withdrawnish."),
+        ] {
+            assert_reports(&on_line(&line), 47, &withdrawn);
+        }
+        for line in [
+            format!("{three} is withdrawn."),
+            format!("{three} was merged into {}.", req(1)),
+            format!("Merged: {three}."),
+            format!("{three} (withdrawn), {} is not withdrawn.", req(1)),
+        ] {
+            let found = on_line(&line);
+            assert!(found.is_empty(), "{line:?} is permitted: {found:?}");
+        }
+    }
+
     /// Verifies REQ-048: each requirement of the repository is in exactly one test plan, with
     /// a test or an evidence record.
     #[test]
@@ -1025,6 +1097,30 @@ mod gates {
                     "\n\n/// Verifies",
                     "\n\n#[test]\nfn second_test() {}\n\n/// Verifies",
                 );
+            },
+        );
+    }
+
+    /// Verifies REQ-049 criterion 4: a test plan entry without a `.rs` file fails, also when
+    /// a function of that name exists in some file.
+    #[test]
+    fn trace_gate_needs_a_file_for_each_test() {
+        fixture_passes();
+        let design = "docs/design/demo.md";
+        rejects(
+            trace,
+            49,
+            "the test plan names `first_test` without a `.rs` file",
+            |f| {
+                f.replace(design, "`demo.rs` `first_test`", "`first_test`");
+            },
+        );
+        rejects(
+            trace,
+            49,
+            &format!("`first_test` verifies {}, but the test plan", req(1)),
+            |f| {
+                f.replace(design, "`demo.rs` `first_test`", "`first_test`");
             },
         );
     }
@@ -1384,9 +1480,14 @@ mod gates {
         rejects(evidence, 51, "`method` is `test`", |f| {
             f.replace(&record, "method: inspection", "method: test");
         });
-        rejects(evidence, 51, "the body has 0 subsections", |f| {
-            f.replace(&record, "### Criterion 1\n", "");
-        });
+        rejects(
+            evidence,
+            51,
+            "the body has no subsection `Criterion 1`",
+            |f| {
+                f.replace(&record, "### Criterion 1\n", "");
+            },
+        );
         rejects(evidence, 51, "is not the ID in the file name", |f| {
             f.replace(
                 &record,
@@ -1394,6 +1495,52 @@ mod gates {
                 &format!("requirement: {}", req(1)),
             );
         });
+    }
+
+    /// Verifies REQ-051 criterion 2: each acceptance criterion `N` has its own subsection
+    /// whose heading starts with `Criterion N`. Other subsections do not count for a criterion.
+    #[test]
+    fn evidence_gate_checks_each_criterion() {
+        fixture_passes();
+        let two = req(2);
+        let record = format!("docs/verification/{two}.md");
+        let two_criteria = |f: &Fixture| {
+            f.replace(
+                &Fixture::req_file(2),
+                "`$FF`.\n",
+                "`$FF`.\n2. A person sees the value.\n",
+            );
+        };
+        let needle = format!("no subsection `Criterion 2` for criterion 2 of {two}");
+        rejects(evidence, 51, &needle, |f| {
+            two_criteria(f);
+            f.replace(
+                &record,
+                "### Criterion 1\n",
+                "### Criterion 1\n\nA.\n\n### Notes\n",
+            );
+        });
+        let needle = format!("no subsection `Criterion 1` for criterion 1 of {two}");
+        rejects(evidence, 51, &needle, |f| {
+            two_criteria(f);
+            f.replace(
+                &record,
+                "### Criterion 1\n",
+                "### Criterion 2\n\nA.\n\n### Criterion 2\n",
+            );
+        });
+        rejects(evidence, 51, &needle, |f| {
+            f.replace(&record, "### Criterion 1\n", "### Criterion 10\n");
+        });
+        let fixture = Fixture::new();
+        two_criteria(&fixture);
+        fixture.replace(
+            &record,
+            "### Criterion 1\n",
+            "## Criterion 1: the value\n\nA.\n\n## Criterion 2\n",
+        );
+        let found = fixture.run(evidence);
+        assert!(found.is_empty(), "one subsection per criterion: {found:?}");
     }
 
     /// Verifies REQ-052: the matrix has one row for each requirement that is not withdrawn,
@@ -1511,6 +1658,24 @@ mod gates {
             fixture.run(open_items).is_empty(),
             "a decided item with a decision"
         );
+    }
+
+    /// Verifies REQ-053 criterion 1: an `affects` path that is absolute, or whose `..` leaves
+    /// the repository, fails, also when the path exists on the host.
+    #[test]
+    fn open_item_gate_rejects_paths_outside_the_repository() {
+        fixture_passes();
+        let item = "docs/spec/open-items/OI-001.md";
+        for path in ["/bin/sh", "docs/../..", "../outside.md"] {
+            let needle = format!("`affects` item `{path}` is not a path in the repository");
+            rejects(open_items, 53, &needle, |f| {
+                f.replace(item, "docs/design/demo.md", path);
+            });
+        }
+        let fixture = Fixture::new();
+        fixture.replace(item, "docs/design/demo.md", "docs/../docs/design/demo.md");
+        let found = fixture.run(open_items);
+        assert!(found.is_empty(), "a `..` inside the repository: {found:?}");
     }
 
     /// Verifies REQ-053: the generated indexes of the repository are up to date, and a stale

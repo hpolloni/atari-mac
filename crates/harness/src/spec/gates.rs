@@ -3,7 +3,7 @@
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use super::load::REFERENCE_DIR;
@@ -136,6 +136,16 @@ pub fn structure(spec: &Spec) -> Vec<Violation> {
         for s in &r.sections {
             if !REQUIRED_SECTIONS.contains(&s.title.as_str()) && s.title != "Notes" {
                 let message = format!("the section heading `## {}` is not permitted", s.title);
+                out.push(Violation::new(44, &r.path, Some(s.line), message));
+            }
+        }
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for s in &r.sections {
+            let count = counts.entry(s.title.as_str()).or_default();
+            *count += 1;
+            if *count == 2 {
+                let total = r.sections.iter().filter(|o| o.title == s.title).count();
+                let message = format!("the section `## {}` appears {total} times", s.title);
                 out.push(Violation::new(44, &r.path, Some(s.line), message));
             }
         }
@@ -417,6 +427,24 @@ fn is_external(target: &str) -> bool {
     target.starts_with('#') || target.contains("://") || target.starts_with("mailto:")
 }
 
+/// True if `line` says that a requirement is withdrawn or merged (REQ-047 criterion 3): it
+/// has the whole word `withdrawn` or `merged`, in any case, and the word before it is not
+/// `not`. So `emerged`, `unmerged` and `not withdrawn` do not count.
+fn says_withdrawn(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.iter().enumerate().any(|(index, word)| {
+        matches!(*word, "withdrawn" | "merged")
+            && index
+                .checked_sub(1)
+                .and_then(|before| words.get(before))
+                .is_none_or(|before| *before != "not")
+    })
+}
+
 /// The context of the `references` gate.
 struct Refs<'a> {
     /// The repository root.
@@ -431,8 +459,7 @@ impl Refs<'_> {
     /// The broken ID references of one line. `record` is true in a requirement or an open
     /// item, where a withdrawn requirement can be named.
     fn ids(&self, doc: &Path, number: usize, line: &str, record: bool) -> Vec<Violation> {
-        let lower = line.to_lowercase();
-        let excused = record || lower.contains("withdrawn") || lower.contains("merged");
+        let excused = record || says_withdrawn(line);
         let mut out = Vec::new();
         for prefix in ["REQ-", "OI-", "SLICE-"] {
             for (_, token) in text::references(line, prefix) {
@@ -682,13 +709,18 @@ fn trace_requirement(spec: &Spec, r: &Requirement) -> Vec<Violation> {
     }
     for row in spec.rows(r.id) {
         for test_ref in &row.tests {
+            let function = &test_ref.function;
+            let Some(file) = test_ref.file.as_deref() else {
+                let message =
+                    format!("{id}: the test plan names `{function}` without a `.rs` file");
+                out.push(Violation::new(49, &row.document, Some(row.line), message));
+                continue;
+            };
             let found: Vec<&CodeTest> = spec
                 .code_tests
                 .iter()
                 .filter(|t| t.is_test && test_ref.matches(t))
                 .collect();
-            let file = test_ref.file.as_deref().unwrap_or("any file");
-            let function = &test_ref.function;
             let message = if found.is_empty() {
                 format!(
                     "{id}: the test plan names `{function}` in {file}, which is not a #[test] function"
@@ -808,6 +840,16 @@ fn implemented(spec: &Spec, r: &Requirement) -> Option<Violation> {
     Some(Violation::new(57, &r.path, None, message))
 }
 
+/// The numbers of the acceptance criteria of `r` (the lines `N. ` of the section).
+fn criterion_numbers(r: &Requirement) -> Vec<usize> {
+    r.section("Acceptance criteria").map_or_else(Vec::new, |s| {
+        s.lines
+            .iter()
+            .filter_map(|(_, line)| text::list_number(line))
+            .collect()
+    })
+}
+
 /// REQ-051: the evidence records are valid, and each `inspection` or `demonstration`
 /// requirement of a `done` package has a record with `result: pass`.
 #[must_use]
@@ -826,14 +868,14 @@ pub fn evidence(spec: &Spec) -> Vec<Violation> {
             );
             out.push(Violation::new(51, &record.path, None, message));
         }
-        if record.subsections < r.criteria() {
-            let message = format!(
-                "the body has {} subsections, but {} has {} acceptance criteria",
-                record.subsections,
-                req(r.id),
-                r.criteria()
-            );
-            out.push(Violation::new(51, &record.path, None, message));
+        for number in criterion_numbers(r) {
+            if !record.criterion_sections.contains(&number) {
+                let message = format!(
+                    "the body has no subsection `Criterion {number}` for criterion {number} of {}",
+                    req(r.id)
+                );
+                out.push(Violation::new(51, &record.path, None, message));
+            }
         }
     }
     for r in spec
@@ -857,6 +899,24 @@ pub fn evidence(spec: &Spec) -> Vec<Violation> {
     out
 }
 
+/// True if `path` is relative and its `..` components never leave the directory that it is
+/// relative to (REQ-053 criterion 1: an `affects` path names a file of the repository).
+fn stays_in_repository(path: &Path) -> bool {
+    let mut depth: usize = 0;
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => depth = depth.saturating_add(1),
+            Component::CurDir => {}
+            Component::ParentDir => match depth.checked_sub(1) {
+                Some(up) => depth = up,
+                None => return false,
+            },
+            Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    true
+}
+
 /// REQ-053: the `affects` values exist, and the `Decision` section agrees with the status.
 #[must_use]
 pub fn open_items(spec: &Spec, root: &Path) -> Vec<Violation> {
@@ -865,14 +925,19 @@ pub fn open_items(spec: &Spec, root: &Path) -> Vec<Violation> {
     for item in &spec.open_items {
         for target in &item.affects {
             let is_id = target.starts_with("REQ-") || target.starts_with("OI-");
-            let exists = if is_id {
-                known.contains(target)
+            let path = Path::new(target.split('#').next().unwrap_or_default());
+            let message = if is_id {
+                (!known.contains(target))
+                    .then(|| format!("`affects` item `{target}` does not exist"))
+            } else if !stays_in_repository(path) {
+                Some(format!(
+                    "`affects` item `{target}` is not a path in the repository"
+                ))
             } else {
-                root.join(target.split('#').next().unwrap_or_default())
-                    .exists()
+                (!root.join(path).exists())
+                    .then(|| format!("`affects` item `{target}` does not exist"))
             };
-            if !exists {
-                let message = format!("`affects` item `{target}` does not exist");
+            if let Some(message) = message {
                 out.push(Violation::new(53, &item.path, None, message));
             }
         }
