@@ -1052,10 +1052,10 @@ The seek model of REQ-638 exists (SLICE-05 WP-2), so the REQ-638 tests run. The 
 16. To verify: the AltirraOS cassette boot. The waits of REQ-643 (Notes) are from the 400/800
     OS listing (TRN SRC-CASORG). AltirraOS can use other waits or another prompt tone time.
     The boot tests will show it.
-17. The system tests of REQ-612 to REQ-614 (`req612_xex_loads_segments` and the others) and
-    `Machine::start_xex` need D1: (REQ-636): the SIO bus, the disk drive and the POKEY serial
-    input (SLICE-05). SLICE-04 WP-1 has the parser, the boot image and the loader, and tests
-    the loader with a synthetic OS. The system tests are planned in SLICE-05 WP-3.
+17. Resolved (SLICE-05 WP-3): `Machine::start_xex` and the system tests of REQ-612 to
+    REQ-614 run with D1: on the SIO bus. The machine checks for the first D1: command at
+    each frame end (the bus keeps the bytes of the last command frame), and at once on the
+    SIOV shortcut path.
 18. REQ-623 criterion 5 fails with AltirraOS (SLICE-05 WP-2). The shortcut does not handle
     `DDEVIC` = `$5F`, but the AltirraOS SIO routine sends the request with `DDEVIC` = `$5F`
     and `DUNIT` = `$D3` on the bus as bus ID `$31`, also with the shortcut off. D1: answers
@@ -1065,6 +1065,5 @@ The seek model of REQ-638 exists (SLICE-05 WP-2), so the REQ-638 tests run. The 
 19. `req623_fast_sio_xl_os` reads the user-supplied ROM from `roms/atari-xl-os.rom` (not in
     git). It follows criterion 7 (a message and no check when the file is missing) and stays
     ignored until OI-040 is decided.
-20. `--xex` is not wired (`Machine::start_xex`, WP-3), so the REQ-012 tests
-    `loads_cart_xex_and_disk` and `rejects_bad_cart_xex_and_disk` stay ignored. Their
-    `--cart` and `--disk` parts pass.
+20. Resolved (SLICE-05 WP-3): `--xex` is wired, and the REQ-012 tests
+    `loads_cart_xex_and_disk` and `rejects_bad_cart_xex_and_disk` run.

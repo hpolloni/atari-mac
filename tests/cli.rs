@@ -153,9 +153,8 @@ fn loads_media() {
     }
 }
 
-/// A 100-byte cartridge gives a message that names the file and exit status 2. `--xex` is
-/// not supported yet and also exits with status 2. A missing `--disk` file gives a message
-/// that names the file and exit status 2.
+/// A 100-byte cartridge gives a message that names the file and exit status 2. A missing
+/// `--xex` or `--disk` file gives a message that names the file and exit status 2.
 #[test]
 fn rejects_bad_media() {
     let bad = temp_dir("rejects_bad_media").join("bad.car");
@@ -169,10 +168,17 @@ fn rejects_bad_media() {
     ]);
     assert_eq!(output.status.code(), Some(2), "100-byte cartridge");
     assert!(stderr(&output).contains("bad.car"), "{}", stderr(&output));
-    let output = run(&["--headless", "--frames", "1", "--xex", "x"]);
-    assert_eq!(output.status.code(), Some(2), "--xex");
+    let missing = temp_dir("rejects_bad_media").join("missing.xex");
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "1",
+        "--xex",
+        missing.to_str().expect("path"),
+    ]);
+    assert_eq!(output.status.code(), Some(2), "--xex with a missing file");
     assert!(
-        stderr(&output).contains("not supported yet"),
+        stderr(&output).contains("missing.xex"),
         "--xex: {}",
         stderr(&output)
     );
@@ -253,11 +259,7 @@ fn valid_atr() -> Vec<u8> {
 /// Verifies REQ-012: `--headless --frames 1` exits with status 0 for a valid 8,192-byte
 /// cartridge (`--cart`), a valid executable (`--xex`) and a valid ATR image (`--disk`)
 /// (criterion 1).
-///
-/// Ignored until `--xex` exists (`Machine::start_xex`, SLICE-05 WP-3). The `--cart` and
-/// `--disk` parts pass.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn loads_cart_xex_and_disk() {
     let dir = temp_dir("loads_cart_xex_and_disk");
     for (option, name, bytes) in [
@@ -285,11 +287,7 @@ fn loads_cart_xex_and_disk() {
 
 /// Verifies REQ-012: with a 100-byte file, each of `--cart`, `--xex` and `--disk` writes a
 /// message that names the file to standard error and exits with status 2 (criterion 2).
-///
-/// Ignored until `--xex` exists (`Machine::start_xex`, SLICE-05 WP-3). The `--cart` and
-/// `--disk` parts pass.
 #[test]
-#[ignore = "planned: SLICE-05"]
 fn rejects_bad_cart_xex_and_disk() {
     let dir = temp_dir("rejects_bad_cart_xex_and_disk");
     for (option, name) in [

@@ -87,6 +87,10 @@ pub(super) fn shortcut(machine: &mut Machine) {
     else {
         return;
     };
+    // D1: got a command: `start_xex` releases OPTION (REQ-612).
+    if machine.xex_option_until.is_some() {
+        machine.release_xex_option();
+    }
     let mut bus = CpuBus {
         mem: &mut machine.mem,
         antic: &mut machine.antic,

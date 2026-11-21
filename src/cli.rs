@@ -31,7 +31,7 @@ Options:
   --os <file>          OS ROM, 16384 bytes (default: roms/altirraos-xl.rom)
   --basic <file>       BASIC ROM, 8192 bytes (default: roms/altirra-basic.rom)
   --cart <file>        Cartridge: a raw image of 8192 or 16384 bytes, or a CAR file
-  --xex <file>         Executable (not supported yet)
+  --xex <file>         Executable (XEX): boot it from D1: with BASIC disabled
   --disk <file>        ATR disk image in drive D1: (the OS boots it)
   --bas <file>         Type a BASIC program from a text file at Ready, then RUN it
   --no-run             With --bas: type the program, but do not RUN it
@@ -57,6 +57,8 @@ pub struct Options {
     pub basic: PathBuf,
     /// The cartridge file.
     pub cart: Option<PathBuf>,
+    /// The executable file (`--xex`, REQ-012, REQ-612). It boots from D1:.
+    pub xex: Option<PathBuf>,
     /// The ATR disk image file for D1: (`--disk`, REQ-012).
     pub disk: Option<PathBuf>,
     /// Run without a window.
@@ -85,6 +87,7 @@ impl Default for Options {
             os: PathBuf::from(DEFAULT_OS_ROM),
             basic: PathBuf::from(DEFAULT_BASIC_ROM),
             cart: None,
+            xex: None,
             disk: None,
             headless: false,
             frames: None,
@@ -139,8 +142,8 @@ fn number<T: FromStr>(
 ///
 /// # Errors
 ///
-/// [`FrontendError::Usage`] for an argument that is not valid, and
-/// [`FrontendError::Unsupported`] for `--xex`.
+/// [`FrontendError::Usage`] for an argument that is not valid, and for `--xex` with
+/// `--disk` (both use D1:) or with `--bas` (an executable starts with BASIC disabled).
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, FrontendError> {
     let mut args = args.into_iter();
     let mut options = Options::default();
@@ -150,7 +153,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--os" => options.os = value(&mut args, "--os")?.into(),
             "--basic" => options.basic = value(&mut args, "--basic")?.into(),
             "--cart" => options.cart = Some(value(&mut args, "--cart")?.into()),
-            "--xex" => return Err(FrontendError::Unsupported("--xex")),
+            "--xex" => options.xex = Some(value(&mut args, "--xex")?.into()),
             "--disk" => options.disk = Some(value(&mut args, "--disk")?.into()),
             "--headless" => options.headless = true,
             "--pal" => options.standard = VideoStandard::Pal,
@@ -183,6 +186,17 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
     }
     if options.no_run && options.bas.is_none() {
         return Err(usage("--no-run needs --bas".to_owned()));
+    }
+    if options.xex.is_some() && options.disk.is_some() {
+        return Err(usage(
+            "--xex and --disk cannot be used together: both use drive D1:".to_owned(),
+        ));
+    }
+    if options.xex.is_some() && options.bas.is_some() {
+        return Err(usage(
+            "--xex and --bas cannot be used together: an executable starts with BASIC disabled"
+                .to_owned(),
+        ));
     }
     check_filters(&options)?;
     Ok(Command::Run(options))
@@ -225,7 +239,6 @@ mod tests {
     use atari_core::VideoStandard;
 
     use super::{Command, Options, check_filters, parse};
-    use crate::error::FrontendError;
     use crate::frontend::DisplayFilters;
 
     fn args(list: &[&str]) -> Vec<OsString> {
@@ -293,6 +306,7 @@ mod tests {
                 os: "a.rom".into(),
                 basic: "b.rom".into(),
                 cart: Some("c.car".into()),
+                xex: None,
                 disk: Some("d.atr".into()),
                 headless: true,
                 frames: Some(180),
@@ -376,11 +390,25 @@ mod tests {
     }
 
     #[test]
-    fn xex_is_not_supported() {
-        let result = parse(args(&["--xex", "game"]));
-        assert!(
-            matches!(result, Err(FrontendError::Unsupported(f)) if f == "--xex"),
+    fn xex_option() {
+        assert_eq!(
+            parse_ok(&["--xex", "game.xex"]).xex,
+            Some(PathBuf::from("game.xex")),
             "--xex"
+        );
+        assert!(
+            parse_err(&["--xex"]).starts_with("--xex needs a value"),
+            "--xex without a file"
+        );
+        assert!(
+            parse_err(&["--xex", "a.xex", "--disk", "b.atr"])
+                .starts_with("--xex and --disk cannot be used together"),
+            "--xex with --disk"
+        );
+        assert!(
+            parse_err(&["--bas", "a.bas", "--xex", "a.xex"])
+                .starts_with("--xex and --bas cannot be used together"),
+            "--xex with --bas"
         );
     }
 }
