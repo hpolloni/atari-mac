@@ -1,7 +1,7 @@
 ---
 id: SLICE-09
 title: Logging and speed statistics
-status: in-progress
+status: done
 depends_on: "SLICE-08 (tape events), SLICE-05 WP-1 (SIO events)"
 packages:
   - id: WP-1
