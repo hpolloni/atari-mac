@@ -1,7 +1,7 @@
 ---
 id: SLICE-02
 title: Graphics modes and player/missile graphics
-status: in-progress
+status: done
 depends_on: "SLICE-01"
 packages:
   - id: WP-1
@@ -22,7 +22,7 @@ packages:
     requirements: [REQ-056]
   - id: WP-5
     title: Requirement status gate
-    status: planned
+    status: done
     requirements: [REQ-057]
 ---
 # SLICE-02: Graphics modes and player/missile graphics

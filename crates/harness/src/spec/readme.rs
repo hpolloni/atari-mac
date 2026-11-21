@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use super::report::{self, COMMAND, STATES};
-use super::{ItemStatus, README, Spec, Violation, text};
+use super::{ItemStatus, README, Spec, Status, Violation, text};
 
 /// The first line of the status block.
 pub const STATUS_BEGIN: &str = "<!-- BEGIN GENERATED: status -->";
@@ -18,8 +18,11 @@ pub const STATUS_END: &str = "<!-- END GENERATED: status -->";
 /// The rule of the README checks.
 const RULE: u16 = 56;
 
-/// The text between the two marker lines of the status block: one table row for each slice,
-/// then the counts of the whole matrix and the number of open items with the status `open`.
+/// The text between the two marker lines of the status block.
+///
+/// The block has one table row for each slice, then the counts of the whole matrix, the
+/// number of requirements with the status `implemented` (REQ-057) and the number of open
+/// items with the status `open`.
 #[must_use]
 pub fn status_block(spec: &Spec) -> String {
     let mut lines = vec![
@@ -60,6 +63,11 @@ pub fn status_block(spec: &Spec) -> String {
         .iter()
         .map(|s| format!("{} {s}", counts.get(s).copied().unwrap_or_default()))
         .collect();
+    let implemented = spec
+        .requirements
+        .iter()
+        .filter(|r| r.status == Status::Implemented)
+        .count();
     let open = spec
         .open_items
         .iter()
@@ -68,7 +76,8 @@ pub fn status_block(spec: &Spec) -> String {
     lines.extend([
         String::new(),
         format!(
-            "All {total} requirements: {}. Open items with the status `open`: {open}.",
+            "All {total} requirements: {}. Implemented: {implemented}. Open items with the \
+             status `open`: {open}.",
             summary.join(", ")
         ),
         String::new(),
