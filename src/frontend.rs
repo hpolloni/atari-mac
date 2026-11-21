@@ -1229,4 +1229,50 @@ mod tests {
             .collect();
         assert_eq!(out[..], plain[..], "PAL: row 0 is not blended");
     }
+
+    /// Planned tests: a package replaces each stub with the real test.
+    fn planned() {
+        panic!("planned test: a package replaces this stub with the real test");
+    }
+
+    /// Verifies REQ-082: with a tape inserted, a frame that starts while the motor line is
+    /// low runs in turbo (no wait), and a frame that starts while it is high has the
+    /// real-time pacing of REQ-007 (criterion 1, fake clock).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn tape_turbo_follows_motor_line() {
+        planned();
+    }
+
+    /// Verifies REQ-082: without a tape, the motor line low has no effect on the pacing
+    /// (criterion 2, fake clock).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn motor_line_without_tape_keeps_pacing() {
+        planned();
+    }
+
+    /// Verifies REQ-082: in tape turbo, the window loop shows a frame at least every 100 ms
+    /// of host time (criterion 3, fake clock).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn tape_turbo_presents_frames() {
+        planned();
+    }
+
+    /// Verifies REQ-082: after the same frames and the same key input, the frame buffer and
+    /// the RAM are the same with tape turbo and without it (criterion 4).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn tape_turbo_keeps_machine_state() {
+        planned();
+    }
+
+    /// Verifies REQ-082: in tape turbo, the frame loop plays no audio and counts no
+    /// underrun, and the audio plays again after turbo (criterion 5, fake device).
+    #[test]
+    #[ignore = "planned: SLICE-08"]
+    fn tape_turbo_stops_audio() {
+        planned();
+    }
 }

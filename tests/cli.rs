@@ -317,17 +317,17 @@ fn cas_rejects_bad_files() {
     planned();
 }
 
-/// Verifies REQ-081: with `--cas`, START and OPTION are held from the cold reset until frame
-/// 60, and RETURN is pressed in frames 180-186 (NTSC) or 150-156 (PAL); no other key is
-/// pressed (criterion 3).
+/// Verifies REQ-081: with `--cas`, START is held from the power-on cold reset until frame
+/// 60; OPTION, RETURN and the other keys are not pressed, so BASIC stays on (criterion 3).
 #[test]
 #[ignore = "planned: SLICE-08"]
 fn cas_key_presses() {
     planned();
 }
 
-/// Verifies REQ-081: with the boot test tape, `$0600` holds `$A5` within 2,400 frames
-/// (NTSC) and 2,000 frames (PAL) after the start (criterion 4).
+/// Verifies REQ-081: with the boot test tape, the test presses RETURN in frames 180-186
+/// (NTSC) or 150-156 (PAL); then `$0600` holds `$A5` within 2,400 frames (NTSC) and 2,000
+/// frames (PAL) after the start (criterion 4).
 #[test]
 #[ignore = "planned: SLICE-08"]
 fn cas_boots_tape() {
