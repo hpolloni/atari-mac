@@ -18,9 +18,9 @@ The POKEY serial port (REQ-500 range), the PIA CB2 output and the memory map (RE
 are not in this document. This document gives the calls that those modules make to the media
 module.
 
-All code is in `crates/atari-core/src/media.rs`. If the file becomes too large, it can become
-the directory `media/` with the submodules `cart`, `xex`, `atr`, `sio` and `disk`. The public
-names stay the same. The core has no file I/O (REQ-015): all functions take and give bytes.
+The code is in `crates/atari-core/src/media.rs` (cartridges, errors) and its submodules in
+`media/`: `xex`, `tape`, `disk` (the ATR images), `drive` (the drive commands) and `sio` (the
+bus timing). The public names are in `media`. The core has no file I/O (REQ-015): all functions take and give bytes.
 
 ## Interfaces
 
@@ -224,9 +224,10 @@ impl SioBus {
     /// makes the start bit, the 8 data bits (LSB first) and the stop bit of each scheduled
     /// device byte. The line is high when no byte is in progress.
     pub fn data_in_level(&self, now: u64) -> bool;
-    /// The start cycle of the next scheduled device byte, for tests.
+    /// The start cycle of the first scheduled device byte of the current transaction, for tests.
     pub fn next_device_byte_start(&self) -> Option<u64>;
-    /// The scheduled device bytes as `(value, start, bit_cycles)`, for tests.
+    /// The scheduled device bytes of the current transaction as `(value, start, bit_cycles)`,
+    /// for tests. A falling edge of the command line clears them.
     pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)>;
     /// A complete transaction at once, for the SIOV shortcut (REQ-623).
     pub fn transact(&mut self, request: &SioRequest<'_>) -> SioOutcome;
@@ -257,9 +258,9 @@ impl DiskDrive {
     pub const fn image(&self) -> Option<&DiskImage>;
     pub const fn image_mut(&mut self) -> Option<&mut DiskImage>;
     /// Command acceptance (ACK or NAK) and the data frame direction.
-    pub fn accept(&mut self, frame: &CommandFrame) -> Accept;
+    pub fn accept(&mut self, frame: CommandFrame) -> Accept;
     /// Command execution after the ACK (and the data frame of a write-type command).
-    pub fn execute(&mut self, frame: &CommandFrame, data: Option<&[u8]>) -> Completion;
+    pub fn execute(&mut self, frame: CommandFrame, data: Option<&[u8]>) -> Completion;
     /// A data frame from the computer had a checksum error (REQ-620).
     pub fn data_frame_error(&mut self);
 }
@@ -334,9 +335,13 @@ the machine:
 | Receive: the frame is longer than `DBYT` | `$8F` (the first `DBYT` bytes go to the buffer) |
 | Receive: the frame is shorter than `DBYT` | `$8A` |
 | Send: `DBYT` is shorter than the frame | `$8A` |
-| Send: `DBYT` is longer than the frame | `$8B` |
+| Send: `DBYT` is longer than the frame | `$8B` (the drive also sets status byte 0 bit 1, as for a data frame checksum error) |
+| Read-type command with no receive direction | Complete or Error, no data |
+| Read-type command with the send direction, or write-type command with no send direction | `$8A` (project decision: one side waits for a frame that the other side does not send) |
 
-The fast path takes no emulated time. The POKEY registers do not change.
+When a receive gives Error and also a length mismatch, the length mismatch status is used.
+
+The fast path takes no emulated time. The POKEY registers and the bus phase do not change.
 
 The OS cassette requests never reach `transact`: the OS sends them to its own cassette code
 (OI-046), which drives POKEY and the motor line. The cassette deck below gets them through
@@ -799,8 +804,13 @@ with `SKSTAT` bit 4, and the record reads through `SERIN`.
 `busy_us` for Read, Put and Write is `OP_BASE_US`, plus `40_000 + 20_000 * (moves - 1)` if the
 head moves `moves > 0` tracks, plus `208_000` for Write. The track is `(sector - 1) / 18`, or
 `(sector - 1) / 26` for ED. `head_track` then becomes the new track. Format sets `head_track`
-to 0. This model is enabled when REQ-638 is implemented; before that, `busy_us` is
-`OP_BASE_US`.
+to 0.
+
+Only an access to the disk moves the head: a Read of an inserted image, and a Put or Write of
+a write-enabled image. A Read, Put or Write with no image, and a Put or Write of a
+write-protected image, take `OP_BASE_US` with no seek. Status and the Percom block commands
+take 0 µs (the Complete byte follows after `COMPLETE_MIN`). A format takes the format time of
+the Timing section, and a format that gives Error takes 0 µs.
 
 ## Timing
 
@@ -934,7 +944,7 @@ requirement, and `run_until` for `$0600` = `$A5`.
 | REQ-620 | `media.rs` `req620_data_checksum_nak` (1-3) |
 | REQ-621 | `media.rs` `req621_complete_delay` (1, 2), for NTSC and PAL (3) |
 | REQ-622 | `media.rs` `req622_byte_timing_ntsc`, `req622_byte_timing_pal` (1-4) |
-| REQ-623 | `crates/harness/tests/media.rs` `req623_fast_sio_read` (1, 2), `req623_fast_sio_put` (3), `req623_fast_sio_not_intercepted` (4-6), `req623_fast_sio_xl_os` (7), `req623_fast_sio_boot_faster` (8). The test code is in a boot image (see Test images). |
+| REQ-623 | `crates/harness/tests/media.rs` `req623_fast_sio_read` (1, 2), `req623_fast_sio_put` (3), `req623_fast_sio_not_intercepted` (4-6), `req623_fast_sio_xl_os` (7), `req623_fast_sio_boot_faster` (8). The test code is in a boot image (see Test images). `media.rs` `req623_transact_status` (the status table of `SioBus::transact`, "SIOV shortcut") |
 | REQ-624 | `media.rs` `req624_only_device_31` (1, 2) |
 | REQ-625 | `media.rs` `req625_atr_sd_ed_dd` (1-5), `req625_atr_extra_bytes` (6), `req625_atr_large` (7), `req625_atr_dd_boot_sectors` (the full boot sector rule of ATR loading) |
 | REQ-626 | `media.rs` `req626_atr_errors` (1-8), `req626_atr_error_order` (9) |
@@ -961,7 +971,7 @@ cannot download. How this test runs without the ROM is open: see OI-040. REQ-623
 document do not agree, and the REQ-027 gate permits only the ignore reason `planned: SLICE-NN`.
 The other REQ-623 tests must give the running test that a `done` package needs (REQ-027).
 
-The REQ-638 tests are planned stubs (`planned: SLICE-05`) until the seek model is built. The MaxFlash kinds exist (WP-7 of SLICE-01), so the REQ-608 tests run.
+The seek model of REQ-638 exists (SLICE-05 WP-2), so the REQ-638 tests run. The MaxFlash kinds exist (WP-7 of SLICE-01), so the REQ-608 tests run.
 
 ## Open issues
 

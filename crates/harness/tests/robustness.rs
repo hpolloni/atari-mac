@@ -3,7 +3,9 @@
 //! The random bytes come from a `SplitMix64` generator with a fixed seed, so each run tests
 //! the same inputs.
 
-use atari_core::media::{Cartridge, Tape};
+use atari_core::media::{
+    Cartridge, CommandFrame, DiskImage, SioBus, SioData, SioOutcome, SioRequest, Tape, Xex,
+};
 use atari_core::{Machine, MachineConfig, VideoStandard};
 use atari_harness::system::TEST_SAMPLE_RATE;
 use atari_harness::{HarnessError, data};
@@ -90,6 +92,23 @@ fn random_file(rng: &mut Rng, index: usize) -> Vec<u8> {
     if index % 4 == 2 {
         file.resize([0x2000, 0x4000][index / 4 % 2], 0);
     }
+    // Each fourth file starts with no header, with an ATR header that agrees with the length,
+    // with the XEX signature, or with an ATR header with random fields after the signature.
+    if index.is_multiple_of(4) && file.len() >= 16 {
+        match index / 4 % 4 {
+            1 => {
+                let sector_size: u16 = [128, 256][index / 16 % 2];
+                let units = (file.len() - 16) / 16;
+                file[..2].copy_from_slice(&[0x96, 0x02]);
+                file[2..4].copy_from_slice(&units.to_le_bytes()[..2]);
+                file[4..6].copy_from_slice(&sector_size.to_le_bytes());
+                file[6] = units.to_le_bytes()[2];
+            }
+            2 => file[..2].copy_from_slice(&[0xFF, 0xFF]),
+            3 => file[..2].copy_from_slice(&[0x96, 0x02]),
+            _ => {}
+        }
+    }
     // Each fourth file is a CAS image of random chunks with supported types and short
     // lengths, so that the chunk checks after the signature also run.
     if index % 4 == 3 {
@@ -127,10 +146,10 @@ fn random_cas(rng: &mut Rng, bytes: &[u8]) -> Vec<u8> {
 /// with no panic (criterion 2). Each load returns `Ok` or an `Err` value. A cartridge that
 /// loads is also inserted in a machine, which runs 2 frames.
 ///
-/// The media types with a loader now: raw cartridge (`Cartridge::from_raw`), CAR file
-/// (`Cartridge::from_car`) and CAS tape image (`Tape::from_cas`, SLICE-08 WP-1). The XEX
-/// loader (`Xex::parse`, SLICE-04 WP-1) and the ATR loader (`DiskImage::from_atr`, SLICE-05)
-/// join this test when they exist.
+/// The media types: raw cartridge (`Cartridge::from_raw`), CAR file (`Cartridge::from_car`),
+/// CAS tape image (`Tape::from_cas`), executable (`Xex::parse`) and ATR disk image
+/// (`DiskImage::from_atr`). A disk image that loads is also exported and loaded again, and
+/// gets a Status command and Read commands through the SIOV path of the SIO bus.
 ///
 /// Verifies REQ-016
 #[test]
@@ -138,11 +157,24 @@ fn random_files_do_not_panic() {
     let mut rng = Rng(FILE_SEED);
     let mut loaded = 0_u32;
     let mut tapes = 0_u32;
+    let mut programs = 0_u32;
+    let mut disks = 0_u32;
     for index in 0..FILES {
         let file = random_file(&mut rng, index);
         if let Ok(tape) = Tape::from_cas(&file) {
             assert!(!tape.blocks().is_empty(), "a tape has at least one block");
             tapes += 1;
+        }
+        if let Ok(xex) = Xex::parse(&file) {
+            assert!(
+                !xex.segments().is_empty(),
+                "an executable has at least one segment"
+            );
+            programs += 1;
+        }
+        if let Ok(image) = DiskImage::from_atr(&file) {
+            use_disk(image, index);
+            disks += 1;
         }
         let cartridges = [
             Cartridge::from_raw(file.clone()),
@@ -156,6 +188,49 @@ fn random_files_do_not_panic() {
     }
     assert!(loaded > 0, "some random raw cartridges load and run");
     assert!(tapes > 0, "some random CAS images load");
+    assert!(programs > 0, "some random executables load");
+    assert!(disks > 0, "some random ATR images load");
+}
+
+/// Exports `image`, loads the export again, and sends a Status command and three Read
+/// commands of random sectors to the drive with the image. The sectors come from a generator
+/// of its own, seeded with `index`, so that the files after this one do not change.
+fn use_disk(image: DiskImage, index: usize) {
+    let mut rng = Rng(FILE_SEED ^ u64::try_from(index).unwrap_or(0));
+    assert_eq!(
+        DiskImage::from_atr(&image.to_atr()).map(|again| again.geometry()),
+        Ok(image.geometry()),
+        "the export loads with the geometry"
+    );
+    let mut bus = SioBus::new(VideoStandard::Ntsc);
+    bus.drive_mut().insert(image);
+    let frame = |command, sector: usize| {
+        let [aux1, aux2, ..] = sector.to_le_bytes();
+        CommandFrame {
+            device: 0x31,
+            command,
+            aux1,
+            aux2,
+        }
+    };
+    let status = SioRequest {
+        frame: frame(0x53, 0),
+        data: SioData::Receive(4),
+    };
+    assert!(
+        matches!(bus.transact(&status), SioOutcome::Done { status: 0x01, .. }),
+        "Status of a loaded image"
+    );
+    for _ in 0..3 {
+        let read = SioRequest {
+            frame: frame(0x52, rng.below_or_eq(0xFFFF)),
+            data: SioData::Receive(256),
+        };
+        assert!(
+            matches!(bus.transact(&read), SioOutcome::Done { .. }),
+            "Read of a loaded image"
+        );
+    }
 }
 
 /// With a fixed seed, random bytes in RAM and `PC` = `$0600` run for 600 frames with no

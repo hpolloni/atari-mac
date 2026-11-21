@@ -1,18 +1,22 @@
-//! Cartridge, executable and tape file formats.
+//! Cartridge, executable, tape and disk image formats, the SIO bus and the disk drive D1:.
 //!
 //! Design: `docs/design/media.md`. Requirements: REQ-600 to REQ-643. The cartridge
 //! interface is decided in OI-003. The standard 8 KB and 16 KB cartridges, the Atarimax
-//! `MaxFlash` cartridges, the XEX parser, the XEX boot image and the CAS
-//! tape image loader exist now.
+//! `MaxFlash` cartridges, the XEX parser, the XEX boot image, the CAS tape image loader,
+//! the ATR disk images, the SIO bus and the disk drive D1: exist now.
 
 use core::error::Error;
 use core::fmt;
 
 mod disk;
+mod drive;
+mod sio;
 mod tape;
 mod xex;
 
 pub use disk::{DiskImage, Geometry};
+pub use drive::{Accept, Completion, DiskDrive};
+pub use sio::{CommandFrame, SioBus, SioData, SioOutcome, SioRequest, sio_checksum};
 pub use tape::{Tape, TapeBlock};
 pub use xex::{SegmentDefect, Xex, XexDefect, XexSegment};
 
@@ -53,6 +57,23 @@ pub enum MediaError {
     XexSignature,
     /// An XEX file has no complete segment. The defect, if any, is the first one.
     XexNoSegment(Option<XexDefect>),
+    /// An ATR file is shorter than its 16-byte header.
+    AtrHeader,
+    /// An ATR file does not start with `$96 $02`. The value is the word that was found.
+    AtrSignature(u16),
+    /// An ATR sector size is not 128 or 256.
+    AtrSectorSize(u16),
+    /// The ATR data size is not a whole number of sectors.
+    AtrDataSize(usize),
+    /// The ATR file has fewer data bytes than the header gives.
+    AtrTruncated {
+        /// The data size in the header.
+        expected: usize,
+        /// The data bytes after the header.
+        actual: usize,
+    },
+    /// The ATR sector count is 0 or more than 65535.
+    AtrSectorCount(usize),
     /// A CAS file is shorter than one chunk header (8 bytes).
     CasHeader,
     /// The first chunk of a CAS file is not `FUJI`.
@@ -112,6 +133,25 @@ impl fmt::Display for MediaError {
                 defect.kind.describe(),
                 defect.offset
             ),
+            Self::AtrHeader => write!(f, "ATR file is shorter than its 16-byte header"),
+            Self::AtrSignature(word) => write!(
+                f,
+                "ATR file starts with ${word:04X}, not with the signature $0296"
+            ),
+            Self::AtrSectorSize(size) => write!(
+                f,
+                "ATR sector size {size} is not supported (only 128 and 256)"
+            ),
+            Self::AtrDataSize(size) => {
+                write!(f, "ATR data size {size} is not a whole number of sectors")
+            }
+            Self::AtrTruncated { expected, actual } => write!(
+                f,
+                "ATR header gives {expected} data bytes, but the file has {actual} bytes"
+            ),
+            Self::AtrSectorCount(count) => {
+                write!(f, "ATR sector count {count} is not in the range 1 to 65535")
+            }
             Self::CasHeader => write!(f, "CAS file is shorter than one 8-byte chunk header"),
             Self::CasSignature => write!(f, "CAS file does not start with a FUJI chunk"),
             Self::CasTruncated { offset } => write!(
@@ -363,6 +403,7 @@ mod tests {
     mod cas;
     mod drive;
     mod sio;
+    mod sio_host;
     mod tape;
     mod xex;
 
