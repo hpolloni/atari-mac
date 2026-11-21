@@ -13,6 +13,7 @@ use std::mem;
 use std::ops::RangeInclusive;
 
 use crate::antic::{AnCode, CycleOutput, DmaKind};
+use crate::state::impl_state;
 use crate::timing::{VBLANK_START_LINE, VideoStandard};
 
 /// Frame width in half color clocks (HPOS `$20-$DF`).
@@ -44,6 +45,12 @@ pub struct ConsoleKeys {
     pub option: bool,
 }
 
+impl_state!(ConsoleKeys {
+    start,
+    select,
+    option
+});
+
 /// A write that takes effect at a later color clock (REQ-434).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct PendingWrite {
@@ -54,6 +61,8 @@ struct PendingWrite {
     /// The value.
     value: u8,
 }
+
+impl_state!(PendingWrite { time, reg, value });
 
 /// The playfield inputs of one color clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -136,6 +145,41 @@ pub struct Gtia {
     /// The priority table (see `priority`).
     priority: Box<[u16]>,
 }
+
+impl_state!(Gtia {
+    standard,
+    hposp,
+    hposm,
+    sizep,
+    sizem,
+    grafp,
+    grafm,
+    colpm,
+    colpf,
+    colbk,
+    prior,
+    vdelay,
+    gractl,
+    consol_out,
+    pending,
+    pending_len,
+    shift,
+    shift_state,
+    collisions,
+    hires,
+    mode_10_pixel,
+    missile_line,
+    trig_input,
+    trig_latch,
+    console,
+    clock,
+    line,
+    cycle,
+    back,
+    front,
+} skip {
+    priority
+});
 
 /// The write delay of a register in color clocks (HRM 6.10 Table 18, REQ-434).
 const fn write_delay(reg: u8) -> u64 {
@@ -475,7 +519,9 @@ impl Gtia {
         let bits = code.bits();
         if matches!(bits, 0b001..=0b011) {
             if bits & 0b010 != 0 {
-                self.hires = bits == 0b011;
+                // REQ-432: a GTIA mode holds the hires state off (HRM 6.8). The last HPOS
+                // at which `%011` sets it is open (OI-054).
+                self.hires = bits == 0b011 && self.prior & 0xC0 == 0;
             }
             return Playfield {
                 blank: true,

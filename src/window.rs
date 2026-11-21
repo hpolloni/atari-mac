@@ -120,6 +120,10 @@ pub fn run(
 /// The emulation thread: runs the frames at real-time speed (or in turbo while a BASIC
 /// program is typed) until the user quits, `frames` frames have run or the window stops.
 /// Returns the time from the first frame to the end.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the frontend owns the host clock; the core reads no clock (REQ-014)"
+)]
 fn emulate(
     frontend: &mut Frontend,
     shared: &Shared,

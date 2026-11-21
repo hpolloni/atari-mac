@@ -9,6 +9,7 @@ mod decode;
 #[cfg(test)]
 mod tests;
 
+use crate::state::{Reader, State, StateError, Writer, impl_state};
 use crate::timing::{CYCLES_PER_LINE, VBLANK_START_LINE, VideoStandard};
 use decode::{
     blink_invert, char_codes, font_address, font_row, height, is_char, is_hires, mapped_codes,
@@ -25,6 +26,15 @@ pub trait DmaMemory {
 /// One 3-bit code on the ANTIC-to-GTIA bus (REQ-307, HRM 6.9 Table 17).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AnCode(u8);
+
+impl State for AnCode {
+    fn save(&self, w: &mut Writer) {
+        self.0.save(w);
+    }
+    fn load(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        self.0.load(r)
+    }
+}
 
 impl AnCode {
     /// Background.
@@ -84,6 +94,41 @@ pub enum DmaKind {
     Refresh,
 }
 
+impl State for DmaKind {
+    fn save(&self, w: &mut Writer) {
+        let (kind, player): (u8, u8) = match *self {
+            Self::None => (0, 0),
+            Self::Missile => (1, 0),
+            Self::Player(n) => (2, n),
+            Self::DisplayList => (3, 0),
+            Self::DisplayListAddress => (4, 0),
+            Self::CharacterName => (5, 0),
+            Self::CharacterData => (6, 0),
+            Self::Bitmap => (7, 0),
+            Self::Refresh => (8, 0),
+        };
+        kind.save(w);
+        player.save(w);
+    }
+    fn load(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        let mut kind_and_player = (0_u8, 0_u8);
+        kind_and_player.load(r)?;
+        *self = match kind_and_player {
+            (0, 0) => Self::None,
+            (1, 0) => Self::Missile,
+            (2, n) => Self::Player(n),
+            (3, 0) => Self::DisplayList,
+            (4, 0) => Self::DisplayListAddress,
+            (5, 0) => Self::CharacterName,
+            (6, 0) => Self::CharacterData,
+            (7, 0) => Self::Bitmap,
+            (8, 0) => Self::Refresh,
+            _ => return Err(StateError::Invalid),
+        };
+        Ok(())
+    }
+}
+
 /// What happened in one machine cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[expect(
@@ -112,6 +157,18 @@ pub struct CycleOutput {
     /// The cycle of this tick, 0..114.
     pub cycle: u32,
 }
+
+impl_state!(CycleOutput {
+    halt,
+    rdy,
+    dma,
+    dma_data,
+    nmi,
+    video,
+    frame_done,
+    line,
+    cycle,
+});
 
 /// Internal ANTIC state for tests and the debugger (see [`Antic::debug_state`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,7 +243,7 @@ const NMI_DLI: u8 = 0x80;
 const NMI_VBI: u8 = 0x40;
 
 /// A playfield fetch that waits for the data bus value of the cycle (REQ-311, REQ-347).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Deferred {
     /// The cycle of the fetch.
     cycle: u32,
@@ -199,6 +256,14 @@ struct Deferred {
     /// A character data fetch for this name, with `false` if ANTIC substitutes `$00`.
     char_data: Option<(u8, bool)>,
 }
+
+impl_state!(Deferred {
+    cycle,
+    mode,
+    slot,
+    name_or_bitmap,
+    char_data
+});
 
 /// The ANTIC chip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,6 +376,59 @@ pub struct Antic {
     #[cfg(test)]
     requests: [Option<u16>; 3],
 }
+
+impl_state!(Antic {
+    standard,
+    line,
+    cycle,
+    cur_line,
+    cur_cycle,
+    total_cycles,
+    dmactl,
+    dmactl_late,
+    chactl,
+    dlist,
+    hscrol,
+    vscrol,
+    pmbase,
+    chbase,
+    chbase_late,
+    nmien,
+    nmien_prev,
+    nmist,
+    ir,
+    prev_vs,
+    row,
+    first_line,
+    new_mode_line,
+    jvb_wait,
+    dl_fetched,
+    addr_lo,
+    memscan,
+    line_buffer,
+    lb_index,
+    dma_clock,
+    dma_clock_normal,
+    pf_ir,
+    names,
+    pf_started,
+    start_width,
+    win_left,
+    win_right,
+    pixels,
+    refresh_pending,
+    refresh_row,
+    wsync_start,
+    wsync_end,
+    dli_this_line,
+    nmi_source,
+    nmi_armed,
+    nmi_was_high,
+    hires_bug,
+    deferred,
+} test_only {
+    requests
+});
 
 /// Increments the low 10 bits of a display list address (REQ-324).
 const fn inc10(addr: u16) -> u16 {

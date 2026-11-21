@@ -28,6 +28,7 @@
 //! | [`screen`] | The text of the OS text screen in memory (REQ-024) |
 //! | [`machine`] | Memory map, bus scheduling, interrupts: ties all chips together |
 //! | [`timing`] | Clock and frame timing constants |
+//! | [`state`] | The byte format of the save states (REQ-018) |
 
 pub mod antic;
 pub mod cpu;
@@ -41,7 +42,9 @@ pub mod pia;
 mod planned;
 pub mod pokey;
 pub mod screen;
+pub mod state;
 pub mod timing;
 
 pub use machine::{ConfigError, JoystickState, Machine, MachineConfig};
+pub use state::StateError;
 pub use timing::VideoStandard;

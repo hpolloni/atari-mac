@@ -2,6 +2,8 @@
 //!
 //! Design: `docs/design/pokey.md`, "Keyboard scan". Requirements: REQ-518 to REQ-522.
 
+use crate::state::{impl_state, impl_state_enum};
+
 /// The scan codes on which the scan checks CONTROL, SHIFT and BREAK (HRM 5.8
 /// Control/Shift/Break scan).
 const CONTROL_CODE: u8 = 0x00;
@@ -22,6 +24,13 @@ pub(super) struct ScanInput {
     /// BREAK is down.
     pub(super) brk: bool,
 }
+
+impl_state!(ScanInput {
+    matrix,
+    shift,
+    control,
+    brk
+});
 
 /// The results of one scan pulse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -44,6 +53,13 @@ enum State {
     /// State 2: debounce key up.
     DebounceUp,
 }
+
+impl_state_enum!(State {
+    Up,
+    DebounceDown,
+    Down,
+    DebounceUp
+});
 
 /// The keyboard scan: the 6-bit counter, the compare register, the state machine and the
 /// modifier latches.
@@ -68,6 +84,16 @@ pub(super) struct KeyboardScan {
     /// BREAK level at the last check.
     brk_prev: bool,
 }
+
+impl_state!(KeyboardScan {
+    counter,
+    compare,
+    state,
+    shift_latch,
+    ctrl_latch,
+    key_down,
+    brk_prev,
+});
 
 impl KeyboardScan {
     /// The power-on state.

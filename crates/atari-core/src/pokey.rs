@@ -21,6 +21,7 @@ mod timers;
 use std::collections::VecDeque;
 
 use crate::keyboard::{CONTROL, SHIFT};
+use crate::state::impl_state;
 use crate::timing::{CYCLES_PER_LINE, VideoStandard};
 use audio::Audio;
 use kbscan::{KeyboardScan, ScanInput};
@@ -123,7 +124,7 @@ const SKCTL_FAST_POT: u8 = 0x04;
 const SERIAL_FIFO: usize = 64;
 
 /// A byte that the serial output shift register sent completely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SerialByte {
     /// The 8 data bits.
     pub value: u8,
@@ -132,6 +133,12 @@ pub struct SerialByte {
     /// The POKEY cycle (see [`Pokey::cycle`]) on which the stop bit ended.
     pub end_cycle: u64,
 }
+
+impl_state!(SerialByte {
+    value,
+    start_cycle,
+    end_cycle
+});
 
 /// The write registers as stored, for the tests (`test_write_regs`).
 #[cfg(test)]
@@ -215,6 +222,39 @@ pub struct Pokey {
     /// The host audio output.
     audio: Audio,
 }
+
+impl_state!(Pokey {
+    standard,
+    sample_rate,
+    audf,
+    audc,
+    audctl,
+    skctl,
+    irqen,
+    irqen_hist,
+    irqst,
+    kbcode,
+    serin,
+    sk_err,
+    cycle,
+    exit_cycle,
+    timers,
+    fired,
+    noise,
+    out_ff,
+    hp_ff,
+    pots,
+    volumes,
+    channels_dirty,
+    keys,
+    typed_mods,
+    scan,
+    serial,
+    in_level,
+    sent,
+    speaker,
+    audio,
+});
 
 impl Pokey {
     /// Creates POKEY in the power-on state (REQ-501). `sample_rate` is the host audio rate
@@ -470,6 +510,11 @@ impl Pokey {
     #[cfg(test)]
     pub(crate) const fn test_speaker(&self) -> bool {
         self.speaker
+    }
+
+    /// The host audio sample rate in Hz (for the save states, REQ-018).
+    pub(crate) const fn sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 
     /// Moves all samples made since the last call to the end of `out` (REQ-538).

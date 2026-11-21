@@ -235,7 +235,10 @@ The same builder function is the reference for the unit tests against HRM Table 
 ### GTIA modes (REQ-428 to REQ-433)
 
 - When `PRIOR` bits 6-7 are not `%00`, `hires` is false. A change of bits 6-7 from `%00`
-  to another value clears `hires` until the next `%011` code (REQ-432).
+  to another value clears `hires`, and a `%011` code sets `hires` only while bits 6-7 are
+  `%00`. Thus `hires` stays off for the rest of a scanline on which bits 6-7 return to
+  `%00` (REQ-432). The last HPOS at which `%011` sets `hires` is open (OI-054); now each
+  `%011` code at HPOS `$00-$21` can set it.
 - Pixel `p = ((an[0] & 3) << 2) | (an[1] & 3)`.
 - Mode 9: no playfield input. If `SB` is in the mask, the color is `COLBK | p`.
 - Mode 11: no playfield input. If `SB` is in the mask, the color is `COLBK | (p << 4)`.
@@ -332,7 +335,7 @@ run a small 6502 program on the full machine and check the frame buffer or memor
 | REQ-429 | `gtia.rs` `mode_9_luminance`, `mode_9_players_on_top`, `mode_9_no_playfield_collisions` |
 | REQ-430 | `gtia.rs` `mode_10_register_map`, `mode_10_delay_and_border`, `mode_10_wide_right_edge`, `mode_10_collisions` |
 | REQ-431 | `gtia.rs` `mode_11_hues`, `mode_11_players_on_top`, `mode_11_no_playfield_collisions` |
-| REQ-432 | `gtia.rs` `pseudo_mode_e_after_mid_line_prior` |
+| REQ-432 | `gtia.rs` `pseudo_mode_e_after_mid_line_prior`, `gtia_mode_at_hblank_blocks_hires` |
 | REQ-433 | `gtia.rs` `mode_10_bak_mutes_pixel` |
 | REQ-434 | `gtia.rs` `write_delays_table_18`, `write_delay_base_other_cycle`; `crates/harness/tests/gtia.rs` `mid_line_colbk_change` |
 | REQ-435 | `gtia.rs` `trigger_reads`; `crates/harness/tests/gtia.rs` `trig2_always_inactive`, `trig3_follows_cartridge` |

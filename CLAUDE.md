@@ -99,10 +99,10 @@ macOS frontend is the root crate `atari-mac`. `README.md` gives the layout and t
 
 ## Worktrees
 
-- A new worktree can start from an older commit. A teammate first checks
-  `git log --oneline -1` and fast-forwards to `main` if necessary.
-- ROMs and test data are not in git. A teammate copies `roms/*.rom` from the main checkout
-  and makes a symlink to `test-data/`. Neither is committed.
+- A teammate first runs `make worktree-setup` in its new worktree. It fast-forwards the
+  branch to `main` (a new worktree can start from an older commit), copies `roms/*.rom` from
+  the main checkout, and makes the `test-data/` symlink. ROMs and test data are not in git.
+  Neither is committed.
 - Before a teammate reports, it stops every background command and wait loop that it
   started. A wait loop must also end when the command that it waits for has ended.
 - Merge the branches that other branches depend on first. A gate change that makes the gates

@@ -6,6 +6,8 @@
 //!
 //! Design: `docs/design/pokey.md`, "Clocks and timers".
 
+use crate::state::impl_state;
+
 /// Cycles from an underflow, or from an `STIMER` write, to the reload.
 const RELOAD_DELAY: u64 = 3;
 
@@ -33,6 +35,13 @@ pub(super) struct Timers {
     /// count, 3 cycles after an underflow of the low timer, or `NEVER`.
     link_at: [u64; 4],
 }
+
+impl_state!(Timers {
+    counter,
+    reload_at,
+    fire_at,
+    link_at
+});
 
 impl Timers {
     /// The power-on state.

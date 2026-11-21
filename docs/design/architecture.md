@@ -32,6 +32,7 @@ files, the clock of the host, the window and the audio device (REQ-014).
 | `screen` | The text of the OS text screen in memory (REQ-024) | [test-harness.md](test-harness.md) |
 | `media` | Cartridges, executables, disk images, SIO devices | [media.md](media.md) |
 | `timing` | Clock and frame constants | This document |
+| `state` | The byte format of the save states | This document, "Save states" |
 
 A module talks to another module only through the public interface in its design document.
 
@@ -66,6 +67,54 @@ next `frame_done`. The frontend converts the color bytes with `palette::rgb`.
 
 POKEY produces mono `f32` samples at the sample rate in `MachineConfig`. The frontend takes
 them with `Machine::drain_audio` after each frame.
+
+## Determinism (REQ-014)
+
+The core reads no host clock and no environment. The workspace `clippy.toml` lists
+`std::time::Instant::now`, `std::time::SystemTime::now` and `std::env::var` in
+`disallowed-methods`. The frontend (the frame pacing and the `--frames` time) and the test
+harness (`UPDATE_GOLDEN`, the time limit of the specification gates) mark each function that
+uses one with `#[expect(clippy::disallowed_methods, reason = "...")]`.
+
+## Save states (REQ-018)
+
+```rust
+impl Machine {
+    /// The complete machine state as bytes. The ROMs are not in the state.
+    pub fn save_state(&self) -> Vec<u8>;
+    /// Restores a state of `save_state` into a machine with the same `MachineConfig`.
+    /// On an error the machine does not change.
+    pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError>;
+}
+
+pub enum StateError { Signature, Version(u16), Truncated, Checksum, Config, Invalid, TrailingBytes }
+```
+
+The module `state` gives the trait `State` (`save` to a `Writer`, `load` in place from a
+`Reader`) for the number types, `bool`, `usize`, arrays, pairs, `Option`, `Vec` and
+`VecDeque`, and two macros. Each chip module writes its own fields:
+`impl_state!(Type { field, ... })` for a struct, with an optional `skip { ... }` list (a
+constant table, for example the GTIA priority table) or `test_only { ... }` list (a field
+with `#[cfg(test)]`), and `impl_state_enum!(Type { Variant, ... })` for an enum without
+data. The struct macro destructures the struct without `..`, so a new field that is in no
+list does not compile. An enum with data or a struct with a field from the configuration
+has a manual `State` implementation (`antic::DmaKind`, `media::Cartridge`,
+`machine::Memory`).
+
+The format, all numbers little-endian:
+
+| Part | Contents |
+| --- | --- |
+| Signature | 8 bytes `A65XEST` and `$1A` |
+| Version | `u16`, 1 |
+| Configuration hash | FNV-1a 64 of the video standard, the audio sample rate, the OS ROM, the BASIC ROM and whether a cartridge is inserted |
+| Machine | The fields of `Machine` in their order: CPU, memory (RAM, then the cartridge: the FNV-1a 64 hash of its ROM, the bank and the enable flag; then `portb`), ANTIC, GTIA, POKEY, PIA, and the machine counters. A `Vec` or `VecDeque` is its length as `u64` and the elements. An enum is the index of the variant as `u64`. |
+| Checksum | FNV-1a 64 of all bytes before it |
+
+`load_state` checks the signature, the version, the checksum and the configuration hash in
+this order, loads into a copy of the machine, and replaces the machine only when the load
+succeeds and no byte is left. The audio samples that were not drained are in the state. When
+a chip gets a new field, its `impl_state!` list gets the field, and the version increments.
 
 ## Frontend
 
@@ -331,7 +380,7 @@ file error.
 | REQ-017 | `src/frontend.rs` unit test `pause_stops_frames` |
 | REQ-014 | `crates/harness/tests/boot.rs` `emulation_is_deterministic`; clippy `disallowed-methods` |
 | REQ-016 | `crates/harness/tests/robustness.rs` `random_files_do_not_panic`, `random_programs_do_not_panic` |
-| REQ-018 | `crates/harness/tests/boot.rs` `save_state_round_trip` |
+| REQ-018 | `crates/harness/tests/boot.rs` `save_state_round_trip`; `crates/atari-core/src/state.rs` unit test `values_round_trip` |
 | REQ-042 | `crates/harness/tests/harness_self_test.rs` `coverage_job_needs_80_percent` (the CI workflow runs the coverage check); CI job `Coverage (cargo-llvm-cov)` |
 
 ## Open issues

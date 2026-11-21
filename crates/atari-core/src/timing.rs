@@ -3,6 +3,8 @@
 //! One "cycle" in this crate is one CPU clock cycle (one machine cycle). ANTIC color clocks
 //! run at twice that rate.
 
+use crate::state::impl_state_enum;
+
 /// Machine cycles in one scanline (both NTSC and PAL).
 pub const CYCLES_PER_LINE: u32 = 114;
 
@@ -21,6 +23,8 @@ pub enum VideoStandard {
     /// 312 lines, 49.86 Hz, 1.7734470 MHz (Europe).
     Pal,
 }
+
+impl_state_enum!(VideoStandard { Ntsc, Pal });
 
 impl VideoStandard {
     /// Scanlines in one frame.

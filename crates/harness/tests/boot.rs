@@ -1,7 +1,8 @@
-//! System boot tests with the free ROMs (REQ-002, REQ-004 to REQ-006, REQ-014, REQ-024).
+//! System boot tests with the free ROMs (REQ-002, REQ-004 to REQ-006, REQ-014, REQ-018,
+//! REQ-024).
 
 use atari_core::gtia::ConsoleKeys;
-use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard};
+use atari_core::{ConfigError, Machine, MachineConfig, StateError, VideoStandard};
 use atari_harness::screen::has_row;
 use atari_harness::system::{
     BOOT_FRAMES, BootOptions, TEST_SAMPLE_RATE, boot, hold_console_keys, run_frames, run_until,
@@ -67,16 +68,37 @@ fn rejects_rom_with_wrong_size() {
     );
 }
 
-/// Verifies REQ-014: two machines with the same configuration give the same frames.
+/// Verifies REQ-014: two machines created with the same `MachineConfig` and run for 300
+/// frames give equal frame buffers after each frame and equal audio sample sequences
+/// (criterion 1).
 #[test]
 fn emulation_is_deterministic() {
     let mut a = Machine::new(config().unwrap()).unwrap();
     let mut b = Machine::new(config().unwrap()).unwrap();
+    let mut audio_a = Vec::new();
+    let mut audio_b = Vec::new();
     for frame in 0..300 {
         a.run_frame();
         b.run_frame();
         assert_eq!(a.frame(), b.frame(), "frame {frame}");
+        a.drain_audio(&mut audio_a);
+        b.drain_audio(&mut audio_b);
+        assert_eq!(
+            audio_a.len(),
+            audio_b.len(),
+            "sample count after frame {frame}"
+        );
     }
+    assert!(
+        audio_a.len() > 300 * 700,
+        "about 801 samples per frame at 48 kHz: {}",
+        audio_a.len()
+    );
+    let same = audio_a
+        .iter()
+        .zip(&audio_b)
+        .all(|(x, y)| x.to_bits() == y.to_bits());
+    assert!(same, "equal audio sample sequences");
     assert_eq!(a, b, "machine state after 300 frames");
 }
 
@@ -128,13 +150,6 @@ fn basic_is_mapped_without_option() {
     assert_eq!(machine.peek(0xA000), basic[0], "BASIC byte $0000 at $A000");
 }
 
-/// Fails the test that calls it. A planned stub calls this function, so that the stub never
-/// passes when it runs (`cargo test -- --include-ignored`).
-#[expect(clippy::panic, reason = "a planned test stub must fail when it runs")]
-fn planned() {
-    panic!("planned test: a package replaces this stub with the real test");
-}
-
 /// Verifies REQ-002: a `MachineConfig` with `VideoStandard::default()` gives NTSC: one frame
 /// is 29,868 cycles (criterion 3).
 #[test]
@@ -155,7 +170,70 @@ fn default_standard_is_ntsc() {
 /// Verifies REQ-018: a state saved after frame 100 and restored in a new machine gives the
 /// same frame buffers for frames 101 to 200 as a run without interruption (criterion 1).
 #[test]
-#[ignore = "planned: SLICE-06"]
 fn save_state_round_trip() {
-    planned();
+    let mut original = Machine::new(config().unwrap()).unwrap();
+    run_frames(&mut original, 100);
+    let state = original.save_state();
+    let mut restored = Machine::new(config().unwrap()).unwrap();
+    restored.load_state(&state).unwrap();
+    assert_eq!(
+        restored, original,
+        "the restored machine equals the saved machine"
+    );
+    let mut audio_original = Vec::new();
+    let mut audio_restored = Vec::new();
+    let mut changed = false;
+    for frame in 101..=200 {
+        let before = original.frame().to_vec();
+        original.run_frame();
+        restored.run_frame();
+        assert_eq!(restored.frame(), original.frame(), "frame {frame}");
+        changed |= original.frame() != before.as_slice();
+        original.drain_audio(&mut audio_original);
+        restored.drain_audio(&mut audio_restored);
+    }
+    assert!(
+        changed,
+        "the screen changes in frames 101 to 200 (the Ready prompt)"
+    );
+    assert_eq!(audio_restored.len(), audio_original.len(), "sample count");
+    let same = audio_original
+        .iter()
+        .zip(&audio_restored)
+        .all(|(x, y)| x.to_bits() == y.to_bits());
+    assert!(same, "equal audio samples");
+    assert_eq!(restored, original, "machine state after frame 200");
+
+    // A state does not load into a machine with another configuration, and a changed byte
+    // fails the checksum. The machine does not change when a load fails.
+    let mut pal = Machine::new(MachineConfig {
+        standard: VideoStandard::Pal,
+        ..config().unwrap()
+    })
+    .unwrap();
+    let fresh = pal.clone();
+    assert_eq!(
+        pal.load_state(&state),
+        Err(StateError::Config),
+        "PAL machine"
+    );
+    assert_eq!(pal, fresh, "unchanged after a failed load");
+    let mut bad = state.clone();
+    let middle = bad.len() / 2;
+    bad[middle] ^= 1;
+    assert_eq!(
+        restored.load_state(&bad),
+        Err(StateError::Checksum),
+        "changed byte"
+    );
+    assert_eq!(
+        restored.load_state(&state[..state.len() - 9]),
+        Err(StateError::Checksum),
+        "truncated state"
+    );
+    assert_eq!(
+        restored.load_state(b"not a state"),
+        Err(StateError::Signature),
+        "other bytes"
+    );
 }
