@@ -2,7 +2,7 @@
 id: SLICE-08
 title: Cassette tape
 status: planned
-depends_on: "SLICE-05 (POKEY serial input); the CA2 output modes of REQ-227 (SLICE-06 WP-2)"
+depends_on: "SLICE-05 WP-1 (POKEY serial input)"
 packages:
   - id: WP-1
     title: CAS tape images
@@ -11,27 +11,29 @@ packages:
   - id: WP-2
     title: Tape deck, motor and signal
     status: planned
-    requirements: [REQ-641, REQ-642]
+    requirements: [REQ-641, REQ-642, REQ-227]
   - id: WP-3
     title: Tape boot and the --cas option
     status: planned
-    requirements: [REQ-643, REQ-081, REQ-016]
+    requirements: [REQ-643, REQ-081, REQ-082]
 ---
 # SLICE-08: Cassette tape
 
 ## Goal
 
-The user starts the emulator with `--cas game.cas`. The emulator inserts the CAS tape image in an emulated cassette deck, holds START and OPTION at the cold reset, and presses RETURN after the prompt tone. The OS reads the tape through the POKEY serial input and runs the boot-tape game.
+The user starts the emulator with `--cas game.cas`. The emulator inserts the CAS tape image in an emulated cassette deck, holds START at the cold reset. The user presses RETURN after the prompt tone. The tape loads in turbo while the motor runs. The OS reads the tape through the POKEY serial input and runs the boot-tape game.
 
 ## Work packages
 
 | Package | Title | Requirements |
 | --- | --- | --- |
 | WP-1 | CAS tape images | REQ-639, REQ-640 |
-| WP-2 | Tape deck, motor and signal | REQ-641, REQ-642 |
-| WP-3 | Tape boot and the --cas option | REQ-643, REQ-081, REQ-016 |
+| WP-2 | Tape deck, motor and signal | REQ-641, REQ-642, REQ-227 |
+| WP-3 | Tape boot and the --cas option | REQ-643, REQ-081, REQ-082 |
 
-WP-1 is in the core only (`Tape::from_cas`). WP-2 needs WP-1, the POKEY serial input and `SKSTAT` bit 4 (SLICE-05 WP-1: REQ-526, REQ-530), and the PIA CA2 output (REQ-227). WP-3 needs WP-2.
+WP-1 is in the core only (`Tape::from_cas`). WP-2 needs WP-1, the POKEY serial input and `SKSTAT` bit 4 (SLICE-05 WP-1: REQ-526, REQ-530), and the PIA CA2 output (REQ-227, moved here from SLICE-06 WP-2 on 2026-11-20). WP-3 needs WP-2. WP-1 can start at once, in parallel with SLICE-05 WP-1.
+
+REQ-227 criteria 3 to 5 (the pulse modes) follow the recommended option 1 of OI-010, which is open. The lead records this here. The tape uses only criteria 1 and 2.
 
 The design is in `docs/design/media.md`, "Cassette deck", and in `docs/design/architecture.md`, "Tape image from the command line (REQ-081)".
 
@@ -41,11 +43,11 @@ These open items change the requirements of this slice. The requirements follow 
 
 | Open item | Question | Affects |
 | --- | --- | --- |
-| OI-048 | The CAS chunk types that the emulator supports | REQ-639, REQ-640, REQ-642 |
+| OI-048 | The CAS chunk types that the emulator supports (decided: option 2) | REQ-639, REQ-640, REQ-642 |
 | OI-049 | Tape writing | Scope of the slice (not planned now) |
-| OI-050 | The key presses for a tape boot | REQ-081, REQ-643 |
-| OI-051 | The tape load speed | REQ-081 (not planned now) |
-| OI-052 | The tape position at a cold reset | REQ-641 criterion 5 |
+| OI-050 | The key presses for a tape boot (decided: option 2, START only) | REQ-081, REQ-643 |
+| OI-051 | The tape load speed (decided: option 2, turbo) | REQ-082 |
+| OI-052 | The tape position at a cold reset (decided: option 2) | REQ-641 criterion 5 |
 | OI-046 | The cassette device code that SIO intercepts | REQ-643 criterion 5 does not depend on it |
 
 ### Test rule for each package (REQ-027)
