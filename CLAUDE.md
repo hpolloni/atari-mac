@@ -94,4 +94,8 @@ macOS frontend is the root crate `atari-mac`. `README.md` gives the layout and t
 - The lead commits merges and its own edits on `main` locally. Push only when the user asks,
   and ask again before each push.
 - No ROM files, test data or secrets in git.
+- No commercial software. A test, a requirement, a document or a commit message does not
+  read or name a game, a program or a media image that the user supplies (for example a
+  file in `roms/`). The user names such a file only as an example. Tests make their media
+  in code.
 - In records, name roles (the user, the lead, a teammate), not persons.
