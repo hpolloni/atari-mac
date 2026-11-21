@@ -51,6 +51,8 @@ make roms                 # downloads the ROMs (one time)
 cargo run --release       # opens the window: NTSC, BASIC enabled
 cargo run --release -- --pal --scale 3
 cargo run --release -- --bas examples/pong.bas
+cargo run --release -- --bas examples/sounds.bas   # each SOUND distortion and pitch
+cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 ```
 
 | Option | Meaning |
