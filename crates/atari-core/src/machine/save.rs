@@ -39,11 +39,11 @@ impl_state!(Machine {
     fast_sio,
     fast_tape,
     // Inputs of the frontend: GTIA has the console keys that the machine sees, and the
-    // OPTION hold of `start_xex` and the START hold of `start_tape` are key presses of the
+    // OPTION hold of `start_xex` and the keys of `hold_start_keys` are key presses of the
     // frontend start.
     console_keys,
     xex_option_until,
-    tape_start_until,
+    start_hold,
     // The next tape mark of the event log: `load_state` calculates it again.
     tape_mark_at,
     tape_mark,

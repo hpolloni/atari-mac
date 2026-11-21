@@ -734,6 +734,196 @@ fn no_fast_tape_help() {
     );
 }
 
+/// The options of the command line `--no-basic` with `extra`, with the free ROMs.
+fn parse_no_basic(extra: &[&str]) -> Options {
+    let mut args = vec!["--os", OS_ROM, "--basic", BASIC_ROM, "--no-basic"];
+    args.extend(extra);
+    match cli::parse(args.into_iter().map(OsString::from)) {
+        Ok(cli::Command::Run(options)) => *options,
+        other => panic!("the command line: {other:?}"),
+    }
+}
+
+/// The `CONSOL` bits 0-2 (`$D01F`, a bit is 0 while its key is down) in frames 0-299 from
+/// the start of the frontend with `options`, and the frontend after the 300 frames.
+fn consol_frames(options: &Options) -> (Frontend, Vec<u8>) {
+    let mut frontend = start(options).expect("start");
+    assert_eq!(frontend.machine().frame_count(), 0, "the cold reset");
+    let mut consol = Vec::new();
+    for _ in 0..300 {
+        consol.push(frontend.machine().peek(0xD01F) & 0x07);
+        frontend.run_frames(1).expect("run");
+    }
+    (frontend, consol)
+}
+
+/// Asserts that `consol` (from [`consol_frames`]) is `held` in frames 0-59 and `$07` (no
+/// key) in frames 60-299.
+fn assert_held_until_60(consol: &[u8], held: u8, what: &str) {
+    for (frame, &value) in consol.iter().enumerate() {
+        let expected = if frame < 60 { held } else { 0x07 };
+        assert_eq!(value, expected, "{what}: CONSOL in frame {frame}");
+    }
+}
+
+/// Writes `$5A` to `$A000` and gives the byte that the CPU reads there.
+fn write_read_a000(frontend: &mut Frontend) -> u8 {
+    frontend.machine_mut().poke_ram(0xA000, 0x5A);
+    frontend.machine().peek(0xA000)
+}
+
+/// Runs `frontend` until `$0600` holds `$A5`, at most `limit` frames, and tells whether it
+/// does.
+fn run_until_marker(frontend: &mut Frontend, limit: u64) -> bool {
+    for _ in 0..limit {
+        frontend.run_frames(1).expect("run");
+        if frontend.machine().peek_ram(0x0600) == 0xA5 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Verifies REQ-093: with `--no-basic`, OPTION is down from the power-on cold reset until
+/// frame 60, and no console key is down after it (criterion 1).
+#[test]
+fn no_basic_holds_option() {
+    let options = parse_no_basic(&[]);
+    assert!(options.no_basic, "the option");
+    let (_, consol) = consol_frames(&options);
+    assert_held_until_60(&consol, 0x03, "--no-basic");
+    let (_, consol) = consol_frames(&Options {
+        no_basic: false,
+        ..options
+    });
+    assert_held_until_60(&consol, 0x07, "without --no-basic");
+}
+
+/// Verifies REQ-093: with `--no-basic` and no media, after 180 frames, `$5A` written to
+/// `$A000` reads back as `$5A`; without `--no-basic`, the read gives byte `$0000` of the
+/// BASIC ROM (criterion 2).
+#[test]
+fn no_basic_ram_at_a000() {
+    let options = parse_no_basic(&[]);
+    let mut frontend = start(&options).expect("start");
+    frontend.run_frames(180).expect("run");
+    assert_eq!(write_read_a000(&mut frontend), 0x5A, "RAM at $A000");
+    let basic = fs::read(BASIC_ROM).expect("BASIC ROM");
+    assert_ne!(basic[0], 0x5A, "the test can tell RAM from the ROM");
+    let mut frontend = start(&Options {
+        no_basic: false,
+        ..options
+    })
+    .expect("start");
+    frontend.run_frames(180).expect("run");
+    assert_eq!(write_read_a000(&mut frontend), basic[0], "the BASIC ROM");
+}
+
+/// Verifies REQ-093: with `--no-basic` and `--cas`, START and OPTION are down until frame
+/// 60; the boot test tape of REQ-643 boots with `--auto-return` (`$0600` holds `$A5` within
+/// 2,400 frames), and after the boot, `$5A` written to `$A000` reads back as `$5A`
+/// (criterion 3).
+#[test]
+fn no_basic_with_cas() {
+    let tape = boot_tape_file("no_basic_with_cas");
+    let options = parse_cas(&tape, &["--no-basic", "--auto-return"]);
+    assert!(options.no_basic && options.auto_return, "the options");
+    let (_, consol) = consol_frames(&options);
+    assert_held_until_60(&consol, 0x02, "--no-basic --cas");
+    let mut frontend = start(&options).expect("start");
+    assert!(
+        run_until_marker(&mut frontend, 2_400),
+        "no $A5 at $0600 after 2,400 frames"
+    );
+    assert_eq!(write_read_a000(&mut frontend), 0x5A, "RAM at $A000");
+}
+
+/// A single-density ATR image of 720 sectors that boots: sector 1 has the boot header
+/// `00 01 00 07 00 07` (1 sector at `$0700`) and the code `LDA #$A5`, `STA $0600`,
+/// `JMP $070B`; the other sectors hold `$00`.
+fn boot_atr() -> Vec<u8> {
+    let mut atr = valid_atr();
+    let sector_1 = [
+        0x00, 0x01, 0x00, 0x07, 0x00, 0x07, 0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x4C, 0x0B, 0x07,
+    ];
+    atr[16..16 + sector_1.len()].copy_from_slice(&sector_1);
+    atr
+}
+
+/// Verifies REQ-093: with `--no-basic` and `--disk`, OPTION is down until frame 60, and the
+/// OS boots the disk (`$0600` holds `$A5` within 1,200 frames) with RAM at `$A000`
+/// (criterion 4).
+#[test]
+fn no_basic_with_disk() {
+    let disk = temp_dir("no_basic_with_disk").join("boot.atr");
+    fs::write(&disk, boot_atr()).expect("write the ATR file");
+    let options = parse_no_basic(&["--disk", disk.to_str().expect("UTF-8 path")]);
+    assert_eq!(options.disk.as_deref(), Some(disk.as_path()), "the disk");
+    let (_, consol) = consol_frames(&options);
+    assert_held_until_60(&consol, 0x03, "--no-basic --disk");
+    let mut frontend = start(&options).expect("start");
+    assert!(
+        run_until_marker(&mut frontend, 1_200),
+        "no $A5 at $0600 after 1,200 frames"
+    );
+    assert_eq!(write_read_a000(&mut frontend), 0x5A, "RAM at $A000");
+}
+
+/// Verifies REQ-093: `--no-basic` with `--bas` gives exit code 2 and a message that names
+/// both options; `--no-basic` with `--xex` is accepted and gives the same console keys in
+/// frames 0-299 and the same RAM after them as `--xex` alone (criterion 5).
+#[test]
+fn no_basic_with_bas_and_xex() {
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "1",
+        "--no-basic",
+        "--bas",
+        "a.bas",
+    ]);
+    let message = stderr(&output);
+    assert_eq!(output.status.code(), Some(2), "exit status: {message}");
+    assert!(
+        message.contains("--no-basic") && message.contains("--bas"),
+        "the message names both options: {message}"
+    );
+    let xex = temp_dir("no_basic_with_bas_and_xex").join("game.xex");
+    fs::write(&xex, VALID_XEX).expect("write the executable");
+    let xex_arg = xex.to_str().expect("UTF-8 path");
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "1",
+        "--no-basic",
+        "--xex",
+        xex_arg,
+    ]);
+    assert!(output.status.success(), "--xex: {}", stderr(&output));
+    let options = parse_no_basic(&["--xex", xex_arg]);
+    let (with, with_consol) = consol_frames(&options);
+    let (without, without_consol) = consol_frames(&Options {
+        no_basic: false,
+        ..options
+    });
+    assert_eq!(with_consol, without_consol, "the console keys");
+    assert!(
+        (0..=0xFFFF_u16).all(|a| with.machine().peek_ram(a) == without.machine().peek_ram(a)),
+        "the same RAM"
+    );
+}
+
+/// Verifies REQ-093: `--help` lists `--no-basic` (criterion 6).
+#[test]
+fn no_basic_help() {
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--no-basic"),
+        "--help lists --no-basic"
+    );
+}
+
 /// Runs `--headless --frames 240 --screenshot` with `flags` and returns the PNG pixels as
 /// `0x00RRGGBB` values.
 fn screenshot_240(test: &str, flags: &[&str]) -> Vec<u32> {

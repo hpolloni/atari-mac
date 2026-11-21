@@ -22,7 +22,7 @@ packages:
     requirements: [REQ-644, REQ-091, REQ-092]
   - id: WP-5
     title: Boot with BASIC off
-    status: planned
+    status: done
     requirements: [REQ-093]
 ---
 # SLICE-08: Cassette tape

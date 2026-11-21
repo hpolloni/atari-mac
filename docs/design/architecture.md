@@ -356,6 +356,34 @@ headless run (`run_frames`). A host key change in `Frontend::step` can release R
 as on the real keyboard. The help line is
 `--auto-return        With --cas: press RETURN after the prompt tone`.
 
+### Boot with BASIC off (REQ-093)
+
+`--no-basic` sets `Options::no_basic`. `--no-basic` together with `--bas` is a usage error
+(exit status 2): `--no-basic and --bas cannot be used together: --bas types the program into
+BASIC`. With `--xex`, the option is accepted and has no effect, because `start_xex` holds
+OPTION itself (criterion 5).
+
+The machine has one hold mechanism for console keys at the start:
+
+```rust
+/// The frames from the cold reset during which a start hold holds its keys.
+pub const START_HOLD_FRAMES: u64 = 60;
+/// Holds the pressed keys of `keys`, with the keys of an earlier call, until the end of
+/// frame START_HOLD_FRAMES after the cold reset. No effect from that frame on. A cold reset
+/// (`power_on`) ends the hold.
+pub const fn hold_start_keys(&mut self, keys: ConsoleKeys);
+```
+
+`start_tape` holds START with it (REQ-081 criterion 3). After `start_xex` and `start_tape`,
+`load_machine` calls `hold_start_keys` with OPTION when `no_basic` is set and there is no
+`--xex`. The machine is then at frame 0 of the power-on cold reset (`Machine::new` or
+`start_tape`), so OPTION is down in frames 0-59 (criterion 1), together with START for
+`--cas` (criterion 3). The XL OS reads OPTION at the cold start and sets `PORTB` bit 1, so
+BASIC is off (REQ-006). The hold is not in the save state (a key press of the frontend
+start, as the other holds). `power_on` ends the hold, so the F10 cold reset holds no key:
+the user holds F4 (OPTION) during F10. The help line is
+`--no-basic           Hold OPTION at power-on: boot with BASIC off`.
+
 ### Tape shortcut option (REQ-091)
 
 `Options::fast_tape` is `true` by default, and `--no-fast-tape` sets it to `false`.
@@ -826,6 +854,7 @@ file error.
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_typed_listing_keeps_lower_case` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
 | REQ-092 | `tests/cli.rs` `auto_return_presses_return` (1, NTSC and PAL), `auto_return_headless_boot` (2, NTSC and PAL), `auto_return_needs_cas` (3), `cas_without_auto_return` (4), `auto_return_help` (5) |
+| REQ-093 | `tests/cli.rs` `no_basic_holds_option` (1), `no_basic_ram_at_a000` (2), `no_basic_with_cas` (3), `no_basic_with_disk` (4), `no_basic_with_bas_and_xex` (5), `no_basic_help` (6) |
 | REQ-091 | `tests/cli.rs` `fast_tape_default_on` (1), `no_fast_tape_option` (2), `no_fast_tape_help` (3); `src/cli.rs` unit test `no_fast_tape_parses` |
 | REQ-082 | `src/frontend.rs` unit tests `tape_turbo_follows_motor_line` (1, fake clock), `motor_line_without_tape_keeps_pacing` (2), `tape_turbo_presents_frames` (3), `tape_turbo_keeps_machine_state` (4), `tape_turbo_stops_audio` (5, fake device) |
 | REQ-083 | `src/stats.rs` unit tests `stats_line_each_second` (1, fake clock), `stats_frame_rate_and_speed` (2, 3), `stats_shown_and_underruns` (4, 7), `stats_emulation_time` (5), `stats_turbo_and_motor` (6); `tests/cli.rs` `stats_headless_lines` (1, 4, 7), `no_stats_without_option` (8), `stats_help_lists_option` (9) |

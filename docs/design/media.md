@@ -532,6 +532,9 @@ pub fn tape_motor_on(&self) -> bool;
 /// (REQ-081 criterion 3, OI-050). It presses no other key. The frame count starts at 0 at
 /// the cold reset.
 pub fn start_tape(&mut self, tape: Tape);
+/// Holds `keys` with the keys of an earlier call until frame 60 after the cold reset
+/// (REQ-081, REQ-093). A cold reset ends the hold.
+pub const fn hold_start_keys(&mut self, keys: ConsoleKeys);
 ```
 
 D1: is on the bus when the configuration has a disk or after the first `insert_disk`
@@ -897,7 +900,8 @@ The deck has no start or stop time (a project decision, REQ-641 Notes).
 `Machine::start_tape(tape)`:
 
 1. `insert_tape(tape)`, then `power_on` (the tape position is 0).
-2. `set_console_keys` with START from frame 0 until frame 60. Then no console key.
+2. `hold_start_keys` with START: START from frame 0 until frame 60. Then no console key.
+   `--no-basic` adds OPTION to the same hold (`architecture.md`, "Boot with BASIC off").
 
 The machine counts the frames from the cold reset and does step 2 at the first cycle of the
 frame. The user presses RETURN after the prompt tone (OI-050); the tests of REQ-643 and

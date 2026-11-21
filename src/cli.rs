@@ -38,6 +38,7 @@ Options:
   --cas <file>         CAS tape image: boot it (holds START at power-on)
   --no-fast-tape       Read the tape records at the real speed (no tape shortcut)
   --auto-return        With --cas: press RETURN after the prompt tone
+  --no-basic           Hold OPTION at power-on: boot with BASIC off
   --bas <file>         Type a BASIC program from a text file at Ready, then RUN it
   --no-run             With --bas: type the program, but do not RUN it
   --pal                PAL machine (default: NTSC)
@@ -82,6 +83,9 @@ pub struct Options {
     /// With `--cas`: the frontend presses RETURN after the prompt tone (`--auto-return`,
     /// REQ-092).
     pub auto_return: bool,
+    /// The frontend holds OPTION at the power-on cold reset until frame 60, so BASIC is off
+    /// (`--no-basic`, REQ-093).
+    pub no_basic: bool,
     /// Run without a window.
     pub headless: bool,
     /// The number of frames to run. `None` runs until the user quits.
@@ -120,6 +124,7 @@ impl Default for Options {
             cas: None,
             fast_tape: true,
             auto_return: false,
+            no_basic: false,
             headless: false,
             frames: None,
             screenshot: None,
@@ -214,7 +219,8 @@ impl TraceArgs {
 ///
 /// [`FrontendError::Usage`] for an argument that is not valid, for `--xex` with `--disk`
 /// (both use D1:) or with `--bas` (an executable starts with BASIC disabled), and for `--cas`
-/// with `--bas` or `--xex` (each makes key presses at the start, REQ-081 criterion 6).
+/// with `--bas` or `--xex` (each makes key presses at the start, REQ-081 criterion 6), and
+/// for `--no-basic` with `--bas` (REQ-093 criterion 5).
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, FrontendError> {
     let mut args = args.into_iter();
     let mut options = Options::default();
@@ -230,6 +236,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--cas" => options.cas = Some(value(&mut args, "--cas")?.into()),
             "--no-fast-tape" => options.fast_tape = false,
             "--auto-return" => options.auto_return = true,
+            "--no-basic" => options.no_basic = true,
             "--headless" => options.headless = true,
             "--pal" => options.standard = VideoStandard::Pal,
             "--frames" => options.frames = Some(number(&mut args, "--frames")?),
@@ -291,6 +298,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
     if options.cas.is_some() && options.bas.is_some() {
         return Err(usage(
             "--cas and --bas cannot be used together: both make key presses at the start"
+                .to_owned(),
+        ));
+    }
+    if options.no_basic && options.bas.is_some() {
+        return Err(usage(
+            "--no-basic and --bas cannot be used together: --bas types the program into BASIC"
                 .to_owned(),
         ));
     }
@@ -424,6 +437,7 @@ mod tests {
                 cas: None,
                 fast_tape: true,
                 auto_return: false,
+                no_basic: false,
                 headless: true,
                 frames: Some(180),
                 screenshot: Some("out.png".into()),

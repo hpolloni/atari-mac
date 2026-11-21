@@ -47,9 +47,10 @@ const PORTB_SELF_TEST_OFF: u8 = 0x80;
 /// The bus ID of drive D1: (HRM 9.1), the first byte of its command frames.
 const DEVICE_D1: u8 = 0x31;
 
-/// The frames from the cold reset during which [`Machine::start_tape`] holds START
-/// (REQ-081 criterion 3).
-pub const TAPE_START_FRAMES: u64 = 60;
+/// The frames from the cold reset during which [`Machine::hold_start_keys`] holds its keys:
+/// START of [`Machine::start_tape`] (REQ-081 criterion 3) and OPTION of `--no-basic`
+/// (REQ-093 criterion 1).
+pub const START_HOLD_FRAMES: u64 = 60;
 
 /// The frames after the cold reset of [`Machine::start_xex`] at which the machine releases
 /// OPTION if D1: got no command: 3 seconds of emulated time, rounded to whole frames
@@ -365,9 +366,10 @@ pub struct Machine {
     /// While [`Machine::start_xex`] holds OPTION: the frame count at which the machine
     /// releases it if D1: got no command before (REQ-612).
     xex_option_until: Option<u64>,
-    /// While [`Machine::start_tape`] holds START: the frame count at which the machine
-    /// releases it (REQ-081 criterion 3).
-    tape_start_until: Option<u64>,
+    /// The console keys that [`Machine::hold_start_keys`] holds until frame
+    /// [`START_HOLD_FRAMES`] after the cold reset (REQ-081 criterion 3, REQ-093). No key
+    /// after that frame.
+    start_hold: ConsoleKeys,
     /// The TV standard.
     standard: VideoStandard,
     /// The last value on the data bus (the floating bus value for an idle cycle).
@@ -425,7 +427,7 @@ impl Machine {
             fast_tape: config.fast_tape,
             console_keys: ConsoleKeys::default(),
             xex_option_until: None,
-            tape_start_until: None,
+            start_hold: ConsoleKeys::default(),
             standard: config.standard,
             data_bus: 0xFF,
             cycles: 0,
@@ -495,6 +497,8 @@ impl Machine {
         self.sio.set_log_frame(0);
         self.plan_tape_mark(1);
         self.sequence_start = None;
+        self.start_hold = ConsoleKeys::default();
+        self.apply_console_keys();
     }
 
     /// The System Reset button (REQ-217): resets the CPU, ANTIC and the PIA. RAM, GTIA and
@@ -609,8 +613,8 @@ impl Machine {
             if self.xex_option_until.is_some() {
                 self.check_xex_option();
             }
-            if self.tape_start_until.is_some_and(|end| self.frames >= end) {
-                self.tape_start_until = None;
+            if self.frames >= START_HOLD_FRAMES && self.start_hold != ConsoleKeys::default() {
+                self.start_hold = ConsoleKeys::default();
                 self.apply_console_keys();
             }
         }
@@ -801,11 +805,12 @@ impl Machine {
     }
 
     /// Gives GTIA the console keys of the frontend, with OPTION while
-    /// [`Machine::start_xex`] holds it and START while [`Machine::start_tape`] holds it.
+    /// [`Machine::start_xex`] holds it and the keys of [`Machine::hold_start_keys`].
     const fn apply_console_keys(&mut self) {
         let mut keys = self.console_keys;
-        keys.option |= self.xex_option_until.is_some();
-        keys.start |= self.tape_start_until.is_some();
+        keys.option |= self.xex_option_until.is_some() || self.start_hold.option;
+        keys.start |= self.start_hold.start;
+        keys.select |= self.start_hold.select;
         self.gtia.set_console_keys(keys);
     }
 
@@ -833,14 +838,32 @@ impl Machine {
     }
 
     /// Inserts `tape` in the cassette deck, does a cold reset (the tape position is 0) and
-    /// holds START from the cold reset until frame [`TAPE_START_FRAMES`] (REQ-081 criterion
-    /// 3, `docs/design/media.md`, "Tape boot"). The machine then releases START at the end
-    /// of the frame. It presses no other key, so BASIC stays on (OI-050). The keys of
-    /// [`Machine::set_console_keys`] stay pressed.
+    /// holds START from the cold reset until frame [`START_HOLD_FRAMES`] (REQ-081 criterion
+    /// 3, `docs/design/media.md`, "Tape boot"), with [`Machine::hold_start_keys`]. The
+    /// machine then releases START at the end of the frame. It presses no other key, so
+    /// BASIC stays on (OI-050). The keys of [`Machine::set_console_keys`] stay pressed.
     pub fn start_tape(&mut self, tape: Tape) {
         self.insert_tape(tape);
         self.power_on();
-        self.tape_start_until = Some(TAPE_START_FRAMES);
+        self.hold_start_keys(ConsoleKeys {
+            start: true,
+            ..ConsoleKeys::default()
+        });
+    }
+
+    /// Holds the pressed keys of `keys`, together with the keys of an earlier call, from now
+    /// until the end of frame [`START_HOLD_FRAMES`] after the cold reset (REQ-081
+    /// criterion 3, REQ-093 criterion 1). The frontend calls it at the power-on cold reset
+    /// (frame 0). From frame [`START_HOLD_FRAMES`] on, the call has no effect. A cold reset
+    /// ([`Machine::power_on`]) ends the hold, so the F10 cold reset holds no key. The keys
+    /// of [`Machine::set_console_keys`] stay pressed.
+    pub const fn hold_start_keys(&mut self, keys: ConsoleKeys) {
+        if self.frames >= START_HOLD_FRAMES {
+            return;
+        }
+        self.start_hold.start |= keys.start;
+        self.start_hold.select |= keys.select;
+        self.start_hold.option |= keys.option;
         self.apply_console_keys();
     }
 

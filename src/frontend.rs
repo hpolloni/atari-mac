@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use atari_core::debug::RunEnd;
-use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
+use atari_core::gtia::{ConsoleKeys, FRAME_HEIGHT, FRAME_WIDTH};
 use atari_core::keyboard::RETURN;
 use atari_core::media::{Cartridge, DiskImage, MediaError, Tape, Xex};
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
@@ -112,6 +112,9 @@ pub fn xex_warnings(xex: &Xex) -> Vec<String> {
 /// image that is not valid. With `--xex`, the machine starts the executable
 /// ([`Machine::start_xex`], REQ-612). With `--cas`, the machine boots the tape
 /// ([`Machine::start_tape`], REQ-081): START is held from the cold reset until frame 60.
+/// With `--no-basic` and no `--xex`, the machine also holds OPTION from the cold reset
+/// until frame 60 ([`Machine::hold_start_keys`], REQ-093), so the OS boots with BASIC off.
+/// `start_xex` holds OPTION itself.
 pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, FrontendError> {
     let os_rom = read(&options.os)?;
     let basic_rom = read(&options.basic)?;
@@ -170,6 +173,12 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
     }
     if let Some(tape) = tape {
         machine.start_tape(tape);
+    }
+    if options.no_basic && xex.is_none() {
+        machine.hold_start_keys(ConsoleKeys {
+            option: true,
+            ..ConsoleKeys::default()
+        });
     }
     Ok(machine)
 }
