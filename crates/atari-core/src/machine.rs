@@ -22,8 +22,9 @@ use core::fmt;
 
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
+use crate::events::{self, record};
 use crate::gtia::{ConsoleKeys, Gtia};
-use crate::media::{Cartridge, DiskImage, SioBus, Tape, Xex};
+use crate::media::{Cartridge, DiskImage, SioBus, Tape, TapeBlock, TapeMark, Xex};
 use crate::pia::Pia;
 use crate::pokey::Pokey;
 use crate::state::StateError;
@@ -381,6 +382,11 @@ pub struct Machine {
     last_out: CycleOutput,
     /// The CPU bus access of the last machine cycle, if the CPU had the bus.
     last_access: Option<BusAccess>,
+    /// The cycle of the next tape mark of the event log (REQ-084) while the motor runs with
+    /// a tape, else `u64::MAX`. Not in the save state.
+    tape_mark_at: u64,
+    /// The tape mark at `tape_mark_at`.
+    tape_mark: TapeMark,
 }
 
 impl Machine {
@@ -424,7 +430,21 @@ impl Machine {
             frames: 0,
             last_out: CycleOutput::default(),
             last_access: None,
+            tape_mark_at: u64::MAX,
+            tape_mark: TapeMark::End,
         };
+        if let Some(cart) = &machine.mem.cart {
+            let kind = cart.kind();
+            record!(
+                info,
+                events::MEDIA,
+                machine.frames,
+                machine.cycles,
+                "cartridge, {} bytes, CAR type {}",
+                kind.rom_size(),
+                kind.car_type()
+            );
+        }
         // With no disk, D1: is not on the bus (the OS boot then sees no drive).
         machine.sio.set_drive_connected(false);
         if let Some(image) = config.disk {
@@ -440,6 +460,7 @@ impl Machine {
     /// Power off and on (REQ-215, REQ-216): RAM is `$00`, all chips are reset, and the CPU
     /// starts its reset sequence. The cycle and frame counters start again at 0.
     pub fn power_on(&mut self) {
+        record!(info, events::RESET, self.frames, self.cycles, "cold reset");
         self.mem.ram.fill(0);
         // `Antic::reset` keeps the beam position, but a power-on must give the same machine
         // each time (REQ-216 criterion 3), so ANTIC also starts at line 0, cycle 0.
@@ -454,7 +475,7 @@ impl Machine {
         // The motor stops with the PIA reset, and the tape goes back to the start (REQ-641
         // criterion 5, OI-052). The cycle count of the old run ends here.
         self.ca2 = self.pia.ca2();
-        self.sio.set_motor_line(!self.ca2, self.cycles);
+        self.motor_line(!self.ca2, self.cycles);
         self.sio.tape_deck_mut().rewind(1);
         if let Some(cart) = self.mem.cart.as_mut() {
             cart.cold_reset();
@@ -468,11 +489,20 @@ impl Machine {
         self.frames = 0;
         self.last_out = CycleOutput::default();
         self.last_access = None;
+        self.sio.set_log_frame(0);
+        self.plan_tape_mark(1);
     }
 
     /// The System Reset button (REQ-217): resets the CPU, ANTIC and the PIA. RAM, GTIA and
     /// POKEY do not change, and ANTIC sends no NMI (HRM 2.4).
     pub fn press_reset(&mut self) {
+        record!(
+            info,
+            events::RESET,
+            self.frames,
+            self.cycles,
+            "warm reset (RESET key)"
+        );
         self.cpu.reset();
         self.antic.reset();
         self.pia.reset();
@@ -490,6 +520,11 @@ impl Machine {
         let now = self.cycles + 1;
         self.pokey.set_serial_in(self.sio.data_in_level(now));
         self.pokey.tick();
+        // The tape mark of the event log in this cycle (REQ-084).
+        if now == self.tape_mark_at {
+            self.tape_mark_record(now);
+            self.plan_tape_mark(now + 1);
+        }
         // 3. The IRQ line. The PIA level is the level of the end of the last cycle.
         self.cpu.set_irq(self.irq_line());
         // 4. The CPU access, if ANTIC does not halt the CPU (REQ-202).
@@ -539,7 +574,8 @@ impl Machine {
         let ca2 = self.pia.ca2();
         if ca2 != self.ca2 {
             self.ca2 = ca2;
-            self.sio.set_motor_line(!ca2, now);
+            self.motor_line(!ca2, now);
+            self.plan_tape_mark(now + 1);
         }
         // TRIG3 follows RD5 after each access that can switch the cartridge (REQ-232).
         self.update_trig3();
@@ -548,6 +584,7 @@ impl Machine {
         self.last_out = out;
         if out.frame_done {
             self.frames += 1;
+            self.sio.set_log_frame(self.frames);
             if self.xex_option_until.is_some() {
                 self.check_xex_option();
             }
@@ -555,6 +592,61 @@ impl Machine {
                 self.tape_start_until = None;
                 self.apply_console_keys();
             }
+        }
+    }
+
+    /// The PIA CA2 output changed at the end of cycle `now`: the motor line of the deck, and
+    /// the event log record of a motor start or stop (REQ-641, REQ-084).
+    fn motor_line(&mut self, low: bool, now: u64) {
+        let was_on = self.sio.tape_deck().motor_on();
+        self.sio.set_motor_line(low, now);
+        if was_on == low {
+            return;
+        }
+        let deck = self.sio.tape_deck();
+        let state = if low { "on" } else { "off" };
+        match deck.locate(deck.position(now + 1)) {
+            Some((block, byte)) => record!(
+                info,
+                events::TAPE,
+                self.frames,
+                now,
+                "motor {state}, record {block} byte {byte}"
+            ),
+            None => record!(
+                info,
+                events::TAPE,
+                self.frames,
+                now,
+                "motor {state}, no tape"
+            ),
+        }
+    }
+
+    /// Sets the cycle of the next tape mark of the event log (REQ-084). `n` is the next
+    /// cycle. The mark at tape time `t` is in cycle `n + t - position(n)`.
+    fn plan_tape_mark(&mut self, n: u64) {
+        let deck = self.sio.tape_deck();
+        let mark = if deck.motor_on() {
+            let p = deck.position(n);
+            deck.next_mark(p).map(|(t, mark)| (n + (t - p), mark))
+        } else {
+            None
+        };
+        (self.tape_mark_at, self.tape_mark) = mark.unwrap_or((u64::MAX, TapeMark::End));
+    }
+
+    /// Sends the event log record of the tape mark in cycle `now` (REQ-084).
+    fn tape_mark_record(&self, now: u64) {
+        match self.tape_mark {
+            TapeMark::Record { index, len, baud } => record!(
+                info,
+                events::TAPE,
+                self.frames,
+                now,
+                "record {index} starts: {len} bytes at {baud} baud"
+            ),
+            TapeMark::End => record!(info, events::TAPE, self.frames, now, "tape ends"),
         }
     }
 
@@ -617,6 +709,19 @@ impl Machine {
     /// Inserts `image` in drive D1: and connects D1: to the SIO bus. An image in D1: is
     /// replaced. The machine is not reset.
     pub fn insert_disk(&mut self, image: DiskImage) {
+        let geometry = image.geometry();
+        record!(
+            info,
+            events::MEDIA,
+            self.frames,
+            self.cycles,
+            "disk, {} bytes, {} sectors of {} bytes",
+            (1..=geometry.sectors)
+                .filter_map(|n| geometry.sector_len(n))
+                .sum::<usize>(),
+            geometry.sectors,
+            geometry.sector_size
+        );
         self.sio.drive_mut().insert(image);
         self.sio.set_drive_connected(true);
     }
@@ -640,6 +745,18 @@ impl Machine {
     /// seconds of emulated time after the cold reset. The keys of
     /// [`Machine::set_console_keys`] stay pressed.
     pub fn start_xex(&mut self, xex: &Xex) {
+        record!(
+            info,
+            events::MEDIA,
+            self.frames,
+            self.cycles,
+            "executable, {} bytes in {} segments",
+            xex.segments()
+                .iter()
+                .map(|segment| segment.data.len())
+                .sum::<usize>(),
+            xex.segments().len()
+        );
         self.insert_disk(xex.boot_image());
         self.power_on();
         self.xex_option_until = Some(xex_option_frames(self.standard));
@@ -673,8 +790,24 @@ impl Machine {
     /// Inserts `tape` in the cassette deck at position 0 (REQ-641). A tape in the deck is
     /// replaced. The machine is not reset, and the motor line does not change.
     pub fn insert_tape(&mut self, tape: Tape) {
+        record!(
+            info,
+            events::MEDIA,
+            self.frames,
+            self.cycles,
+            "tape, {} bytes in {} blocks",
+            tape.blocks()
+                .iter()
+                .map(|block| match block {
+                    TapeBlock::Data { bytes, .. } => bytes.len(),
+                    TapeBlock::Signal { .. } => 0,
+                })
+                .sum::<usize>(),
+            tape.blocks().len()
+        );
         let now = self.cycles + 1;
         self.sio.tape_deck_mut().insert(tape, now);
+        self.plan_tape_mark(now);
     }
 
     /// Inserts `tape` in the cassette deck, does a cold reset (the tape position is 0) and
@@ -692,7 +825,9 @@ impl Machine {
     /// Removes the tape from the cassette deck and gives it back. SIO DATA IN then has no
     /// tape signal (REQ-641 criterion 6).
     pub fn eject_tape(&mut self) -> Option<Tape> {
-        self.sio.tape_deck_mut().eject()
+        let tape = self.sio.tape_deck_mut().eject();
+        self.plan_tape_mark(self.cycles + 1);
+        tape
     }
 
     /// The tape position (REQ-641) in the next machine cycle: the tape time in machine
@@ -837,7 +972,10 @@ impl Machine {
     /// A [`StateError`] if the bytes are not a save state of this format, or if the state is
     /// from a machine with another configuration. Then the machine does not change.
     pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
-        save::load(self, bytes)
+        save::load(self, bytes)?;
+        self.sio.set_log_frame(self.frames);
+        self.plan_tape_mark(self.cycles + 1);
+        Ok(())
     }
 }
 

@@ -41,16 +41,20 @@ thread_local! {
     static RECORDS: RefCell<Vec<Captured>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The capture logger: keeps each record of the thread.
+/// The capture logger: keeps each record of the category `frontend` of the thread. The
+/// records of the core (REQ-084, for example the cold reset) are not in this test.
 #[derive(Debug, Clone, Copy)]
 struct Capture;
 
 impl Log for Capture {
-    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-        true
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.target() == "atari::frontend"
     }
 
     fn log(&self, record: &Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
         let count = |key| {
             record
                 .key_values()

@@ -22,11 +22,11 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
 | [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 8 | 0 | 0 | 0 |
-| [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | planned | 2 | 1 | 0 | 0 |
+| [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | planned | 3 | 0 | 0 | 0 |
 | [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 1 | 1 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
 
-All 288 requirements: 278 tested, 5 pending, 0 missing, 5 not a test requirement. Implemented: 227. Open items with the status `open`: 30.
+All 288 requirements: 279 tested, 4 pending, 0 missing, 5 not a test requirement. Implemented: 228. Open items with the status `open`: 30.
 
 <!-- END GENERATED: status -->
 

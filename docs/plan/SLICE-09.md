@@ -6,7 +6,7 @@ depends_on: "SLICE-08 (tape events), SLICE-05 WP-1 (SIO events)"
 packages:
   - id: WP-1
     title: Machine event log in the core
-    status: planned
+    status: done
     requirements: [REQ-084]
   - id: WP-2
     title: The --stats and --log options

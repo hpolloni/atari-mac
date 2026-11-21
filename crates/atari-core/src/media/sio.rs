@@ -18,6 +18,7 @@ use std::collections::VecDeque;
 
 use super::deck::TapeDeck;
 use super::drive::{Accept, Completion, DiskDrive};
+use crate::events::{self, record};
 use crate::pokey::SerialByte;
 use crate::state::{Reader, State, StateError, Writer, impl_state};
 use crate::timing::VideoStandard;
@@ -331,6 +332,9 @@ pub struct SioBus {
     external: VecDeque<DeviceByte>,
     /// The cassette deck (REQ-641, REQ-642).
     deck: TapeDeck,
+    /// The frame count for the `frame` key of the event log records (REQ-084). The machine
+    /// sets it; it is not in the save state.
+    log_frame: u64,
 }
 
 // The timing comes from the video standard of the configuration.
@@ -347,7 +351,9 @@ impl_state!(SioBus {
     external,
     deck,
 } skip {
-    timing
+    timing,
+    // The frame count of the event log: the machine sets it after a load.
+    log_frame
 });
 
 impl SioBus {
@@ -367,7 +373,13 @@ impl SioBus {
             host: Vec::new(),
             external: VecDeque::new(),
             deck: TapeDeck::new(standard),
+            log_frame: 0,
         }
+    }
+
+    /// Sets the frame count for the `frame` key of the event log records (REQ-084).
+    pub(crate) const fn set_log_frame(&mut self, frame: u64) {
+        self.log_frame = frame;
     }
 
     /// The cassette deck.
@@ -430,6 +442,27 @@ impl SioBus {
             self.phase = BusPhase::Command { bad: false };
         } else if let BusPhase::Command { bad } = self.phase {
             self.phase = BusPhase::Idle;
+            if bad || usize::from(self.frame_len) != FRAME_LEN {
+                record!(
+                    info,
+                    events::SIO,
+                    self.log_frame,
+                    now,
+                    "command frame not valid: {} bytes",
+                    self.frame_len
+                );
+            } else {
+                let [device, command, aux1, aux2, checksum] = self.frame;
+                let ok = sio_checksum(&[device, command, aux1, aux2]) == checksum;
+                record!(
+                    info,
+                    events::SIO,
+                    self.log_frame,
+                    now,
+                    "command device ${device:02X} command ${command:02X} aux1 ${aux1:02X} aux2 ${aux2:02X} checksum {}",
+                    if ok { "ok" } else { "bad" }
+                );
+            }
             if !bad {
                 self.end_command_frame(now);
             }
@@ -456,20 +489,35 @@ impl SioBus {
         let ack_start = now + self.timing.ack_delay;
         match self.drive.accept(frame) {
             Accept::Nak => {
+                self.reply_record("NAK", now, ack_start);
                 self.schedule(NAK, ack_start);
                 self.phase = BusPhase::Reply;
             }
             Accept::Read => {
+                self.reply_record("ACK", now, ack_start);
                 let ack_end = self.schedule_ack(ack_start);
                 let completion = self.drive.execute(frame, None);
-                self.schedule_result(ack_end, completion);
+                self.schedule_result(ack_end, completion, now);
             }
             Accept::Write { len } => {
+                self.reply_record("ACK", now, ack_start);
                 self.schedule(ACK, ack_start);
                 self.data_in.clear();
                 self.phase = BusPhase::DataIn { frame, len };
             }
         }
+    }
+
+    /// Sends the event log record of an ACK or a NAK that starts at `start`, decided in
+    /// cycle `now` (REQ-084).
+    fn reply_record(&self, reply: &str, now: u64, start: u64) {
+        record!(
+            info,
+            events::SIO,
+            self.log_frame,
+            now,
+            "reply {reply} at cycle {start}"
+        );
     }
 
     /// Schedules one device byte that starts at `start`.
@@ -490,21 +538,46 @@ impl SioBus {
     }
 
     /// Schedules the Complete or Error byte after the ACK that ends at `ack_end`, and the
-    /// data frame with its checksum (REQ-619, REQ-621, REQ-622).
-    fn schedule_result(&mut self, ack_end: u64, completion: Completion) {
+    /// data frame with its checksum (REQ-619, REQ-621, REQ-622). `now` is the cycle of the
+    /// decision, for the event log (REQ-084).
+    fn schedule_result(&mut self, ack_end: u64, completion: Completion, now: u64) {
         let busy = self.timing.cycles(completion.busy_us);
         let result_start = ack_end + busy.max(self.timing.complete_min);
+        record!(
+            info,
+            events::SIO,
+            self.log_frame,
+            now,
+            "reply {} at cycle {result_start}, data frame {} bytes",
+            if completion.ok { "COMPLETE" } else { "ERROR" },
+            completion.data.as_ref().map_or(0, Vec::len)
+        );
         self.schedule(if completion.ok { COMPLETE } else { ERROR }, result_start);
         if let Some(data) = completion.data {
             let period = self.timing.byte_period;
             let mut start = result_start;
             for &byte in &data {
                 start += period;
+                self.received_record(byte, now, start);
                 self.schedule(byte, start);
             }
-            self.schedule(sio_checksum(&data), start + period);
+            let checksum = sio_checksum(&data);
+            self.received_record(checksum, now, start + period);
+            self.schedule(checksum, start + period);
         }
         self.phase = BusPhase::Reply;
+    }
+
+    /// Sends the event log record of a data frame byte of a device that starts at `start`,
+    /// scheduled in cycle `now` (REQ-084).
+    fn received_record(&self, byte: u8, now: u64, start: u64) {
+        record!(
+            debug,
+            events::SIO,
+            self.log_frame,
+            now,
+            "received ${byte:02X} at cycle {start}"
+        );
     }
 
     /// The command line is asserted (low).
@@ -515,6 +588,14 @@ impl SioBus {
 
     /// POKEY finished sending `byte` (from `Pokey::take_serial_byte`).
     pub fn host_byte(&mut self, byte: SerialByte) {
+        record!(
+            debug,
+            events::SIO,
+            self.log_frame,
+            byte.end_cycle,
+            "sent ${:02X}",
+            byte.value
+        );
         if self.host.len() < HOST_BYTES {
             self.host.push(byte.value);
         }
@@ -550,13 +631,15 @@ impl SioBus {
         let (payload, checksum) = data.split_at(len);
         if checksum.first().copied() != Some(sio_checksum(payload)) {
             self.drive.data_frame_error();
+            self.reply_record("NAK", end, ack_start);
             self.schedule(NAK, ack_start);
             self.phase = BusPhase::Reply;
             return;
         }
+        self.reply_record("ACK", end, ack_start);
         let ack_end = self.schedule_ack(ack_start);
         let completion = self.drive.execute(frame, Some(payload));
-        self.schedule_result(ack_end, completion);
+        self.schedule_result(ack_end, completion, end);
     }
 
     /// The level of the SIO DATA IN line in machine cycle `now` (`true` = mark). The bus

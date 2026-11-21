@@ -34,6 +34,7 @@
 pub mod antic;
 pub mod cpu;
 pub mod disasm;
+mod events;
 pub mod gtia;
 pub mod keyboard;
 pub mod machine;
