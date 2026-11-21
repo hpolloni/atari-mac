@@ -346,7 +346,9 @@ One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
 5. The machine finds the data bus value of the cycle (`antic.md`, "Call order", step 3),
    then calls `antic.end_cycle(data_bus)` and `gtia.clock(&out, data_bus)`.
 6. `pia.tick()`. Then each byte from `pokey.take_serial_byte()` goes to `sio.host_byte`. If
-   the PIA CB2 level changed in this cycle, `sio.set_command_line(!pia.cb2(), c)`.
+   the PIA CB2 level changed in this cycle, `sio.set_command_line(!pia.cb2(), c)`. If the
+   PIA CA2 level changed in this cycle, `sio.set_motor_line(!pia.ca2(), c)` (the cassette
+   motor, `media.md`, "Cassette deck").
 7. `cycles += 1`. If `out.frame_done` is true, the frame counter increments.
 
 This is the only definition of the machine cycle order. The other design documents refer

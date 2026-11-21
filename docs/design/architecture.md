@@ -3,7 +3,7 @@
 ## Scope
 
 This document gives the crate structure, the data flow between the chips, the scheduling
-model and the frontend. It covers REQ-001 to REQ-019, REQ-040 to REQ-042 and REQ-080. The chip
+model and the frontend. It covers REQ-001 to REQ-019, REQ-040 to REQ-042, REQ-080 and REQ-081. The chip
 designs are in the other documents in this directory.
 
 ## Crates
@@ -209,6 +209,24 @@ with `RUN` (196 frames to `Ready`, then 1,161 frames of typing) takes 2.15 s hea
 (1.83 s for the typing) and 2.27 s in the window (about 1.9 s for the typing), against
 22.6 s for 1,357 frames at real-time speed.
 
+### Tape image from the command line (REQ-081)
+
+`--cas <file>` sets `Options::cas`. `atari_mac::start` reads the file and calls
+`media::Tape::from_cas` before it creates the machine, so a file that cannot be read
+(`FrontendError::Read`) or a bad image (the `MediaError` of REQ-640, with the file name) gives
+exit status 2 before the machine starts. `--cas` together with `--bas` is a usage error
+(exit status 2), because both make key presses at the start. The help line is
+`--cas <file>         CAS tape image: boot it (holds START and OPTION, presses RETURN)`.
+
+The frontend then calls `Machine::start_tape` (`media.md`, "Tape boot"), which makes the key
+presses of criterion 3 (OI-050). The frontend does not make key presses itself. The host keys
+work as usual, but a host console key or key during frames 0 to 186 (NTSC) can change the
+boot. The tape loads at real-time speed (OI-051 is open).
+
+After WP-3 adds the option to `--help`, the README options table gets the row
+`` | `--cas <file>` | Boot a CAS tape image (holds START and OPTION, then presses RETURN) | ``.
+Before that, the README gate (REQ-056 criterion 6) rejects the row.
+
 ## Error handling
 
 The core returns errors as values (`ConfigError`, `MediaError`). It never panics (REQ-016).
@@ -227,6 +245,7 @@ file error.
 | REQ-012 | `tests/cli.rs` `loads_cart_xex_and_disk` (criterion 1), `rejects_bad_cart_xex_and_disk` (criterion 2) |
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
+| REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
 | REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md` |
 | REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md` |

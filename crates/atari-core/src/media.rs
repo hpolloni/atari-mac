@@ -290,8 +290,10 @@ impl Cartridge {
 mod tests {
     mod atr;
     mod cartridge;
+    mod cas;
     mod drive;
     mod sio;
+    mod tape;
     mod xex;
 
     use super::{CartKind, Cartridge, MediaError};
