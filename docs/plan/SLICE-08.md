@@ -44,7 +44,7 @@ These open items change the requirements of this slice. The requirements follow 
 | Open item | Question | Affects |
 | --- | --- | --- |
 | OI-048 | The CAS chunk types that the emulator supports (decided: option 2) | REQ-639, REQ-640, REQ-642 |
-| OI-049 | Tape writing | Scope of the slice (not planned now) |
+| OI-049 | Tape writing (decided: option 1, out of scope, a non-goal) | Scope of the slice |
 | OI-050 | The key presses for a tape boot (decided: option 2, START only) | REQ-081, REQ-643 |
 | OI-051 | The tape load speed (decided: option 2, turbo) | REQ-082 |
 | OI-052 | The tape position at a cold reset (decided: option 2) | REQ-641 criterion 5 |
