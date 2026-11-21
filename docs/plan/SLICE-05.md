@@ -16,6 +16,10 @@ packages:
     title: Executable boot
     status: done
     requirements: [REQ-612, REQ-613, REQ-614, REQ-012]
+  - id: WP-4
+    title: Disk speed in the frontend
+    status: planned
+    requirements: [REQ-094, REQ-095]
 ---
 # SLICE-05: Disk drive
 
@@ -30,6 +34,9 @@ The emulator has an emulated disk drive D1: on the SIO bus. It boots an ATR disk
 | WP-1 | POKEY serial port | REQ-502, REQ-516, REQ-517, REQ-525, REQ-526, REQ-527, REQ-528, REQ-529, REQ-530, REQ-531, REQ-532, REQ-533 |
 | WP-2 | SIO disk drive and ATR images | REQ-016, REQ-615, REQ-616, REQ-617, REQ-618, REQ-619, REQ-620, REQ-621, REQ-622, REQ-623, REQ-624, REQ-625, REQ-626, REQ-627, REQ-628, REQ-629, REQ-630, REQ-631, REQ-632, REQ-633, REQ-634, REQ-635, REQ-636, REQ-637, REQ-638 |
 | WP-3 | Executable boot | REQ-612, REQ-613, REQ-614, REQ-012 |
+| WP-4 | Disk speed in the frontend | REQ-094, REQ-095 |
+
+WP-4 (added on 2026-11-21) gives the disk the same speed rules as the tape: the shortcut is on by default, and turbo runs while the drive transfers data (OI-056).
 
 On 2026-11-20 the lead moved REQ-012 from WP-2 to WP-3: its tests also need `--xex`.
 
