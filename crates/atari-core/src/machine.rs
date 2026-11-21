@@ -75,6 +75,8 @@ pub struct MachineConfig {
     pub disk: Option<DiskImage>,
     /// The SIOV shortcut (REQ-623) is on.
     pub fast_sio: bool,
+    /// The tape shortcut (REQ-644) is on.
+    pub fast_tape: bool,
     /// The tape in the cassette deck, if any, at position 0 (REQ-641).
     pub tape: Option<Tape>,
     /// The TV standard.
@@ -330,6 +332,10 @@ impl Bus for CpuBus<'_> {
 
 /// An Atari 65XE.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "two line levels (CB2, CA2) and two settings (the SIOV and tape shortcuts)"
+)]
 pub struct Machine {
     /// The CPU.
     cpu: Cpu,
@@ -352,6 +358,8 @@ pub struct Machine {
     ca2: bool,
     /// The SIOV shortcut is on (REQ-623). A setting of the frontend, not in the save state.
     fast_sio: bool,
+    /// The tape shortcut is on (REQ-644). A setting of the frontend, not in the save state.
+    fast_tape: bool,
     /// The console keys of the last [`Machine::set_console_keys`] (the frontend input).
     console_keys: ConsoleKeys,
     /// While [`Machine::start_xex`] holds OPTION: the frame count at which the machine
@@ -414,6 +422,7 @@ impl Machine {
             cb2: true,
             ca2: true,
             fast_sio: config.fast_sio,
+            fast_tape: config.fast_tape,
             console_keys: ConsoleKeys::default(),
             xex_option_until: None,
             tape_start_until: None,
@@ -539,8 +548,9 @@ impl Machine {
                 data = out.dma_data;
             }
         } else {
-            // The SIOV shortcut, before the opcode fetch at SIOV (REQ-623).
-            if self.fast_sio && self.cpu.at_opcode_fetch() {
+            // The SIOV shortcut and the tape shortcut, before the opcode fetch at SIOV
+            // (REQ-623, REQ-644).
+            if (self.fast_sio || self.fast_tape) && self.cpu.at_opcode_fetch() {
                 siov::shortcut(self);
             }
             if let Some(hook) = hook.as_deref_mut() {
@@ -869,6 +879,17 @@ impl Machine {
         self.fast_sio
     }
 
+    /// Turns the tape shortcut on or off (REQ-644).
+    pub const fn set_fast_tape(&mut self, on: bool) {
+        self.fast_tape = on;
+    }
+
+    /// The tape shortcut is on (REQ-644).
+    #[must_use]
+    pub const fn fast_tape(&self) -> bool {
+        self.fast_tape
+    }
+
     /// The CPU (for debuggers and tests).
     #[must_use]
     pub const fn cpu(&self) -> &Cpu {
@@ -1047,6 +1068,7 @@ mod tests {
             cartridge,
             disk: None,
             fast_sio: false,
+            fast_tape: false,
             tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,

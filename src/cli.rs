@@ -36,6 +36,7 @@ Options:
   --xex <file>         Executable (XEX): boot it from D1: with BASIC disabled
   --disk <file>        ATR disk image in drive D1: (the OS boots it)
   --cas <file>         CAS tape image: boot it (holds START at power-on)
+  --no-fast-tape       Read the tape records at the real speed (no tape shortcut)
   --bas <file>         Type a BASIC program from a text file at Ready, then RUN it
   --no-run             With --bas: type the program, but do not RUN it
   --pal                PAL machine (default: NTSC)
@@ -75,6 +76,8 @@ pub struct Options {
     pub disk: Option<PathBuf>,
     /// The CAS tape image file (`--cas`, REQ-081). The machine boots it.
     pub cas: Option<PathBuf>,
+    /// The tape shortcut (REQ-644) is on: `true` unless `--no-fast-tape` (REQ-091).
+    pub fast_tape: bool,
     /// Run without a window.
     pub headless: bool,
     /// The number of frames to run. `None` runs until the user quits.
@@ -111,6 +114,7 @@ impl Default for Options {
             xex: None,
             disk: None,
             cas: None,
+            fast_tape: true,
             headless: false,
             frames: None,
             screenshot: None,
@@ -219,6 +223,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, Fronte
             "--xex" => options.xex = Some(value(&mut args, "--xex")?.into()),
             "--disk" => options.disk = Some(value(&mut args, "--disk")?.into()),
             "--cas" => options.cas = Some(value(&mut args, "--cas")?.into()),
+            "--no-fast-tape" => options.fast_tape = false,
             "--headless" => options.headless = true,
             "--pal" => options.standard = VideoStandard::Pal,
             "--frames" => options.frames = Some(number(&mut args, "--frames")?),
@@ -406,6 +411,7 @@ mod tests {
                 xex: None,
                 disk: Some("d.atr".into()),
                 cas: None,
+                fast_tape: true,
                 headless: true,
                 frames: Some(180),
                 screenshot: Some("out.png".into()),
@@ -534,6 +540,17 @@ mod tests {
             parse_err(&["--xex", "a.xex", "--cas", "a.cas"])
                 .starts_with("--cas and --xex cannot be used together"),
             "--cas with --xex"
+        );
+    }
+
+    /// Verifies REQ-091: the tape shortcut is on without `--no-fast-tape`, and
+    /// `--no-fast-tape` turns it off (criteria 1, 2).
+    #[test]
+    fn no_fast_tape_parses() {
+        assert!(parse_ok(&["--cas", "a.cas"]).fast_tape, "on by default");
+        assert!(
+            !parse_ok(&["--cas", "a.cas", "--no-fast-tape"]).fast_tape,
+            "--no-fast-tape"
         );
     }
 }

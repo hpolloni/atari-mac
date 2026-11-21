@@ -85,6 +85,7 @@ fn headless_writes_screenshot() {
         cartridge: None,
         disk: None,
         fast_sio: false,
+        fast_tape: false,
         tape: None,
         standard: VideoStandard::Ntsc,
         audio_sample_rate: 48_000,
@@ -531,6 +532,85 @@ fn cas_with_bas_rejected() {
     );
 }
 
+/// The options of the command line `--cas <file>` with `extra`, with the free ROMs.
+fn parse_cas(cas: &Path, extra: &[&str]) -> Options {
+    let mut args = vec![
+        "--os",
+        OS_ROM,
+        "--basic",
+        BASIC_ROM,
+        "--cas",
+        cas.to_str().expect("UTF-8 path"),
+    ];
+    args.extend(extra);
+    match cli::parse(args.into_iter().map(OsString::from)) {
+        Ok(cli::Command::Run(options)) => *options,
+        other => panic!("the command line: {other:?}"),
+    }
+}
+
+/// Starts the frontend with `options`, presses RETURN in frames 180-186 (NTSC, REQ-081
+/// criterion 4) and gives the frontend and the frames until `$0600` holds `$A5`, at most
+/// 2,400.
+fn cas_boot_frames(options: &Options) -> (Frontend, Option<u64>) {
+    let mut frontend = start(options).expect("start");
+    for frame in 0..2_400 {
+        if frame == 180 {
+            frontend
+                .machine_mut()
+                .key_down(ascii_to_kbcode('\n').expect("RETURN"));
+        }
+        if frame == 186 {
+            frontend.machine_mut().key_up();
+        }
+        frontend.run_frames(1).expect("run");
+        if frontend.machine().peek_ram(0x0600) == 0xA5 {
+            return (frontend, Some(frame + 1));
+        }
+    }
+    (frontend, None)
+}
+
+/// Verifies REQ-091: without `--no-fast-tape`, the machine of the frontend has the tape
+/// shortcut on, and the boot test tape boots with it (criterion 1).
+#[test]
+fn fast_tape_default_on() {
+    let tape = boot_tape_file("fast_tape_default_on");
+    let options = parse_cas(&tape, &[]);
+    assert!(options.fast_tape, "the option is on");
+    let (frontend, done) = cas_boot_frames(&options);
+    assert!(frontend.machine().fast_tape(), "1: the shortcut is on");
+    assert!(done.is_some(), "1: the tape boots");
+}
+
+/// Verifies REQ-091: with `--no-fast-tape`, the machine has the tape shortcut off, and the
+/// boot test tape loads on the serial path as in REQ-643: within 2,400 frames, and in more
+/// frames than with the shortcut (criterion 2).
+#[test]
+fn no_fast_tape_option() {
+    let tape = boot_tape_file("no_fast_tape_option");
+    let (fast, fast_done) = cas_boot_frames(&parse_cas(&tape, &[]));
+    let (slow, slow_done) = cas_boot_frames(&parse_cas(&tape, &["--no-fast-tape"]));
+    assert!(fast.machine().fast_tape(), "without the option");
+    assert!(!slow.machine().fast_tape(), "2: the shortcut is off");
+    let (fast_done, slow_done) = (fast_done.unwrap(), slow_done.unwrap());
+    assert!(
+        fast_done < slow_done,
+        "2: with the shortcut {fast_done} frames, without {slow_done} frames"
+    );
+}
+
+/// Verifies REQ-091: `--help` lists `--no-fast-tape` (criterion 3).
+#[test]
+fn no_fast_tape_help() {
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--no-fast-tape"),
+        "--help lists --no-fast-tape"
+    );
+}
+
 /// Runs `--headless --frames 240 --screenshot` with `flags` and returns the PNG pixels as
 /// `0x00RRGGBB` values.
 fn screenshot_240(test: &str, flags: &[&str]) -> Vec<u32> {
@@ -562,6 +642,7 @@ fn frame_after_240(standard: VideoStandard) -> Vec<u8> {
         cartridge: None,
         disk: None,
         fast_sio: false,
+        fast_tape: false,
         tape: None,
         standard,
         audio_sample_rate: 48_000,
@@ -1296,7 +1377,8 @@ fn stats_help_lists_option() {
 const LOG_CHILD: &str = "ATARI_MAC_LOG_TAPE_CHILD";
 
 /// The child process of `log_writes_tape_lines`: parses `--headless --frames 2400 --log tape
-/// --cas <tape>` with the free ROMs, installs the logger of `--log` as `run` does, and boots
+/// --no-fast-tape --cas <tape>` with the free ROMs (the serial path, so that each record
+/// start has a line), installs the logger of `--log` as `run` does, and boots
 /// the tape with RETURN in frames 180-186 (as `cas_boots_tape`). The headless binary presses
 /// no key, so the test process itself is the child. It stops 5 frames after the boot code
 /// wrote `$A5` to `$0600`.
@@ -1311,6 +1393,7 @@ fn log_tape_child(tape: &str) {
         "2400",
         "--log",
         "tape",
+        "--no-fast-tape",
         "--cas",
         tape,
     ];

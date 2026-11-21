@@ -155,6 +155,32 @@ impl TapeDeck {
         }
     }
 
+    /// The next data record at tape time `p`, for the tape shortcut (REQ-644): the first
+    /// data block whose gap ends at `p` or later, with its index in [`Tape::blocks`] and
+    /// the tape time where it ends. `None` with no tape and when no such block remains.
+    #[must_use]
+    pub fn next_record(&self, p: u64) -> Option<(usize, u64)> {
+        let tape = self.tape.as_ref()?;
+        self.times
+            .iter()
+            .zip(tape.blocks())
+            .enumerate()
+            .find_map(|(index, (times, block))| match block {
+                TapeBlock::Data { .. } if times.data >= p => Some((index, times.end)),
+                TapeBlock::Data { .. } | TapeBlock::Signal { .. } => None,
+            })
+    }
+
+    /// Moves the tape to position `p` in cycle `from` (the tape shortcut, REQ-644). With the
+    /// motor on, the tape moves on from `p` after cycle `from`; with the motor off, it stays
+    /// at `p`.
+    pub const fn seek(&mut self, p: u64, from: u64) {
+        self.played = p;
+        if self.running_since.is_some() {
+            self.running_since = Some(from);
+        }
+    }
+
     /// The tape signal at tape time `p` (REQ-642), independent of the motor: mark in a
     /// gap and after the last block, the bit cells of a data block, the signals of a signal
     /// block. `true` with no tape.

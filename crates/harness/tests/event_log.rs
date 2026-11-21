@@ -221,6 +221,7 @@ mod event_log {
             cartridge,
             disk,
             fast_sio,
+            fast_tape: false,
             tape,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
@@ -283,9 +284,11 @@ mod event_log {
     /// The tape boot of REQ-643 (NTSC, START until frame 60, RETURN in frames 180-186).
     /// The OS leaves the motor on after the boot, so the run then presses the RESET key
     /// (the PIA reset stops the motor) and runs `AFTER_DONE` more frames. Gives the
-    /// machine, the motor changes and the frame of the marker.
-    fn tape_boot() -> (Machine, Vec<Change>, Option<u64>) {
+    /// machine, the motor changes and the frame of the marker. `fast_tape` is the tape
+    /// shortcut (REQ-644).
+    fn tape_boot_with(fast_tape: bool) -> (Machine, Vec<Change>, Option<u64>) {
         let mut m = machine(None, None, Some(boot_tape()), false);
+        m.set_fast_tape(fast_tape);
         m.set_console_keys(ConsoleKeys {
             start: true,
             ..ConsoleKeys::default()
@@ -308,6 +311,11 @@ mod event_log {
             changes.extend(after);
         }
         (m, changes, done)
+    }
+
+    /// [`tape_boot_with`] without the tape shortcut.
+    fn tape_boot() -> (Machine, Vec<Change>, Option<u64>) {
+        tape_boot_with(false)
     }
 
     /// The boot of the SD boot image on the serial path (or with the SIOV shortcut). Gives
@@ -470,6 +478,48 @@ mod event_log {
             tail,
             ["motor off, record 3 byte 0", "tape ends"],
             "1: the tape ends, then the motor stops at the RESET key"
+        );
+    }
+
+    /// Verifies REQ-644: with the tape shortcut on, the tape boot gives one `atari::tape`
+    /// record `tape shortcut: record <r>, 132 bytes, status $01` for each of the three
+    /// records, no `record <r> starts` record (the shortcut reads each record before its
+    /// gap ends), and `tape ends` in the cycle after the read of the last record: the tape
+    /// mark plan follows the position jumps (criterion 4, REQ-084).
+    #[test]
+    fn tape_shortcut_records() {
+        let _lock = start(LevelFilter::Info);
+        let (_m, _motor, done) = tape_boot_with(true);
+        assert!(done.is_some(), "the tape boots");
+        let records = take(TAPE);
+        let reads: Vec<&Entry> = records
+            .iter()
+            .filter(|e| e.message.starts_with("tape shortcut"))
+            .collect();
+        let messages: Vec<&str> = reads.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            (0..3)
+                .map(|r| format!("tape shortcut: record {r}, 132 bytes, status $01"))
+                .collect::<Vec<_>>(),
+            "one record for each read"
+        );
+        assert!(
+            records.iter().all(|e| !e.message.starts_with("record ")),
+            "no record start after a jump: {records:?}"
+        );
+        let last = reads.last().unwrap();
+        let end = records.iter().find(|e| e.message == "tape ends").unwrap();
+        assert_eq!(
+            end.cycle,
+            last.cycle.map(|c| c + 1),
+            "the tape ends in the cycle after the last read"
+        );
+        assert!(
+            reads
+                .iter()
+                .all(|e| e.frame.is_some() && e.level == Level::Info),
+            "the frame key and the level"
         );
     }
 

@@ -342,6 +342,17 @@ After WP-3 adds the option to `--help`, the README options table gets the row
 `` | `--cas <file>` | Boot a CAS tape image (holds START at power-on; press RETURN after the tone) | ``.
 Before that, the README gate (REQ-056 criterion 6) rejects the row.
 
+### Tape shortcut option (REQ-091)
+
+`Options::fast_tape` is `true` by default, and `--no-fast-tape` sets it to `false`.
+`load_machine` gives it to `MachineConfig::fast_tape`, so the machine of the frontend has
+the tape shortcut of REQ-644 (`media.md`, "Tape shortcut") unless the command line has
+`--no-fast-tape`. The help line is
+`--no-fast-tape       Read the tape records at the real speed (no tape shortcut)`, and the
+README options table gets the row
+`` | `--no-fast-tape` | Read the tape records at the real speed, with no tape shortcut (REQ-644) | ``.
+With the option, a tape loads on the serial path as in REQ-643, with the turbo of REQ-082.
+
 ### Turbo while the tape motor runs (REQ-082)
 
 The window loop calls `Pacing::after_frame(turbo, now)` with `turbo` =
@@ -445,6 +456,7 @@ position (bit index / 10). It is 0 in the gap of a block and in a signal block.
 | `tape` | The motor stops | `Machine::motor_line` | Info | `motor off, record <r> byte <b>`, or `motor off, no tape` |
 | `tape` | A data record starts | `Machine::run_cycle` step 2, when `now` is the cycle of the next tape mark (see below) | Info | `record <r> starts: <n> bytes at <baud> baud` |
 | `tape` | The tape ends | `Machine::run_cycle` step 2, as above | Info | `tape ends` |
+| `tape` | The tape shortcut reads a record | `machine/siov.rs`, `tape_read` (`media.md`, "Tape shortcut") | Info | `tape shortcut: record <r>, <n> bytes, status $01` (`<n>` is the length of block `<r>`), or `tape shortcut: no record, status $8A` |
 | `sio` | A command frame ends | `media/sio.rs`, `SioBus::set_command_line`, at the rising edge in `BusPhase::Command` | Info | `command device $31 command $52 aux1 $01 aux2 $00 checksum ok` (or `checksum bad`). A frame with a bad bit time or not 5 bytes: `command frame not valid: <n> bytes`. |
 | `sio` | A device replies ACK or NAK | `SioBus::end_command_frame` (the command) and `SioBus::end_data_frame` (the data frame) | Info | `reply ACK at cycle <c>` or `reply NAK at cycle <c>` |
 | `sio` | A device replies COMPLETE or ERROR | `SioBus::schedule_result` | Info | `reply COMPLETE at cycle <c>, data frame <n> bytes` (or `ERROR`). `<n>` is 0 without a data frame. |
@@ -798,6 +810,7 @@ file error.
 | REQ-013 | `tests/cli.rs` `headless_writes_screenshot` |
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_typed_listing_keeps_lower_case` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
+| REQ-091 | `tests/cli.rs` `fast_tape_default_on` (1), `no_fast_tape_option` (2), `no_fast_tape_help` (3); `src/cli.rs` unit test `no_fast_tape_parses` |
 | REQ-082 | `src/frontend.rs` unit tests `tape_turbo_follows_motor_line` (1, fake clock), `motor_line_without_tape_keeps_pacing` (2), `tape_turbo_presents_frames` (3), `tape_turbo_keeps_machine_state` (4), `tape_turbo_stops_audio` (5, fake device) |
 | REQ-083 | `src/stats.rs` unit tests `stats_line_each_second` (1, fake clock), `stats_frame_rate_and_speed` (2, 3), `stats_shown_and_underruns` (4, 7), `stats_emulation_time` (5), `stats_turbo_and_motor` (6); `tests/cli.rs` `stats_headless_lines` (1, 4, 7), `no_stats_without_option` (8), `stats_help_lists_option` (9) |
 | REQ-084 | `crates/harness/tests/event_log.rs` `tape_records` (1, 2, 3), `sio_records` (1, 2, 3, the serial path and the SIOV shortcut), `reset_records` (1, 2, 3), `media_records` (1, 2, 3), `log_keeps_machine_state` (4), `no_logger_calls_when_off` (5) |

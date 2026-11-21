@@ -372,6 +372,7 @@ mod disassembler {
             cartridge: Some(bank_cartridge()),
             disk: None,
             fast_sio: false,
+            fast_tape: false,
             tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,

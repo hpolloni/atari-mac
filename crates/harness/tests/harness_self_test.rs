@@ -75,6 +75,7 @@ fn screen_text_has_24_rows_of_40() {
         cartridge: None,
         disk: None,
         fast_sio: false,
+        fast_tape: false,
         tape: None,
         standard: VideoStandard::Ntsc,
         audio_sample_rate: system::TEST_SAMPLE_RATE,

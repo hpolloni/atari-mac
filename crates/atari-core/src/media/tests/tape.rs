@@ -326,3 +326,52 @@ fn deck_save_state_round_trip() {
     empty.load(&mut Reader::new(&bytes)).expect("load");
     assert_eq!(empty, TapeDeck::new(VideoStandard::Ntsc), "no tape");
 }
+
+/// Verifies REQ-644: `next_record` gives the first data block whose gap ends at the tape
+/// time or later, with the tape time where it ends, and skips a signal block; `seek` puts
+/// the position at the tape time in the cycle that it names, with the motor on and off
+/// (criterion 4).
+#[test]
+fn req644_next_record_and_seek() {
+    let deck = deck_with(VideoStandard::Ntsc, tape(&file_t()));
+    let starts = deck.block_starts();
+    let (end_0, end_1, end_2) = (starts[1], starts[2], starts[3]);
+    let gap_r = round_cycles(20_000.0 * VideoStandard::Ntsc.cpu_clock_hz() / 1000.0);
+    assert_eq!(deck.next_record(0), Some((0, end_0)), "in the first gap");
+    assert_eq!(
+        deck.next_record(gap_r),
+        Some((0, end_0)),
+        "at the first start bit"
+    );
+    assert_eq!(
+        deck.next_record(gap_r + 1),
+        Some((1, end_1)),
+        "a record that started is skipped"
+    );
+    assert_eq!(
+        deck.next_record(end_1),
+        None,
+        "the signal block is skipped, and no record remains"
+    );
+    assert_eq!(
+        TapeDeck::new(VideoStandard::Ntsc).next_record(0),
+        None,
+        "no tape"
+    );
+
+    let mut running = deck.clone();
+    running.set_motor_line(true, M);
+    running.seek(end_0, M + 100);
+    assert_eq!(running.position(M + 100), end_0, "motor on: in the cycle");
+    assert_eq!(
+        running.position(M + 105),
+        end_0 + 5,
+        "motor on: the tape moves on"
+    );
+    assert!(running.motor_on(), "the motor state does not change");
+
+    let mut stopped = deck;
+    stopped.seek(end_2, M);
+    assert_eq!(stopped.position(M + 1_000), end_2, "motor off: no motion");
+    assert!(!stopped.motor_on(), "the motor state does not change");
+}

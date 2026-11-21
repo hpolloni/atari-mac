@@ -38,6 +38,7 @@ mod cartridges {
             cartridge,
             disk: None,
             fast_sio: false,
+            fast_tape: false,
             tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
@@ -493,6 +494,7 @@ mod xex_loader {
             cartridge: None,
             disk: None,
             fast_sio: false,
+            fast_tape: false,
             tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
@@ -686,6 +688,7 @@ mod executables {
             disk: None,
             tape: None,
             fast_sio,
+            fast_tape: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })
@@ -940,6 +943,7 @@ mod disks {
             cartridge: None,
             disk: Some(disk),
             fast_sio,
+            fast_tape: false,
             tape: None,
             standard,
             audio_sample_rate: TEST_SAMPLE_RATE,
@@ -1090,17 +1094,10 @@ mod disks {
         assert_eq!(sector, [0x5A; 128].as_slice(), "3: sector 5 of the image");
     }
 
-    /// Verifies REQ-623: fast SIO does not handle a request for another device, a request
-    /// whose bus ID wraps to `$31`, or a call of `$E459` with the OS ROM off (criteria 4-6).
-    ///
-    /// Ignored: criterion 5 fails with `AltirraOS`. The shortcut does not handle `DDEVIC` =
-    /// `$5F`, but the OS routine itself sends the request with `DUNIT` = `$D3` on the bus as
-    /// bus ID `$31` (also with the shortcut off), and D1: answers on the real serial path,
-    /// so `$4000-$407F` holds 128 bytes of `$02`. The HRM (9.1) says that the SIO routines
-    /// intercept `DDEVIC` = `$5F`; OI-046 asks which value the OS checks. Criteria 4 and 6
-    /// pass.
+    /// Verifies REQ-623: fast SIO does not handle a request for another device, a cassette
+    /// request (`DDEVIC` = `$60`) whose bus ID wraps to `$31`, or a call of `$E459` with the
+    /// OS ROM off (criteria 4-6).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req623_fast_sio_not_intercepted() {
         // 4: D2: is not emulated, so the OS routine runs and times out.
         let d2 = Dcb {
@@ -1110,10 +1107,11 @@ mod disks {
         let m = run_siov(os_rom().unwrap(), &[], d2, "4");
         assert_eq!(m.peek_ram(RESULT_Y), 0x8A, "4: the OS timeout status");
 
-        // 5: DDEVIC = $5F is never intercepted, also when the bus ID wraps to $31.
+        // 5: DDEVIC = $60 (the cassette, OI-046) is never intercepted, also when the bus ID
+        // $60 + $D2 - 1 wraps to $31.
         let cassette = Dcb {
-            device: 0x5F,
-            unit: 0xD3,
+            device: 0x60,
+            unit: 0xD2,
             ..read_sector(2)
         };
         let mut m = machine(
@@ -1270,6 +1268,7 @@ mod cassette {
             cartridge: None,
             disk: None,
             fast_sio: false,
+            fast_tape: false,
             tape: Some(tape_a()),
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
@@ -1477,14 +1476,16 @@ mod tape_boot {
     }
 
     /// A machine with `AltirraOS`, the BASIC ROM, no cartridge, no disk and `tape` in the
-    /// deck, after power-on, with START held (the key timing of REQ-643).
-    fn machine(tape: Tape, standard: VideoStandard, fast_sio: bool) -> Machine {
+    /// deck, the SIOV shortcut `fast_sio` and the tape shortcut `fast_tape`, after
+    /// power-on, with START held (the key timing of REQ-643).
+    fn machine(tape: Tape, standard: VideoStandard, fast_sio: bool, fast_tape: bool) -> Machine {
         let mut m = Machine::new(MachineConfig {
             os_rom: os_rom().unwrap(),
             basic_rom: Some(basic_rom().unwrap()),
             cartridge: None,
             disk: None,
             fast_sio,
+            fast_tape,
             tape: Some(tape),
             standard,
             audio_sample_rate: TEST_SAMPLE_RATE,
@@ -1549,7 +1550,7 @@ mod tape_boot {
 
     /// Checks criterion 1 or 2: the boot within `max_frames`.
     fn check_boot(standard: VideoStandard, fast_sio: bool, max_frames: u64) -> BootRun {
-        let mut m = machine(boot_tape(false), standard, fast_sio);
+        let mut m = machine(boot_tape(false), standard, fast_sio, false);
         let run = run_boot(&mut m, max_frames);
         eprintln!(
             "{standard:?}, SIOV shortcut {fast_sio}: $A5 at $0600 after {:?} frames, the motor first on at the end of frame {:?}",
@@ -1595,12 +1596,12 @@ mod tape_boot {
     /// after 2,400 frames (NTSC), `$0600` does not hold `$A5` (criterion 4).
     #[test]
     fn req643_bad_checksum_no_boot() {
-        let mut good = machine(boot_tape(false), VideoStandard::Ntsc, false);
+        let mut good = machine(boot_tape(false), VideoStandard::Ntsc, false, false);
         assert!(
             run_boot(&mut good, 2_400).done.is_some(),
             "4: the tape without the change boots"
         );
-        let mut m = machine(boot_tape(true), VideoStandard::Ntsc, false);
+        let mut m = machine(boot_tape(true), VideoStandard::Ntsc, false, false);
         let run = run_boot(&mut m, 2_400);
         assert_eq!(run.done, None, "4: no boot with a bad checksum");
         assert_ne!(m.peek_ram(MARKER), DONE, "4: $0600 after 2,400 frames");
@@ -1625,6 +1626,78 @@ mod tape_boot {
         );
     }
 
+    /// Verifies REQ-644: the boot test tape with the RETURN press after the prompt tone
+    /// (frame 180 NTSC, 150 PAL) and the tape shortcut on reaches `$0600` = `$A5` for NTSC and PAL, in fewer frames
+    /// than with the shortcut off (criterion 7).
+    #[test]
+    fn req644_boot_tape_faster() {
+        for (standard, limit) in [(VideoStandard::Ntsc, 2_400), (VideoStandard::Pal, 2_000)] {
+            let slow = run_boot(
+                &mut machine(boot_tape(false), standard, false, false),
+                limit,
+            );
+            let fast = run_boot(&mut machine(boot_tape(false), standard, false, true), limit);
+            eprintln!(
+                "{standard:?}: $A5 at $0600 after {:?} frames with the tape shortcut, {:?} without",
+                fast.done, slow.done
+            );
+            let (fast, slow) = (fast.done.unwrap(), slow.done.unwrap());
+            assert!(
+                fast < slow,
+                "7, {standard:?}: with the shortcut {fast} frames, without {slow} frames"
+            );
+        }
+    }
+
+    /// All 65,536 bytes of RAM.
+    fn ram(m: &Machine) -> Vec<u8> {
+        (0..=u16::MAX).map(|a| m.peek_ram(a)).collect()
+    }
+
+    /// Verifies REQ-644: with the tape shortcut on, a save state in the middle of the tape
+    /// boot (NTSC, after the RETURN press, while the motor runs and before the first
+    /// record), loaded into a new machine of the same configuration, gives the same RAM
+    /// after the same frames as the run without the save and the load (criterion 8).
+    #[test]
+    fn req644_save_state_mid_boot() {
+        const SAVE_FRAME: u64 = 400;
+        const END_FRAME: u64 = 1_000;
+        let mut reference = machine(boot_tape(false), VideoStandard::Ntsc, false, true);
+        let run = run_boot(&mut reference, SAVE_FRAME);
+        assert!(run.done.is_none(), "the boot is not done at the save");
+        assert!(
+            reference.tape_motor_on() && reference.tape_position() > Some(0),
+            "the tape moves at the save"
+        );
+        let state = reference.save_state();
+        while reference.frame_count() < END_FRAME {
+            reference.run_frame();
+        }
+        assert_eq!(
+            reference.peek_ram(MARKER),
+            DONE,
+            "the boot is done at the end"
+        );
+
+        let mut loaded = machine(boot_tape(false), VideoStandard::Ntsc, false, true);
+        loaded.load_state(&state).unwrap();
+        // The key input of frame 400: no console key and no key down.
+        loaded.set_console_keys(ConsoleKeys::default());
+        loaded.key_up();
+        assert_eq!(
+            loaded.frame_count(),
+            SAVE_FRAME,
+            "the frame count of the state"
+        );
+        while loaded.frame_count() < END_FRAME {
+            loaded.run_frame();
+        }
+        assert!(
+            ram(&loaded) == ram(&reference),
+            "8: the RAM at frame {END_FRAME}"
+        );
+    }
+
     /// The CAS file of the boot test tape is the file of the criteria: 5 chunks, and
     /// records of 132 bytes.
     #[test]
@@ -1633,5 +1706,353 @@ mod tape_boot {
         assert_eq!(file.len(), 8 + 8 + 3 * (8 + 132), "the CAS file size");
         let tape = boot_tape(false);
         assert_eq!(tape.blocks().len(), 3, "three data blocks");
+    }
+}
+
+/// Tape shortcut system tests of REQ-644 criteria 1 to 6 (`docs/design/media.md`, "Test
+/// method for the tape shortcut"): a synthetic OS ROM runs the test code from `$C000`, with
+/// `LDY #$77`, `RTS` at SIOV (`$E459`) as the OS routine, and a tape in `MachineConfig`.
+#[cfg(test)]
+mod tape_shortcut {
+    use std::slice;
+
+    use atari_core::media::{Tape, TapeDeck, sio_checksum};
+    use atari_core::{Machine, MachineConfig, VideoStandard};
+    use atari_harness::system::{TEST_SAMPLE_RATE, test_os_rom};
+
+    /// The SIOV entry of the OS (REQ-623).
+    const SIOV: u16 = 0xE459;
+    /// The marker address of the test program.
+    const MARKER: u16 = 0x0600;
+    /// The marker value.
+    const DONE: u8 = 0xA5;
+    /// The test program stores Y of call `k` at `RESULTS + 2k` and the processor status at
+    /// `RESULTS + 2k + 1`.
+    const RESULTS: u16 = 0x0680;
+    /// `DSTATS`.
+    const DSTATS: u16 = 0x0303;
+    /// The buffer of the requests.
+    const BUFFER: u16 = 0x4000;
+    /// The length of a record without the checksum, as the OS gives it in `DBYT` (131).
+    const DBYT: u8 = 0x83;
+    /// The Y value of the synthetic OS routine at SIOV.
+    const OS_Y: u8 = 0x77;
+    /// The cycle limit of a test program.
+    const CYCLES: u32 = 200_000;
+    /// `PACTL`.
+    const PACTL: u16 = 0xD302;
+    /// The `PACTL` value that turns the motor on (CA2 output low).
+    const MOTOR_ON: u8 = 0x34;
+
+    /// One CAS chunk: the 8-byte header (`kind`, the data length, `aux`) and `data`.
+    fn chunk(kind: [u8; 4], aux: u16, data: &[u8]) -> Vec<u8> {
+        let mut bytes = kind.to_vec();
+        bytes.extend(u16::try_from(data.len()).unwrap().to_le_bytes());
+        bytes.extend(aux.to_le_bytes());
+        bytes.extend(data);
+        bytes
+    }
+
+    /// A record of 132 bytes: `55 55 FC`, 128 bytes of `fill`, and the checksum of the 131
+    /// bytes before it (REQ-616).
+    fn record(fill: u8) -> Vec<u8> {
+        let mut bytes = vec![0x55, 0x55, 0xFC];
+        bytes.resize(131, fill);
+        bytes.push(sio_checksum(&bytes));
+        bytes
+    }
+
+    /// A tape at 600 baud with one `data` chunk (gap 100 ms) for each of `records`.
+    fn tape(records: &[Vec<u8>]) -> Tape {
+        let mut file = chunk(*b"FUJI", 0, b"");
+        file.extend(chunk(*b"baud", 600, &[]));
+        for bytes in records {
+            file.extend(chunk(*b"data", 100, bytes));
+        }
+        Tape::from_cas(&file).unwrap()
+    }
+
+    /// The tape time where each block of `tape` ends (NTSC).
+    fn block_ends(tape: &Tape) -> Vec<u64> {
+        let mut deck = TapeDeck::new(VideoStandard::Ntsc);
+        deck.insert(tape.clone(), 0);
+        deck.block_starts().split_off(1)
+    }
+
+    /// One request of the test program: `DDEVIC`, `DUNIT`, `DCOMND`, the buffer at
+    /// [`BUFFER`], `DSTATS` = `$40` and `DBYT` = 131.
+    #[derive(Clone, Copy)]
+    struct Request {
+        /// `DDEVIC`.
+        device: u8,
+        /// `DUNIT`.
+        unit: u8,
+        /// `DCOMND`.
+        command: u8,
+    }
+
+    /// The cassette read of the OS: `DDEVIC` = `$60`, `DUNIT` = 0, `DCOMND` = `$52`.
+    const READ: Request = Request {
+        device: 0x60,
+        unit: 0x00,
+        command: 0x52,
+    };
+
+    /// `LDA #value`, `STA addr`.
+    fn store(addr: u16, value: u8) -> Vec<u8> {
+        let [lo, hi] = addr.to_le_bytes();
+        vec![0xA9, value, 0x8D, lo, hi]
+    }
+
+    /// The synthetic OS ROM: `prefix`, then for each request the device control block,
+    /// `JSR $E459`, `STY` and `PHP`, `PLA`, `STA` to the result bytes; then `$A5` to
+    /// `$0600` and a `JMP` to itself. `LDY #$77`, `RTS` is at `$E459`.
+    fn rom(prefix: &[u8], requests: &[Request]) -> Vec<u8> {
+        let mut code = prefix.to_vec();
+        let [buf_lo, buf_hi] = BUFFER.to_le_bytes();
+        for (result, request) in (RESULTS..).step_by(2).zip(requests) {
+            for (addr, value) in [
+                (0x0300, request.device),
+                (0x0301, request.unit),
+                (0x0302, request.command),
+                (0x0303, 0x40),
+                (0x0304, buf_lo),
+                (0x0305, buf_hi),
+                (0x0306, 0x07),
+                (0x0308, DBYT),
+                (0x0309, 0x00),
+                (0x030A, 0x00),
+                (0x030B, 0x80),
+            ] {
+                code.extend(store(addr, value));
+            }
+            let [y_lo, y_hi] = result.to_le_bytes();
+            let [p_lo, p_hi] = (result + 1).to_le_bytes();
+            code.extend([
+                0x20, 0x59, 0xE4, // JSR $E459
+                0x8C, y_lo, y_hi, // STY result
+                0x08, // PHP
+                0x68, // PLA
+                0x8D, p_lo, p_hi, // STA result + 1
+            ]);
+        }
+        code.extend(store(MARKER, DONE));
+        let [lo, hi] = (0xC000 + u16::try_from(code.len()).unwrap()).to_le_bytes();
+        code.extend([0x4C, lo, hi]);
+        let siov = usize::from(SIOV - 0xC000);
+        assert!(code.len() < siov, "the test code ends before SIOV");
+        code.resize(siov, 0xEA);
+        code.extend([0xA0, OS_Y, 0x60]); // LDY #$77, RTS
+        test_os_rom(&code)
+    }
+
+    /// A machine with the ROM of `prefix` and `requests`, `tape` in the deck and the tape
+    /// shortcut `fast_tape` (the SIOV shortcut off), after power-on.
+    fn machine(prefix: &[u8], requests: &[Request], tape: Tape, fast_tape: bool) -> Machine {
+        Machine::new(MachineConfig {
+            os_rom: rom(prefix, requests),
+            basic_rom: None,
+            cartridge: None,
+            disk: None,
+            fast_sio: false,
+            fast_tape,
+            tape: Some(tape),
+            standard: VideoStandard::Ntsc,
+            audio_sample_rate: TEST_SAMPLE_RATE,
+        })
+        .unwrap()
+    }
+
+    /// Runs `m` until `$0600` holds `$A5`, at most [`CYCLES`] cycles.
+    fn run_done(m: &mut Machine) {
+        for _ in 0..CYCLES {
+            if m.peek_ram(MARKER) == DONE {
+                return;
+            }
+            m.run_cycle();
+        }
+        panic!("no $A5 at $0600 after {CYCLES} cycles");
+    }
+
+    /// Runs `m` until the CPU is at the opcode fetch at SIOV, at most [`CYCLES`] cycles.
+    fn run_to_siov(m: &mut Machine) {
+        for _ in 0..CYCLES {
+            if m.cpu().at_opcode_fetch() && m.cpu().registers().pc == SIOV {
+                return;
+            }
+            m.run_cycle();
+        }
+        panic!("no opcode fetch at SIOV after {CYCLES} cycles");
+    }
+
+    /// Y and the processor status of call `k`.
+    fn result(m: &Machine, k: u16) -> (u8, u8) {
+        (m.peek_ram(RESULTS + 2 * k), m.peek_ram(RESULTS + 2 * k + 1))
+    }
+
+    /// The `len` bytes at the buffer.
+    fn buffer(m: &Machine, len: u16) -> Vec<u8> {
+        (BUFFER..BUFFER + len).map(|a| m.peek_ram(a)).collect()
+    }
+
+    /// Verifies REQ-644: with the shortcut on, a cassette read copies the first `DBYT`
+    /// (131) bytes of the next record to the buffer, the status is `$01` in `DSTATS` and Y
+    /// with N = 0, and the tape position is then the end of the record; a second read
+    /// gets the second record (criteria 1, 4).
+    #[test]
+    fn req644_reads_record() {
+        let (first, second) = (record(0x11), record(0x22));
+        let tape = tape(&[first.clone(), second.clone()]);
+        let ends = block_ends(&tape);
+        let mut m = machine(&[], &[READ], tape.clone(), true);
+        run_done(&mut m);
+        let mut expected = first[..131].to_vec();
+        expected.push(0x00);
+        assert_eq!(
+            buffer(&m, 132),
+            expected,
+            "1: the 131 bytes, and the byte after them is not changed"
+        );
+        let (y, p) = result(&m, 0);
+        assert_eq!((y, m.peek_ram(DSTATS)), (0x01, 0x01), "1: Y and DSTATS");
+        assert_eq!(p & 0x80, 0, "1: the N flag");
+        assert_eq!(m.tape_position(), Some(ends[0]), "4: the end of record 0");
+
+        let mut m = machine(&[], &[READ, READ], tape, true);
+        run_done(&mut m);
+        assert_eq!(
+            buffer(&m, 131),
+            second[..131],
+            "the second read: the buffer"
+        );
+        assert_eq!(result(&m, 1).0, 0x01, "the second read: Y");
+        assert_eq!(m.tape_position(), Some(ends[1]), "4: the end of record 1");
+    }
+
+    /// Verifies REQ-644: when the checksum does not match, the buffer holds the 131 bytes
+    /// and the status is `$8F`, with N = 1 (criterion 2).
+    #[test]
+    fn req644_checksum_error() {
+        let mut bad = record(0x33);
+        bad[131] ^= 0x01;
+        let mut m = machine(&[], &[READ], tape(slice::from_ref(&bad)), true);
+        run_done(&mut m);
+        assert_eq!(buffer(&m, 131), bad[..131], "2: the buffer");
+        let (y, p) = result(&m, 0);
+        assert_eq!((y, m.peek_ram(DSTATS)), (0x8F, 0x8F), "2: Y and DSTATS");
+        assert_eq!(p & 0x80, 0x80, "2: the N flag");
+    }
+
+    /// Verifies REQ-644: a record of 10 bytes (fewer than `DBYT + 1`) gives its 10 bytes in
+    /// the buffer and status `$8F`; a second read, with no record after the tape
+    /// position, does not change the buffer and gives status `$8A` (criterion 3).
+    #[test]
+    fn req644_short_record_and_end() {
+        let short: Vec<u8> = (1..=10).collect();
+        let tape = tape(slice::from_ref(&short));
+        let ends = block_ends(&tape);
+        let mut m = machine(&[], &[READ, READ], tape, true);
+        run_done(&mut m);
+        let mut expected = short;
+        expected.resize(131, 0x00);
+        assert_eq!(
+            buffer(&m, 131),
+            expected,
+            "3: 10 bytes, the rest not changed"
+        );
+        assert_eq!(result(&m, 0).0, 0x8F, "3: the short record");
+        let (y, p) = result(&m, 1);
+        assert_eq!((y, m.peek_ram(DSTATS)), (0x8A, 0x8A), "3: no record");
+        assert_eq!(p & 0x80, 0x80, "3: the N flag of $8A");
+        assert_eq!(
+            m.tape_position(),
+            Some(ends[0]),
+            "3: the tape stays at the end"
+        );
+    }
+
+    /// The POKEY read registers except `RANDOM` (`$D20A`), and the PIA registers.
+    fn chip_registers(m: &Machine) -> Vec<(u16, u8)> {
+        (0xD200..=0xD20F)
+            .filter(|&a| a != 0xD20A)
+            .chain(0xD300..=0xD303)
+            .map(|a| (a, m.peek(a)))
+            .collect()
+    }
+
+    /// Verifies REQ-644: with the motor on, the shortcut ends in the cycle of the opcode
+    /// fetch at SIOV (the CPU may wait for DMA before it), the tape position in the next
+    /// cycle is the end of the record, the motor stays on, and the POKEY and PIA registers
+    /// (with `IRQST`, so no serial interrupt) do not change (criteria 4, 5).
+    #[test]
+    fn req644_no_time_no_chip_change() {
+        let tape = tape(&[record(0x44)]);
+        let ends = block_ends(&tape);
+        let mut m = machine(&store(PACTL, MOTOR_ON), &[READ], tape, true);
+        run_to_siov(&mut m);
+        assert!(m.tape_motor_on(), "the motor runs before the request");
+        let position = m.tape_position().unwrap();
+        assert!(
+            position < ends[0] / 2,
+            "the request comes in the gap: {position}"
+        );
+        let (registers, start) = (chip_registers(&m), m.cycle_count());
+        while m.cpu().registers().pc == SIOV {
+            m.run_cycle();
+        }
+        let cycles = m.cycle_count() - start;
+        assert!(
+            cycles <= 16,
+            "4: the request took {cycles} cycles (a record takes 3,937,500)"
+        );
+        assert_eq!(m.tape_position(), Some(ends[0]), "4: the end of the record");
+        assert!(m.tape_motor_on(), "5: the motor line does not change");
+        assert_eq!(chip_registers(&m), registers, "5: POKEY and PIA");
+        run_done(&mut m);
+        assert_eq!(result(&m, 0).0, 0x01, "the status");
+    }
+
+    /// Verifies REQ-644: the write command `$57`, a `DDEVIC` other than `$60` (`$5F` and
+    /// `$31`, with the SIOV shortcut off), and a read with the tape shortcut off go to the
+    /// OS routine: Y holds `$77`, the buffer and the tape position do not change
+    /// (criterion 6).
+    #[test]
+    fn req644_other_requests_to_os() {
+        let cases = [
+            (
+                Request {
+                    command: 0x57,
+                    ..READ
+                },
+                true,
+                "the write command",
+            ),
+            (
+                Request {
+                    device: 0x5F,
+                    unit: 0x01,
+                    ..READ
+                },
+                true,
+                "DDEVIC $5F",
+            ),
+            (
+                Request {
+                    device: 0x31,
+                    unit: 0x01,
+                    ..READ
+                },
+                true,
+                "DDEVIC $31",
+            ),
+            (READ, false, "the shortcut off"),
+        ];
+        for (request, fast_tape, name) in cases {
+            let mut m = machine(&[], &[request], tape(&[record(0x55)]), fast_tape);
+            run_done(&mut m);
+            assert_eq!(result(&m, 0).0, OS_Y, "6, {name}: the OS routine ran");
+            assert_eq!(buffer(&m, 131), vec![0; 131], "6, {name}: the buffer");
+            assert_eq!(m.tape_position(), Some(0), "6, {name}: the tape position");
+        }
     }
 }

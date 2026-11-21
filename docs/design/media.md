@@ -333,8 +333,8 @@ these conditions:
 3. `PORTB` bit 0 = 1 (OS ROM enabled).
 
 If all are true, the machine reads the device control block at `$0300-$030B` with no side
-effects. The bus ID is `DDEVIC + DUNIT - 1`, with 8-bit wrap. A `DDEVIC` of `$5F` is never
-intercepted. The data direction comes from `DSTATS`: bit 7 = send, bit 6 = receive, neither =
+effects. The bus ID is `DDEVIC + DUNIT - 1`, with 8-bit wrap. A `DDEVIC` of `$60` (the
+cassette, OI-046) never goes to `transact`: only the tape shortcut below handles it. The data direction comes from `DSTATS`: bit 7 = send, bit 6 = receive, neither =
 no data. With both bits set, the direction is send. `DBYT` gives the length, and the send
 bytes are read from `DBUF` with no side effects. The machine then calls `SioBus::transact`.
 
@@ -364,9 +364,10 @@ When a receive gives Error and also a length mismatch, the length mismatch statu
 
 The fast path takes no emulated time. The POKEY registers and the bus phase do not change.
 
-The OS cassette requests never reach `transact`: the OS sends them to its own cassette code
-(OI-046), which drives POKEY and the motor line. The cassette deck below gets them through
-the real serial path only.
+The OS cassette requests (`DDEVIC` = `$60`, OI-046) never reach `transact`: the OS sends
+them to its own cassette code, which drives POKEY and the motor line, and the cassette deck
+below gets them through the real serial path. With the tape shortcut on, the cassette reads
+take the path of "Tape shortcut" instead.
 
 ### Cassette deck
 
@@ -409,6 +410,12 @@ impl TapeDeck {
     pub fn signal_at(&self, p: u64) -> bool;
     /// Back to position 0 (cold reset, OI-052). The tape stays inserted.
     pub fn rewind(&mut self, now: u64);
+    /// The tape shortcut (REQ-644): the first data block whose gap ends at tape time `p` or
+    /// later, as its index in `Tape::blocks` and the tape time where it ends.
+    pub fn next_record(&self, p: u64) -> Option<(usize, u64)>;
+    /// The tape shortcut: the position is `p` in cycle `from`. With the motor on, the tape
+    /// moves on from `p` after cycle `from`.
+    pub fn seek(&mut self, p: u64, from: u64);
 }
 
 impl SioBus {
@@ -432,6 +439,65 @@ Call contract for the machine (added to the contract of "SIO bus and disk drive"
    does not call a deck function. `SioBus::reset` does not change the deck.
 7. The deck never reads the cycle counter by itself (REQ-014). All times come from `now`.
 
+### Tape shortcut
+
+The tape shortcut (REQ-644) is a second branch of the SIOV hook of "SIOV shortcut", in
+`machine/siov.rs`. The machine checks the hook when the SIOV shortcut or the tape shortcut
+is on.
+
+```rust
+pub struct MachineConfig {
+    // ...
+    /// The tape shortcut (REQ-644) is on.
+    pub fast_tape: bool,
+}
+
+impl Machine {
+    /// The tape shortcut (REQ-644). `MachineConfig::fast_tape` gives the power-on value. It
+    /// is a setting, not machine state: a save state does not contain it.
+    pub fn set_fast_tape(&mut self, on: bool);
+    pub fn fast_tape(&self) -> bool;
+}
+```
+
+At the opcode fetch at SIOV with the OS ROM enabled (the conditions 2 and 3 of "SIOV
+shortcut"), the machine reads the device control block. When `DDEVIC` = `$60`, the tape
+shortcut is on, `DCOMND` = `$52` and a tape is inserted, the machine:
+
+1. takes `p = deck.position(now)` (`now` = `cycles + 1`, the cycle in progress) and
+   `deck.next_record(p)`: the first `Data` block whose gap ends at `p` or later. A `Signal`
+   block is skipped. A record that has started (its gap ended before `p`) is skipped, so a
+   record that the OS code started to read on the serial path is not read twice.
+2. With no such block: the buffer does not change, and the status is `$8A`.
+3. Else, with `n = DBYT` and the `bytes` of the block: it writes `bytes[..min(n, len)]` to
+   `DBUF` with the normal write rules. The status is `$01` when `bytes.len() > n` and
+   `bytes[n] == sio_checksum(&bytes[..n])` (the 8-bit sum with end-around carry of
+   REQ-616, HRM C.2), else `$8F`. The OS gives `DBYT` = 131 (`55 55`, the control byte and
+   128 data bytes, measured with `AltirraOS` on 2026-11-21: `DCB` = `60 00 52 40 FD 03 00
+   00 83 00 00 80`), so `bytes[131]` is the checksum of a record of 132 bytes.
+4. It calls `deck.seek(end, now + 1)`: the tape continues at the end of the record (the
+   start of the next block) in the next cycle. The motor state does not change. With the
+   motor off, the position is `end` until the motor starts.
+5. It writes the status to `DSTATS` and Y, sets N from bit 7 and clears Z, and returns to
+   the caller (the steps 2 to 4 of "SIOV shortcut", the same function `finish`).
+6. It calls `plan_tape_mark(now + 1)`: the next tape mark of the event log comes from the
+   new position, so no `record <r> starts` record comes for a record that the shortcut
+   read, and `tape ends` comes in cycle `now + 1` after the last record.
+7. It sends an `atari::tape` record (Info): `tape shortcut: record <r>, <n> bytes, status
+   $xx` (`<n>` is the length of the block), or `tape shortcut: no record, status $8A`.
+
+The shortcut takes no emulated time. It does not change the POKEY or PIA registers or the
+motor line, and makes no interrupt. A `DDEVIC` of `$60` with another command, with no tape
+or with the tape shortcut off goes to the OS code. A `DDEVIC` other than `$60` takes the
+SIOV shortcut path, when that is on.
+
+Save state: the tape position is the deck fields `played` and `running_since`, which are in
+the state already. `fast_tape` is a setting, as `fast_sio`, and is not saved. The format
+version does not change.
+
+The frontend turns the shortcut on unless the command line has `--no-fast-tape` (REQ-091,
+`architecture.md`, "Tape shortcut option").
+
 ### Machine configuration
 
 `MachineConfig` gets these fields:
@@ -440,6 +506,7 @@ Call contract for the machine (added to the contract of "SIO bus and disk drive"
 pub cartridge: Option<Cartridge>,
 pub disk: Option<DiskImage>,
 pub fast_sio: bool,
+pub fast_tape: bool,
 pub tape: Option<Tape>,
 ```
 
@@ -958,6 +1025,19 @@ RESET, power-on) use a synthetic OS ROM, as "System test method for cartridges",
 in `MachineConfig`. The boot tests use AltirraOS and the BASIC ROM, the key presses of the
 requirement, and `run_until` for `$0600` = `$A5`.
 
+### Test method for the tape shortcut
+
+The tests of REQ-644 criteria 1 to 6 use a synthetic OS ROM, as "System test method for
+cartridges", with `LDY #$77`, `RTS` at `$E459` as the OS routine, so Y = `$77` shows that
+the OS routine ran. The test code fills the device control block (`DBUF` = `$4000`, `DBYT`
+= 131), executes `JSR $E459` once or twice, stores Y and the processor status at `$0680`
+and the next bytes, and writes `$A5` to `$0600`. The tapes are made in code: records of 132
+bytes with the checksum of REQ-616, a record with a bad checksum, and a record of 10 bytes.
+The expected end of each record comes from `TapeDeck::block_starts` of the same tape.
+Criterion 5 starts the motor with `PACTL` = `$34` and compares the POKEY read registers
+(not `RANDOM`) and the PIA registers before and after the cycle of the shortcut. Criteria 7
+and 8 use the boot test tape and the key timing of REQ-643 with `AltirraOS`.
+
 ### Tests
 
 | Requirement | Test |
@@ -1003,6 +1083,7 @@ requirement, and `run_until` for `$0600` = `$A5`.
 | REQ-641 | `media.rs` `req641_motor_off_no_motion` (1), `req641_motor_start` (2), `req641_motor_stop_keeps_position` (3), `req641_eject` (6); `crates/harness/tests/media.rs` `req641_pactl_moves_tape` (4), `req641_reset_and_power_on` (5) |
 | REQ-642 | `media.rs` `req642_data_block_ntsc` (1, 2, 5), `req642_data_block_pal` (3), `req642_signal_block` (4), `req642_and_with_drive` (6); `crates/harness/tests/media.rs` `req642_skstat_sees_tape` (7) |
 | REQ-643 | `crates/harness/tests/media.rs` `req643_boot_tape_ntsc` (1, 3), `req643_boot_tape_pal` (2), `req643_bad_checksum_no_boot` (4), `req643_boot_tape_siov_shortcut` (5) |
+| REQ-644 | `crates/harness/tests/media.rs` `req644_reads_record` (1, 4), `req644_checksum_error` (2), `req644_short_record_and_end` (3), `req644_no_time_no_chip_change` (4, 5), `req644_other_requests_to_os` (6), `req644_boot_tape_faster` (7, NTSC and PAL), `req644_save_state_mid_boot` (8); `media.rs` `req644_next_record_and_seek` (`TapeDeck::next_record`, `TapeDeck::seek`); `crates/harness/tests/event_log.rs` `tape_shortcut_records` (the `tape` records and the tape marks after the shortcut) |
 
 `req623_fast_sio_xl_os` uses a user-supplied Atari XL/XE OS ROM (REQ-004), which the project
 cannot download. How this test runs without the ROM is open: see OI-040. REQ-623 criterion 7 and this

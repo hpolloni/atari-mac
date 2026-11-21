@@ -18,7 +18,7 @@ packages:
     requirements: [REQ-643, REQ-081, REQ-082]
   - id: WP-4
     title: Tape shortcut
-    status: planned
+    status: done
     requirements: [REQ-644, REQ-091]
 ---
 # SLICE-08: Cassette tape

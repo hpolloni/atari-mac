@@ -21,12 +21,12 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | in-progress | 41 | 0 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
-| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 8 | 0 | 2 | 0 |
+| [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 10 | 0 | 0 | 0 |
 | [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | in-progress | 3 | 0 | 0 | 0 |
 | [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 2 | 0 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
 
-All 290 requirements: 280 tested, 3 pending, 2 missing, 5 not a test requirement. Implemented: 231. Open items with the status `open`: 29.
+All 290 requirements: 282 tested, 3 pending, 0 missing, 5 not a test requirement. Implemented: 233. Open items with the status `open`: 29.
 
 <!-- END GENERATED: status -->
 
@@ -65,6 +65,7 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | `--xex <file>` | Start an executable (XEX): it boots from drive D1: with BASIC disabled (not with `--disk` or `--bas`) |
 | `--disk <file>` | Insert an ATR disk image in drive D1: (the OS boots it at power-on) |
 | `--cas <file>` | Boot a CAS tape image (holds START at power-on; press RETURN after the tone) |
+| `--no-fast-tape` | Read the tape records at the real speed, with no tape shortcut (REQ-644) |
 | `--pal` | PAL machine (default: NTSC) |
 | `--scale <n>` | Window scale, 1 to 8 (default: 2) |
 | `--artifacting` | NTSC artifacting filter: false colors for hi-res pixel patterns |
