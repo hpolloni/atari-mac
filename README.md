@@ -23,7 +23,7 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
 | [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | planned | 1 | 6 | 0 | 0 |
 
-All 279 requirements: 226 tested, 48 pending, 0 missing, 5 not a test requirement. Implemented: 189. Open items with the status `open`: 30.
+All 279 requirements: 226 tested, 48 pending, 0 missing, 5 not a test requirement. Implemented: 189. Open items with the status `open`: 31.
 
 <!-- END GENERATED: status -->
 
