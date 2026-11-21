@@ -282,6 +282,39 @@ fn pseudo_mode_e_after_mid_line_prior() {
     assert_eq!(at(&gtia, 93, 0x31), [0x38, 0x36], "2: row 93, hires again");
 }
 
+/// Verifies REQ-432: with `PRIOR` = `$40` during the horizontal blank code `%011` and a write
+/// of `$00` that takes effect at HPOS `$28`, codes `%100-%111` at HPOS `$30-$33` give
+/// `COLPF0-3` in both columns (criterion 3).
+#[test]
+fn gtia_mode_at_hblank_blocks_hires() {
+    let mut gtia = gtia_with(&[
+        (COLBK, 0x02),
+        (0x16, 0x14),
+        (0x17, 0x26),
+        (0x18, 0x38),
+        (0x19, 0x4A),
+    ]);
+    let inner = pairs_from_30(&[0b00, 0b01, 0b10, 0b11]);
+    // `PRIOR` bits 6-7 take effect at `2c - 2 + 4`: cycle 100 of line 99 gives $CA, before the
+    // horizontal blank of line 100; cycle 19 of line 100 gives $28.
+    run_frame(
+        &mut gtia,
+        true,
+        &inner,
+        &no_dma,
+        &mut |gtia, l, c| match (l, c) {
+            (99, 100) => gtia.write(PRIOR, 0x40),
+            (100, 19) => gtia.write(PRIOR, 0x00),
+            _ => {}
+        },
+    );
+    assert_eq!(
+        span(&gtia, 92, 0x30..=0x33),
+        [0x14, 0x14, 0x26, 0x26, 0x38, 0x38, 0x4A, 0x4A],
+        "3: row 92, pseudo mode E"
+    );
+}
+
 /// Verifies REQ-433: with `PRIOR` = `$80`, the pair (`%101`, `%000`) shows `COLBK` `$90`, the
 /// pair (`%101`, `%100`) shows `COLPF0` `$50` and the pair (`%000`, `%100`) shows `COLPM0`
 /// `$10` (criteria 1-3).
