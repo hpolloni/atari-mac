@@ -5,8 +5,9 @@
 //! sequence in the frames `from` to `from + frames - 1`.
 
 use core::fmt;
-use std::io::{self, Write};
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{self, BufWriter, Stdout, Write};
+use std::path::{Path, PathBuf};
 
 use atari_core::cpu::flags;
 use atari_core::debug::{Control, CpuHook, InstructionStart, Position, Sequence, SequenceKind};
@@ -14,12 +15,65 @@ use atari_core::debug::{Control, CpuHook, InstructionStart, Position, Sequence, 
 /// The trace options of the command line (`--trace`, `--trace-from`, `--trace-frames`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceOptions {
-    /// The trace file.
+    /// The trace file. `-` is standard output (REQ-086 criterion 7).
     pub file: PathBuf,
     /// The first frame of the trace (`--trace-from`, default 0).
     pub from: u64,
     /// The number of frames, at least 1 (`--trace-frames`, default 1).
     pub frames: u64,
+}
+
+impl TraceOptions {
+    /// `true` when the trace goes to standard output: the file is `-` (REQ-086 criterion 7).
+    #[must_use]
+    pub fn to_stdout(&self) -> bool {
+        self.file == Path::new("-")
+    }
+
+    /// Opens the output of the trace: standard output for `-`, else the new file.
+    ///
+    /// # Errors
+    ///
+    /// The error of the creation of the file.
+    pub fn open(&self) -> io::Result<TraceOutput> {
+        Ok(if self.to_stdout() {
+            TraceOutput::Stdout(BufWriter::new(io::stdout()))
+        } else {
+            TraceOutput::File(BufWriter::new(File::create(&self.file)?))
+        })
+    }
+}
+
+/// The output of the trace: a file, or standard output for `--trace -` (REQ-086).
+#[derive(Debug)]
+pub enum TraceOutput {
+    /// The trace file.
+    File(BufWriter<File>),
+    /// Standard output.
+    Stdout(BufWriter<Stdout>),
+}
+
+impl Write for TraceOutput {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::File(out) => out.write(buf),
+            Self::Stdout(out) => out.write(buf),
+        }
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        match self {
+            Self::File(out) => out.write_all(buf),
+            Self::Stdout(out) => out.write_all(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::File(out) => out.flush(),
+            Self::Stdout(out) => out.flush(),
+        }
+    }
 }
 
 /// Writes the lines of REQ-086 for the frames `from` to `from + frames - 1`.

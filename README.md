@@ -77,7 +77,7 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | `--headless`, `--frames <n>`, `--screenshot <file>` | Run without a window for `n` frames, and save the last frame as a PNG file |
 | `--stats` | Each second, write the speed statistics to standard error (frame rate, speed, emulation time, turbo, tape motor, audio underruns) |
 | `--log <categories>` | Write log records to standard error. Categories, separated by commas: `tape`, `sio`, `reset`, `media`, `frontend`, `all`; add `:debug` for more detail (for example `sio:debug`) |
-| `--trace <file>` | Write one line for each CPU instruction and each interrupt sequence to the file: frame, scan line, horizontal position, cycle, address, bytes, disassembly and registers |
+| `--trace <file>` | Write one line for each CPU instruction and each interrupt sequence to the file (`-` is standard output): frame, scan line, horizontal position, cycle, address, bytes, disassembly and registers |
 | `--trace-from <frame>` | With `--trace`: the first frame of the trace (default 0) |
 | `--trace-frames <n>` | With `--trace`: the number of frames of the trace (default 1) |
 

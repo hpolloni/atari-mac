@@ -32,8 +32,7 @@ pub mod trace;
 pub mod window;
 
 use std::ffi::OsString;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 pub use atari_core;
@@ -134,15 +133,11 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
     }
     let mut frontend = start_at(options, audio.sample_rate())?;
     if let Some(trace) = &options.trace {
-        let file = File::create(&trace.file).map_err(|source| FrontendError::Trace {
+        let output = trace.open().map_err(|source| FrontendError::Trace {
             path: trace.file.clone(),
             source,
         })?;
-        frontend = frontend.with_trace(TraceWriter::new(
-            BufWriter::new(file),
-            trace.from,
-            trace.frames,
-        ));
+        frontend = frontend.with_trace(TraceWriter::new(output, trace.from, trace.frames));
     }
     let elapsed = match options.frames {
         Some(frames) if options.headless && options.stats => {
@@ -168,6 +163,14 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
             &audio,
         )?,
     };
+    // The trace is flushed first: with `--trace -` the lines come before the other output on
+    // standard output (REQ-086 criterion 7).
+    if let (Some(trace), Some(writer)) = (&options.trace, frontend.take_trace()) {
+        writer.finish().map_err(|source| FrontendError::Trace {
+            path: trace.file.clone(),
+            source,
+        })?;
+    }
     if options.frames.is_some() {
         let seconds = elapsed.as_secs_f64();
         writeln!(
@@ -178,12 +181,6 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
             frontend.last_frame_cycles()
         )
         .map_err(FrontendError::Output)?;
-    }
-    if let (Some(trace), Some(writer)) = (&options.trace, frontend.take_trace()) {
-        writer.finish().map_err(|source| FrontendError::Trace {
-            path: trace.file.clone(),
-            source,
-        })?;
     }
     if options.audio_stats {
         writeln!(out, "{}", audio.stats()).map_err(FrontendError::Output)?;
