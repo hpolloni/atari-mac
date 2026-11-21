@@ -1,7 +1,7 @@
 ---
 id: SLICE-08
 title: Cassette tape
-status: done
+status: in-progress
 depends_on: "SLICE-05 WP-1 (POKEY serial input)"
 packages:
   - id: WP-1
