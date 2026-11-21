@@ -24,7 +24,7 @@
 //! | [`pokey`] | POKEY: audio, timers, keyboard, IRQ, random numbers |
 //! | [`keyboard`] | Atari keyboard codes (`KBCODE`) |
 //! | [`pia`] | 6520 PIA: joystick ports and the 65XE memory control (`PORTB`) |
-//! | [`media`] | Cartridge and executable file formats |
+//! | [`media`] | Cartridge, executable, tape and disk image formats, the SIO bus and drive D1: |
 //! | [`screen`] | The text of the OS text screen in memory (REQ-024) |
 //! | [`machine`] | Memory map, bus scheduling, interrupts: ties all chips together |
 //! | [`timing`] | Clock and frame timing constants |

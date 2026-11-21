@@ -18,12 +18,12 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-02](docs/plan/SLICE-02.md) | Graphics modes and player/missile graphics | done | 60 | 0 | 0 | 0 |
 | [SLICE-03](docs/plan/SLICE-03.md) | Sound | done | 18 | 0 | 0 | 0 |
 | [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | done | 23 | 0 | 0 | 0 |
-| [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 8 | 33 | 0 | 0 |
+| [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 31 | 10 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
 | [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 3 | 5 | 0 | 0 |
 
-All 280 requirements: 237 tested, 38 pending, 0 missing, 5 not a test requirement. Implemented: 204. Open items with the status `open`: 27.
+All 280 requirements: 260 tested, 15 pending, 0 missing, 5 not a test requirement. Implemented: 204. Open items with the status `open`: 27.
 
 <!-- END GENERATED: status -->
 
