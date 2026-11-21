@@ -26,14 +26,12 @@ pub mod error;
 pub mod frontend;
 pub mod keymap;
 pub mod logging;
-#[cfg(test)]
-mod planned;
 pub mod stats;
 pub mod window;
 
 use std::ffi::OsString;
 use std::io::{self, Write};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub use atari_core;
 
@@ -42,6 +40,7 @@ use crate::bas::Typist;
 use crate::cli::{Command, Options, USAGE};
 use crate::error::FrontendError;
 use crate::frontend::{Frontend, load_machine, load_xex, window_title, write_png, xex_warnings};
+use crate::stats::{Counters, FrameStats, Motor, Stats};
 
 /// Runs the frontend with the command line arguments `args` (without the program name).
 /// Normal output goes to `out`.
@@ -95,11 +94,17 @@ pub fn start_at(options: &Options, sample_rate: u32) -> Result<Frontend, Fronten
 /// The window opens the audio stream on the default output device before it creates the
 /// machine, so that the machine makes samples at the rate of the stream. Without a device,
 /// a warning goes to standard error and the emulator runs without sound (REQ-011).
+///
+/// With `--log`, the logger is installed before the machine is created (REQ-085). Without
+/// it, the frontend installs no logger, and the maximum level of `log` stays `Off`.
 #[expect(
     clippy::disallowed_methods,
     reason = "the frontend owns the host clock; the core reads no clock (REQ-014)"
 )]
 fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendError> {
+    if let Some(categories) = options.log {
+        logging::install(categories);
+    }
     let audio = if options.headless {
         AudioOutput::off("--headless")
     } else {
@@ -122,6 +127,9 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
     }
     let mut frontend = start_at(options, audio.sample_rate())?;
     let elapsed = match options.frames {
+        Some(frames) if options.headless && options.stats => {
+            run_headless_with_stats(&mut frontend, frames)?
+        }
         Some(frames) if options.headless => {
             let start = Instant::now();
             frontend.run_frames(frames)?;
@@ -161,4 +169,45 @@ fn run_machine(options: &Options, out: &mut impl Write) -> Result<(), FrontendEr
         write_png(path, machine.frame(), machine.standard(), options.filters)?;
     }
     Ok(())
+}
+
+/// The headless loop with `--stats` (REQ-083): runs `frames` frames one at a time, measures
+/// the emulation of each frame, and writes a statistics line to standard error after each
+/// second of host time. `shown` and `underruns` are 0 (no window and no audio). Returns the
+/// time from the first frame to the end.
+///
+/// # Errors
+///
+/// The errors of [`Frontend::run_frames`], and [`FrontendError::Output`] when standard
+/// error cannot be written.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the frontend owns the host clock; the core reads no clock (REQ-014)"
+)]
+fn run_headless_with_stats(
+    frontend: &mut Frontend,
+    frames: u64,
+) -> Result<Duration, FrontendError> {
+    let start = Instant::now();
+    let machine = frontend.machine();
+    let mut stats = Stats::new(
+        machine.standard(),
+        start,
+        Counters::default(),
+        Motor::of(machine),
+    );
+    for _ in 0..frames {
+        let t0 = Instant::now();
+        frontend.run_frames(1)?;
+        let t1 = Instant::now();
+        stats.frame(FrameStats {
+            emulation: t1 - t0,
+            turbo: frontend.turbo(),
+            motor: Motor::of(frontend.machine()),
+        });
+        if let Some(line) = stats.tick(t1, Counters::default()) {
+            writeln!(io::stderr(), "{line}").map_err(FrontendError::Output)?;
+        }
+    }
+    Ok(start.elapsed())
 }

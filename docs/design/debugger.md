@@ -123,13 +123,14 @@ other sources. The disassembler uses the name of Table 2 for each opcode.
 That is 105 undocumented opcodes. With the 151 documented opcodes, the table has 256
 entries.
 
-Two errors in the HRM text. Table 2 and the CPU decode table agree, and this design follows
+Three errors in the HRM text. Table 2 and the CPU decode table agree, and this design follows
 them:
 
 1. Table 2 shows `$71` as `ADC (zp,Y)`. The mode is `($nn),Y`, as in each other opcode of
    the column `x1` with an odd high digit.
 2. The list of the `NOP` opcodes in the text of HRM 3.5 has `4C` (that is `JMP $nnnn`) and
    does not have `$3A`, `$5C`, `$C2` and `$E2`. Table 2 shows these four as `NOP`.
+3. The text of HRM 3.5 lists `$9F` for `SAX`. Table 2 shows `$9F` as `SHA $nnnn,Y`.
 
 ### Hook types (`atari-core`, module `debug`)
 

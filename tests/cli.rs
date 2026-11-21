@@ -1,5 +1,6 @@
 //! End-to-end tests for the `atari-mac` binary.
 
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -1115,30 +1116,174 @@ fn planned() {
     panic!("planned test: a package replaces this stub with the real test");
 }
 
+/// The fields of a statistics line of REQ-083 criterion 1.
+#[derive(Debug)]
+struct StatsLine {
+    /// The frames since the start.
+    frame: u64,
+    /// The frames in the last second.
+    fps: f64,
+    /// The speed in percent.
+    speed: u64,
+    /// The frames that the window showed.
+    shown: u64,
+    /// The mean emulation time of a frame in ms.
+    emu: f64,
+    /// `on` or `off`.
+    turbo: String,
+    /// `on`, `off` or `-`.
+    motor: String,
+    /// The audio underruns.
+    underruns: u64,
+}
+
+/// The fields of a statistics line, or `None` when the line does not have the format of
+/// REQ-083 criterion 1.
+fn stats_fields(line: &str) -> Option<StatsLine> {
+    let words: Vec<&str> = line.split(' ').collect();
+    let [
+        "stats:",
+        "frame",
+        frame,
+        "fps",
+        fps,
+        "speed",
+        speed,
+        "shown",
+        shown,
+        "emu",
+        emu,
+        "ms",
+        "turbo",
+        turbo,
+        "motor",
+        motor,
+        "underruns",
+        underruns,
+    ] = words[..]
+    else {
+        return None;
+    };
+    let decimals = |text: &str, places: usize| {
+        text.split_once('.')
+            .is_some_and(|(_, fraction)| fraction.len() == places)
+    };
+    if !decimals(fps, 1) || !decimals(emu, 2) {
+        return None;
+    }
+    if !["on", "off"].contains(&turbo) || !["on", "off", "-"].contains(&motor) {
+        return None;
+    }
+    Some(StatsLine {
+        frame: frame.parse().ok()?,
+        fps: fps.parse().ok()?,
+        speed: speed.strip_suffix('%')?.parse().ok()?,
+        shown: shown.parse().ok()?,
+        emu: emu.parse().ok()?,
+        turbo: turbo.to_owned(),
+        motor: motor.to_owned(),
+        underruns: underruns.parse().ok()?,
+    })
+}
+
+/// The elapsed seconds of a run with `--frames`, from standard output
+/// (`<n> frames in <s> s (...)`).
+fn elapsed_seconds(output: &Output) -> f64 {
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    stdout
+        .split_once(" frames in ")
+        .and_then(|(_, rest)| rest.split_once(" s "))
+        .and_then(|(seconds, _)| seconds.parse().ok())
+        .unwrap_or_else(|| panic!("the elapsed time on standard output: {stdout}"))
+}
+
 /// Verifies REQ-083: `--headless --stats` with enough frames for more than 2 s of host time
 /// writes lines to standard error in the format of criterion 1, with `shown 0`,
 /// `underruns 0`, `turbo off` and `motor -`. The frame numbers increase, and the number of
 /// lines is the elapsed seconds of the run (from standard output), rounded down, or one
 /// less (criteria 1, 4 and 7).
 #[test]
-#[ignore = "planned: SLICE-09"]
 fn stats_headless_lines() {
-    planned();
+    // A debug build runs about 500 frames each second: 2400 frames take more than 2 s
+    // unless the host is much faster. The run doubles the frames until it takes 2 s.
+    let mut frames: u64 = 2400;
+    let (output, elapsed) = loop {
+        let output = run(&["--headless", "--stats", "--frames", &frames.to_string()]);
+        assert!(output.status.success(), "exit status: {}", stderr(&output));
+        let elapsed = elapsed_seconds(&output);
+        if elapsed > 2.0 {
+            break (output, elapsed);
+        }
+        frames *= 2;
+    };
+    let message = stderr(&output);
+    let lines: Vec<&str> = message.lines().collect();
+    let mut last_frame = 0;
+    for line in &lines {
+        let Some(StatsLine {
+            frame,
+            fps,
+            speed,
+            shown,
+            emu,
+            turbo,
+            motor,
+            underruns,
+        }) = stats_fields(line)
+        else {
+            panic!("the format of criterion 1: {line:?}");
+        };
+        assert!(
+            frame > last_frame && frame <= frames,
+            "the frame number increases: {line}"
+        );
+        last_frame = frame;
+        assert!(fps > 0.0, "frames ran: {line}");
+        assert!(speed > 0, "a speed: {line}");
+        assert!(emu > 0.0, "an emulation time: {line}");
+        assert_eq!(
+            (shown, turbo.as_str(), motor.as_str(), underruns),
+            (0, "off", "-", 0),
+            "headless, no tape: {line}"
+        );
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the elapsed seconds are positive and small"
+    )]
+    let seconds = elapsed.floor() as usize;
+    assert!(
+        lines.len() == seconds || lines.len() + 1 == seconds,
+        "{} lines in {elapsed} s: {message}",
+        lines.len()
+    );
 }
 
 /// Verifies REQ-083: a headless run without `--stats` writes no line that starts with
 /// `stats:` to standard error (criterion 8).
 #[test]
-#[ignore = "planned: SLICE-09"]
 fn no_stats_without_option() {
-    planned();
+    let output = run(&["--headless", "--frames", "600"]);
+    assert!(output.status.success(), "exit status: {}", stderr(&output));
+    assert!(
+        !stderr(&output)
+            .lines()
+            .any(|line| line.starts_with("stats:")),
+        "no statistics line: {}",
+        stderr(&output)
+    );
 }
 
 /// Verifies REQ-083: `--help` lists `--stats` (criterion 9).
 #[test]
-#[ignore = "planned: SLICE-09"]
 fn stats_help_lists_option() {
-    planned();
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("  --stats  "),
+        "--help lists --stats"
+    );
 }
 
 /// Verifies REQ-085: `--headless --log tape --cas` with the tape of `boot_tape_file` and
@@ -1154,25 +1299,76 @@ fn log_writes_tape_lines() {
 /// Verifies REQ-085: `--log tape,disk` and `--log sio:trace` give exit status 2 before the
 /// machine starts, and standard error names `disk` and `sio:trace` (criterion 4).
 #[test]
-#[ignore = "planned: SLICE-09"]
 fn log_rejects_unknown_category() {
-    planned();
+    for (value, item) in [("tape,disk", "disk"), ("sio:trace", "sio:trace")] {
+        let output = run(&["--headless", "--frames", "1", "--log", value]);
+        let message = stderr(&output);
+        assert_eq!(output.status.code(), Some(2), "--log {value}: {message}");
+        assert!(
+            message.contains(&format!("unknown --log category \"{item}\"")),
+            "--log {value}: the message names {item}: {message}"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "--log {value}: no frame ran: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
 }
 
 /// Verifies REQ-085: a headless run with a tape and a disk without `--log` writes no line
 /// that starts with `[frame` to standard error. `atari_mac::run` in the test process without
 /// `--log` leaves `log::max_level()` at `Off` (criterion 5).
 #[test]
-#[ignore = "planned: SLICE-09"]
 fn no_log_without_option() {
-    planned();
+    let tape = boot_tape_file("no_log_without_option");
+    let disk = tape.with_file_name("disk.atr");
+    fs::write(&disk, valid_atr()).expect("write the ATR file");
+    let tape = tape.to_str().expect("UTF-8 path");
+    let disk = disk.to_str().expect("UTF-8 path");
+    let args = [
+        "--headless",
+        "--frames",
+        "120",
+        "--cas",
+        tape,
+        "--disk",
+        disk,
+    ];
+    let output = run(&args);
+    assert!(output.status.success(), "exit status: {}", stderr(&output));
+    assert!(
+        !stderr(&output)
+            .lines()
+            .any(|line| line.starts_with("[frame")),
+        "no log line: {}",
+        stderr(&output)
+    );
+    let mut out = Vec::new();
+    let result = atari_mac::run(
+        ["--os", OS_ROM, "--basic", BASIC_ROM]
+            .into_iter()
+            .chain(args)
+            .map(OsString::from),
+        &mut out,
+    );
+    assert!(result.is_ok(), "run in the test process: {result:?}");
+    assert_eq!(
+        log::max_level(),
+        log::LevelFilter::Off,
+        "the level stays Off"
+    );
 }
 
 /// Verifies REQ-085: `--help` lists `--log <categories>` (criterion 6).
 #[test]
-#[ignore = "planned: SLICE-09"]
 fn log_help_lists_option() {
-    planned();
+    let output = run(&["--help"]);
+    assert!(output.status.success(), "--help exit status");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--log <categories>"),
+        "--help lists --log <categories>"
+    );
 }
 
 /// Verifies REQ-086: `InstructionLine` and `SequenceLine` of fixed events give the

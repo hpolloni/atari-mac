@@ -747,7 +747,7 @@ The window loop (`src/window.rs`, `emulate`), with `--stats`:
 
 1. `Shared` gets `shown: AtomicU64`. The window thread adds 1 after each
    `update_with_buffer` of a new frame that succeeds.
-2. `FrameAudio` gets `fn underruns(&self) -> u64`. `AudioSink::underruns` gives the count of
+2. `FrameAudio` gets `fn underruns(&self) -> u64`. `AudioSink::underrun_count` (the lint `same_name_method` rejects the name `underruns`) gives the count of
    its ring, or 0 without a stream. The fake devices of the tests give their own count.
 3. `emulate` makes the `Stats` at `start` (before the first step).
 4. For each step: `t0 = Instant::now()`, `Frontend::step`, `t1 = Instant::now()`. When

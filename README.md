@@ -22,11 +22,11 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
 | [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | in-progress | 8 | 0 | 0 | 0 |
-| [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | planned | 0 | 3 | 0 | 0 |
+| [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | planned | 2 | 1 | 0 | 0 |
 | [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 1 | 1 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
 
-All 288 requirements: 276 tested, 7 pending, 0 missing, 5 not a test requirement. Implemented: 227. Open items with the status `open`: 30.
+All 288 requirements: 278 tested, 5 pending, 0 missing, 5 not a test requirement. Implemented: 227. Open items with the status `open`: 30.
 
 <!-- END GENERATED: status -->
 
@@ -72,6 +72,8 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | `--bas <file>` | Type the BASIC program in a text file at the `Ready` prompt, then `RUN` it |
 | `--no-run` | With `--bas`: type the program, but do not `RUN` it |
 | `--headless`, `--frames <n>`, `--screenshot <file>` | Run without a window for `n` frames, and save the last frame as a PNG file |
+| `--stats` | Each second, write the speed statistics to standard error (frame rate, speed, emulation time, turbo, tape motor, audio underruns) |
+| `--log <categories>` | Write log records to standard error. Categories, separated by commas: `tape`, `sio`, `reset`, `media`, `frontend`, `all`; add `:debug` for more detail (for example `sio:debug`) |
 
 Keys: F1 inverse, F2 START, F3 SELECT, F4 OPTION, F5 RESET, F6 HELP, F7 BREAK, F9 pause,
 F10 cold reset, the arrow keys and the left Option key for joystick 1, Command+Escape quit.
