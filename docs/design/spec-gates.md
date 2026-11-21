@@ -16,7 +16,7 @@ The text below the frontmatter does not change, except that the metadata table i
 ---
 id: REQ-110
 title: Klaus Dormann functional test
-status: draft            # draft | accepted | withdrawn
+status: draft            # draft | accepted | implemented | withdrawn (REQ-057)
 priority: must           # must | should | could
 area: cpu                # product | frontend | test-harness | quality | cpu | system |
                          # antic | gtia | pokey | media
@@ -136,7 +136,7 @@ also on small synthetic files in a temporary directory, so that each failure rul
 | `references` | REQ-047, REQ-056: `REQ-`, `OI-`, `SLICE-` references and relative links, also in `README.md` |
 | `test_plans` | REQ-048: each requirement in exactly one test plan, with tests or evidence |
 | `trace` | REQ-027, REQ-049: test plan to code and code to test plan for all packages; a running test for `done` packages |
-| `slices` | REQ-050, REQ-054: each requirement in a package, package status |
+| `slices` | REQ-050, REQ-054: each requirement in a package, package status, the `implemented` status (REQ-057) |
 | `evidence` | REQ-051: evidence records for `done` packages |
 | `indexes` | REQ-053, REQ-056: the generated indexes and the README status block are up to date |
 | `readme` | REQ-056: `make` targets and command-line options that `README.md` names exist |
@@ -243,6 +243,7 @@ frontmatter. The converter is not committed. The migration commit must show that
 | REQ-054 | `spec_gates.rs` `slice_gate_rejects_bad_files` |
 | REQ-055 | `spec_gates.rs` `gates_run_within_10_seconds`; CI job `Specification` |
 | REQ-056 | `spec_gates.rs` `readme_status_block_is_current` (1-3), `readme_status_block_rejects_bad_markers` (1), `readme_links_and_ids_are_checked` (4), `readme_make_targets_exist` (5), `readme_options_exist` (6) |
+| REQ-057 | `spec_gates.rs` `status_follows_the_plan` (1-3), `readme_status_block_is_current` (4) |
 
 ## Open issues
 

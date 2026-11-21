@@ -68,7 +68,7 @@ These items are out of scope. A requirement must not depend on them.
 ---
 id: REQ-NNN
 title: <short title>
-status: draft            # draft | accepted | withdrawn
+status: draft            # draft | accepted | implemented | withdrawn (REQ-057)
 priority: must           # must | should | could
 area: <`area` value from the ID range table>
 source: HRM <section number> <section title>; <ID> <key> <title>   # or: Project decision

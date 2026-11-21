@@ -13,7 +13,7 @@ implements, the work packages, and the conditions that tell when it is done.
 | Slice | Goal | Status |
 | --- | --- | --- |
 | [SLICE-01](SLICE-01.md) | Boot to BASIC `READY` in a window, and type `PRINT 2+2` | Done |
-| [SLICE-02](SLICE-02.md) | Graphics modes, fine scrolling and player/missile graphics, with golden frame tests | Done |
+| [SLICE-02](SLICE-02.md) | Graphics modes, fine scrolling and player/missile graphics, with golden frame tests | In progress |
 | [SLICE-03](SLICE-03.md) | Sound: POKEY audio and the console speaker, at real-time speed | Planned |
 | [SLICE-04](SLICE-04.md) | Cartridges, executable files, joysticks and paddles | Planned |
 | [SLICE-05](SLICE-05.md) | Disk drive D1: with ATR images (needs SLICE-04) | Planned |
