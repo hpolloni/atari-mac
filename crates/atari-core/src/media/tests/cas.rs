@@ -4,7 +4,7 @@
 use crate::media::{MediaError, Tape, TapeBlock};
 
 /// One chunk: the 8-byte header (`kind`, the data length, `aux`) and `data`.
-fn chunk(kind: [u8; 4], aux: u16, data: &[u8]) -> Vec<u8> {
+pub(super) fn chunk(kind: [u8; 4], aux: u16, data: &[u8]) -> Vec<u8> {
     let mut bytes = kind.to_vec();
     let length = u16::try_from(data.len()).expect("chunk length");
     bytes.extend_from_slice(&length.to_le_bytes());
@@ -26,7 +26,7 @@ fn record_r() -> Vec<u8> {
 }
 
 /// The 201-byte test file T of REQ-639.
-fn file_t() -> Vec<u8> {
+pub(super) fn file_t() -> Vec<u8> {
     let mut file = chunk(*b"FUJI", 0, b"Test");
     file.extend(chunk(*b"baud", 600, &[]));
     file.extend(chunk(*b"data", 20_000, &record_r()));

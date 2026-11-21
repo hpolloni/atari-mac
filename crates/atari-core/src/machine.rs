@@ -23,7 +23,7 @@ use core::fmt;
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
 use crate::gtia::{ConsoleKeys, Gtia};
-use crate::media::{Cartridge, DiskImage, SioBus, Xex};
+use crate::media::{Cartridge, DiskImage, SioBus, Tape, Xex};
 use crate::pia::Pia;
 use crate::pokey::Pokey;
 use crate::state::StateError;
@@ -69,6 +69,8 @@ pub struct MachineConfig {
     pub disk: Option<DiskImage>,
     /// The SIOV shortcut (REQ-623) is on.
     pub fast_sio: bool,
+    /// The tape in the cassette deck, if any, at position 0 (REQ-641).
+    pub tape: Option<Tape>,
     /// The TV standard.
     pub standard: VideoStandard,
     /// The audio output sample rate in Hz.
@@ -351,6 +353,8 @@ pub struct Machine {
     sio: SioBus,
     /// The PIA CB2 level at the end of the last cycle, for the command line changes.
     cb2: bool,
+    /// The PIA CA2 level at the end of the last cycle, for the motor line changes.
+    ca2: bool,
     /// The SIOV shortcut is on (REQ-623). A setting of the frontend, not in the save state.
     fast_sio: bool,
     /// The console keys of the last [`Machine::set_console_keys`] (the frontend input).
@@ -402,6 +406,7 @@ impl Machine {
             pia: Pia::new(),
             sio: SioBus::new(config.standard),
             cb2: true,
+            ca2: true,
             fast_sio: config.fast_sio,
             console_keys: ConsoleKeys::default(),
             xex_option_until: None,
@@ -416,6 +421,9 @@ impl Machine {
         machine.sio.set_drive_connected(false);
         if let Some(image) = config.disk {
             machine.insert_disk(image);
+        }
+        if let Some(tape) = config.tape {
+            machine.insert_tape(tape);
         }
         machine.power_on();
         Ok(machine)
@@ -435,6 +443,11 @@ impl Machine {
         self.mem.portb = self.pia.port_b_pins();
         self.sio.reset();
         self.cb2 = self.pia.cb2();
+        // The motor stops with the PIA reset, and the tape goes back to the start (REQ-641
+        // criterion 5, OI-052). The cycle count of the old run ends here.
+        self.ca2 = self.pia.ca2();
+        self.sio.set_motor_line(!self.ca2, self.cycles);
+        self.sio.tape_deck_mut().rewind(1);
         if let Some(cart) = self.mem.cart.as_mut() {
             cart.cold_reset();
         }
@@ -505,7 +518,7 @@ impl Machine {
         self.antic.end_cycle(data);
         self.gtia.clock(&out, data);
         // 6. The PIA, then the bytes that POKEY sent go to the SIO bus, then the command
-        //    line.
+        //    line and the motor line.
         self.pia.tick();
         while let Some(byte) = self.pokey.take_serial_byte() {
             self.sio.host_byte(byte);
@@ -514,6 +527,11 @@ impl Machine {
         if cb2 != self.cb2 {
             self.cb2 = cb2;
             self.sio.set_command_line(!cb2, now);
+        }
+        let ca2 = self.pia.ca2();
+        if ca2 != self.ca2 {
+            self.ca2 = ca2;
+            self.sio.set_motor_line(!ca2, now);
         }
         // TRIG3 follows RD5 after each access that can switch the cartridge (REQ-232).
         self.update_trig3();
@@ -637,6 +655,35 @@ impl Machine {
         let mut keys = self.console_keys;
         keys.option |= self.xex_option_until.is_some();
         self.gtia.set_console_keys(keys);
+    }
+
+    /// Inserts `tape` in the cassette deck at position 0 (REQ-641). A tape in the deck is
+    /// replaced. The machine is not reset, and the motor line does not change.
+    pub fn insert_tape(&mut self, tape: Tape) {
+        let now = self.cycles + 1;
+        self.sio.tape_deck_mut().insert(tape, now);
+    }
+
+    /// Removes the tape from the cassette deck and gives it back. SIO DATA IN then has no
+    /// tape signal (REQ-641 criterion 6).
+    pub fn eject_tape(&mut self) -> Option<Tape> {
+        self.sio.tape_deck_mut().eject()
+    }
+
+    /// The tape position (REQ-641) in the next machine cycle: the tape time in machine
+    /// cycles that the motor played since the tape start. `None` with no tape.
+    #[must_use]
+    pub fn tape_position(&self) -> Option<u64> {
+        let deck = self.sio.tape_deck();
+        deck.tape().map(|_| deck.position(self.cycles + 1))
+    }
+
+    /// A tape is inserted and the motor line (PIA CA2) is low (REQ-641), for the turbo of
+    /// REQ-082.
+    #[must_use]
+    pub const fn tape_motor_on(&self) -> bool {
+        let deck = self.sio.tape_deck();
+        deck.tape().is_some() && deck.motor_on()
     }
 
     /// Turns the SIOV shortcut on or off (REQ-623).
@@ -824,6 +871,7 @@ mod tests {
             cartridge,
             disk: None,
             fast_sio: false,
+            tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,
         }

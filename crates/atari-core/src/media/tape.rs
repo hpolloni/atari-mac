@@ -4,6 +4,7 @@
 //! `baud`, `data` and `fsk ` (OI-048, option 2). All numbers are little-endian (CAS-FMT).
 
 use super::MediaError;
+use crate::state::{Reader, State, StateError, Writer};
 
 /// The size of a CAS chunk header: the type, the data length and the aux value.
 const CHUNK_HEADER: usize = 8;
@@ -152,6 +153,14 @@ impl Tape {
         })
     }
 
+    /// A tape with no blocks, which a save state load fills.
+    pub(super) const fn empty() -> Self {
+        Self {
+            description: String::new(),
+            blocks: Vec::new(),
+        }
+    }
+
     /// The text of the first `FUJI` chunk (UTF-8, lossy).
     #[must_use]
     pub fn description(&self) -> &str {
@@ -162,5 +171,92 @@ impl Tape {
     #[must_use]
     pub fn blocks(&self) -> &[TapeBlock] {
         &self.blocks
+    }
+}
+
+// An enum with data: the index of the variant as `u64`, then the data of the variant.
+impl TapeBlock {
+    /// Writes the block to a save state.
+    fn save(&self, w: &mut Writer) {
+        match self {
+            Self::Data {
+                gap_ms,
+                baud,
+                bytes,
+            } => {
+                0_usize.save(w);
+                gap_ms.save(w);
+                baud.save(w);
+                bytes.save(w);
+            }
+            Self::Signal { gap_ms, lengths } => {
+                1_usize.save(w);
+                gap_ms.save(w);
+                lengths.save(w);
+            }
+        }
+    }
+
+    /// Reads a block from a save state.
+    fn load(r: &mut Reader<'_>) -> Result<Self, StateError> {
+        let mut index = 0_usize;
+        index.load(r)?;
+        let mut gap_ms = 0_u16;
+        gap_ms.load(r)?;
+        match index {
+            0 => {
+                let mut baud = 0_u16;
+                let mut bytes = Vec::new();
+                baud.load(r)?;
+                bytes.load(r)?;
+                if baud == 0 {
+                    return Err(StateError::Invalid);
+                }
+                Ok(Self::Data {
+                    gap_ms,
+                    baud,
+                    bytes,
+                })
+            }
+            1 => {
+                let mut lengths = Vec::new();
+                lengths.load(r)?;
+                Ok(Self::Signal { gap_ms, lengths })
+            }
+            _ => Err(StateError::Invalid),
+        }
+    }
+}
+
+// The complete tape is in the save state: the frontend can insert another tape.
+impl State for Tape {
+    fn save(&self, w: &mut Writer) {
+        let Self {
+            description,
+            blocks,
+        } = self;
+        description.save(w);
+        blocks.len().save(w);
+        for block in blocks {
+            block.save(w);
+        }
+    }
+
+    fn load(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        let Self {
+            description,
+            blocks,
+        } = self;
+        description.load(r)?;
+        let mut count = 0_usize;
+        count.load(r)?;
+        if count == 0 {
+            return Err(StateError::Invalid);
+        }
+        blocks.clear();
+        for _ in 0..count {
+            blocks.push(TapeBlock::load(r)?);
+        }
+        Ok(())
     }
 }

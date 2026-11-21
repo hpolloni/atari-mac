@@ -117,6 +117,7 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
         cartridge,
         disk,
         fast_sio: false,
+        tape: None,
         standard: options.standard,
         audio_sample_rate: sample_rate,
     })
@@ -621,6 +622,7 @@ mod tests {
             cartridge: None,
             disk: None,
             fast_sio: false,
+            tape: None,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,
         })

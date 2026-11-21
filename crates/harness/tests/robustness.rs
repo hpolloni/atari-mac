@@ -63,6 +63,7 @@ fn machine(cartridge: Option<Cartridge>, standard: VideoStandard) -> Result<Mach
         cartridge,
         disk: None,
         fast_sio: false,
+        tape: None,
         standard,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })?)

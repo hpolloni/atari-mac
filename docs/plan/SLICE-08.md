@@ -10,7 +10,7 @@ packages:
     requirements: [REQ-639, REQ-640]
   - id: WP-2
     title: Tape deck, motor and signal
-    status: planned
+    status: done
     requirements: [REQ-641, REQ-642, REQ-227]
   - id: WP-3
     title: Tape boot and the --cas option

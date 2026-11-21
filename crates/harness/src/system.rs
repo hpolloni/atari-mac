@@ -50,6 +50,7 @@ pub fn boot(options: BootOptions) -> Result<Machine, HarnessError> {
         cartridge: None,
         disk: None,
         fast_sio: false,
+        tape: None,
         standard: options.standard,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })?)
@@ -128,6 +129,7 @@ pub fn boot_program(program: &[u8], options: BootOptions) -> Result<Machine, Har
         cartridge: None,
         disk: None,
         fast_sio: false,
+        tape: None,
         standard: options.standard,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })?)

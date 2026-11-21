@@ -166,6 +166,20 @@ impl State for usize {
     }
 }
 
+// A text as its UTF-8 bytes, in the format of `Vec<u8>` (the description of a tape).
+impl State for String {
+    fn save(&self, w: &mut Writer) {
+        w.put_len(self.len());
+        w.put(self.as_bytes());
+    }
+    fn load(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        let mut bytes = Vec::<u8>::new();
+        bytes.load(r)?;
+        *self = Self::from_utf8(bytes).map_err(|_bad| StateError::Invalid)?;
+        Ok(())
+    }
+}
+
 impl<T: State, const N: usize> State for [T; N] {
     fn save(&self, w: &mut Writer) {
         for item in self {
