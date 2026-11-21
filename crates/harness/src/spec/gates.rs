@@ -9,7 +9,7 @@ use std::process::Command;
 use super::load::REFERENCE_DIR;
 use super::{
     CodeTest, ItemStatus, OPEN_ITEM_INDEX, Outcome, Priority, REQUIREMENT_INDEX, Requirement,
-    Section, SliceStatus, Spec, Storage, Verification, Violation, readme, report, text,
+    Section, SliceStatus, Spec, Status, Storage, Verification, Violation, readme, report, text,
 };
 use crate::sha256;
 
@@ -704,11 +704,12 @@ fn trace_requirement(spec: &Spec, r: &Requirement) -> Vec<Violation> {
     out
 }
 
-/// REQ-050 and REQ-054: the slices and their packages.
+/// REQ-050, REQ-054 and REQ-057: the slices and their packages.
 ///
 /// Each requirement that is not withdrawn is in a package, each planned requirement exists
-/// and is in at most one package, a `done` slice has only `done` packages, and
-/// `product_complete: true` needs each `must` requirement in a `done` package.
+/// and is in at most one package, a `done` slice has only `done` packages,
+/// `product_complete: true` needs each `must` requirement in a `done` package, and the
+/// status `implemented` agrees with the `done` packages.
 #[must_use]
 pub fn slices(spec: &Spec) -> Vec<Violation> {
     let mut out = problems(spec, &[50]);
@@ -751,6 +752,7 @@ pub fn slices(spec: &Spec) -> Vec<Violation> {
             let message = format!("{} is in no slice", req(r.id));
             out.push(Violation::new(50, &r.path, None, message));
         }
+        out.extend(implemented(spec, r));
     }
     if spec.product_complete {
         for r in spec
@@ -780,6 +782,30 @@ pub fn slices(spec: &Spec) -> Vec<Violation> {
         }
     }
     out
+}
+
+/// REQ-057: a requirement that is not withdrawn has the status `implemented` when, and only
+/// when, its package or its slice is `done`.
+fn implemented(spec: &Spec, r: &Requirement) -> Option<Violation> {
+    let id = req(r.id);
+    let is_implemented = r.status == Status::Implemented;
+    let message = match spec.planned(r.id) {
+        Some((slice, package)) if spec.done(r.id) && !is_implemented => format!(
+            "{id} is in SLICE-{:02} {}, which is done, but its status is `{}`, not `implemented`",
+            slice.id,
+            package.id,
+            r.status.as_str()
+        ),
+        Some((slice, package)) if !spec.done(r.id) && is_implemented => format!(
+            "{id} has the status `implemented`, but SLICE-{:02} {} is not done",
+            slice.id, package.id
+        ),
+        None if is_implemented => {
+            format!("{id} has the status `implemented`, but it is in no package")
+        }
+        Some(_) | None => return None,
+    };
+    Some(Violation::new(57, &r.path, None, message))
 }
 
 /// REQ-051: the evidence records are valid, and each `inspection` or `demonstration`

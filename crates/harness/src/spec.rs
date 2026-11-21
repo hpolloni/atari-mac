@@ -1,4 +1,4 @@
-//! Specification gates and two-way traceability (REQ-027, REQ-043 to REQ-056).
+//! Specification gates and two-way traceability (REQ-027, REQ-043 to REQ-057).
 //!
 //! Design: `docs/design/spec-gates.md`. [`load()`] reads the requirements, the open items, the
 //! slices, the evidence records, the test plans of the design documents and the tests in
@@ -83,6 +83,8 @@ keyword_enum! {
         Draft = "draft",
         /// Accepted.
         Accepted = "accepted",
+        /// Implemented: the package or the slice of the requirement is `done` (REQ-057).
+        Implemented = "implemented",
         /// Removed. The file stays, because IDs never change.
         Withdrawn = "withdrawn",
     }
@@ -684,4 +686,4 @@ impl Baseline {
 }
 
 /// The rules that the gates check.
-pub const RULES: &[u16] = &[27, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 56];
+pub const RULES: &[u16] = &[27, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 56, 57];

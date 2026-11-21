@@ -1,4 +1,4 @@
-//! Specification gates (`docs/design/spec-gates.md`, REQ-043 to REQ-056).
+//! Specification gates (`docs/design/spec-gates.md`, REQ-043 to REQ-057).
 //!
 //! Each gate runs on the real repository, where only the violations of
 //! `docs/spec/gate-baseline.txt` are permitted, and on a small synthetic repository in a
@@ -17,7 +17,7 @@ mod gates {
     use atari_harness::data::repo_root;
     use atari_harness::spec::{
         self, Baseline, MATRIX, OPEN_ITEM_INDEX, README, REQUIREMENT_INDEX, RULES, STATUS_BEGIN,
-        STATUS_END, Spec, SpecError, Storage, Violation,
+        STATUS_END, Spec, SpecError, Status, Storage, Violation,
     };
 
     /// A gate as a function of the specification and the repository root.
@@ -53,10 +53,16 @@ mod gates {
     }
 
     /// The text of a requirement file of the fixture.
-    fn requirement(id: u16, verification: &str, source: &str, depends_on: &str) -> String {
+    fn requirement(
+        id: u16,
+        status: &str,
+        verification: &str,
+        source: &str,
+        depends_on: &str,
+    ) -> String {
         let id = req(id);
         format!(
-            "---\nid: {id}\ntitle: Title of {id}\nstatus: draft\npriority: must\narea: product\n\
+            "---\nid: {id}\ntitle: Title of {id}\nstatus: {status}\npriority: must\narea: product\n\
              source: {source}\nverification: {verification}\ndepends_on: [{depends_on}]\n---\n\
              # {id}: Title of {id}\n\n## Requirement\n\nThe emulator shall do one thing.\n\n\
              ## Rationale\n\nA reason.\n\n## Acceptance criteria\n\n1. A test checks the value \
@@ -88,8 +94,8 @@ mod gates {
     }
 
     impl Fixture {
-        /// A repository that passes all gates: three requirements, one open item, one slice
-        /// with one `done` package, one evidence record, one design document, one test file,
+        /// A repository that passes all gates: three requirements (the two of the `done`
+        /// package are `implemented`), one open item, one slice with one `done` package, one evidence record, one design document, one test file,
         /// a README with a status block, a Makefile and the help text in `src/cli.rs`.
         fn new() -> Self {
             let number = FIXTURES.fetch_add(1, Ordering::Relaxed);
@@ -119,16 +125,23 @@ mod gates {
             self.write_registry();
             self.write(
                 &format!("docs/spec/requirements/{one}.md"),
-                &requirement(1, "test", "HRM 3.3 Cycle timing (Clock speed)", ""),
+                &requirement(
+                    1,
+                    "implemented",
+                    "test",
+                    "HRM 3.3 Cycle timing (Clock speed)",
+                    "",
+                ),
             );
             self.write(
                 &format!("docs/spec/requirements/{two}.md"),
-                &requirement(2, "inspection", "Project decision", &one),
+                &requirement(2, "implemented", "inspection", "Project decision", &one),
             );
             self.write(
                 &format!("docs/spec/requirements/{three}.md"),
                 &requirement(
                     3,
+                    "draft",
                     "test",
                     "HRM 1.1 Introduction; HRM 3.3 Cycle timing; DEMO",
                     "",
@@ -384,7 +397,7 @@ mod gates {
             f.replace(&one, "priority: must\n", "priority: must\nowner: lead\n");
         });
         rejects(schema, 43, "`status` is `done`, not one of", |f| {
-            f.replace(&one, "status: draft", "status: done");
+            f.replace(&one, "status: implemented", "status: done");
         });
         rejects(schema, 43, "`priority` is `high`", |f| {
             f.replace(&one, "priority: must", "priority: high");
@@ -441,7 +454,7 @@ mod gates {
             f.replace(&one, "title: Title of", "title: [Title]\nx: Title of");
         });
         let fixture = Fixture::new();
-        fixture.replace(&one, "status: draft", "status: [draft");
+        fixture.replace(&one, "status: implemented", "status: [implemented");
         let error = spec::load(&fixture.root).unwrap_err();
         assert!(
             matches!(&error, SpecError::Yaml { path, line, .. }
@@ -480,7 +493,7 @@ mod gates {
             f.replace(&one, "## Notes", "## Extra\n\nText.\n\n## Notes");
         });
         let fixture = Fixture::new();
-        fixture.replace(&one, "status: draft", "status: withdrawn");
+        fixture.replace(&one, "status: implemented", "status: withdrawn");
         fixture.replace(&one, "## Rationale\n\nA reason.\n\n", "");
         assert!(
             fixture.run(structure).is_empty(),
@@ -1430,7 +1443,11 @@ mod gates {
             report.contains("Violations: 0 new, 0 in the baseline."),
             "counts: {report}"
         );
-        fixture.replace(&Fixture::req_file(1), "status: draft", "status: withdrawn");
+        fixture.replace(
+            &Fixture::req_file(1),
+            "status: implemented",
+            "status: withdrawn",
+        );
         let spec = fixture.spec();
         let violations = spec::check(&spec, &fixture.root);
         let baseline = Baseline::parse(&violations.first().unwrap().key());
@@ -1605,9 +1622,10 @@ mod gates {
         fs::read_to_string(fixture.root.join(README)).unwrap()
     }
 
-    /// Verifies REQ-056: the README of the repository has one status block with a row for each
-    /// slice file, `spec-index` writes the block and keeps the text outside it, and the
-    /// `indexes` gate fails when the block differs from a new generation.
+    /// Verifies REQ-056, REQ-057: the README of the repository has one status block with a row
+    /// for each slice file, `spec-index` writes the block and keeps the text outside it, the
+    /// `indexes` gate fails when the block differs from a new generation, and the block gives
+    /// the number of requirements with the status `implemented` (REQ-057 criterion 4).
     #[test]
     fn readme_status_block_is_current() {
         let root = repo_root();
@@ -1654,7 +1672,7 @@ mod gates {
         assert!(
             text.contains(
                 "All 3 requirements: 1 tested, 1 pending, 0 missing, 1 not a test requirement. \
-                 Open items with the status `open`: 1."
+                 Implemented: 2. Open items with the status `open`: 1."
             ),
             "the counts of the matrix:\n{text}"
         );
@@ -1704,6 +1722,100 @@ mod gates {
         let _counts = spec::generate(&fixture.root).unwrap();
         assert!(readme_of(&fixture).contains("| New slice |"));
         assert!(fixture.all().is_empty(), "all gates pass");
+
+        assert_implemented_count(&spec, &block, &fixture);
+    }
+
+    /// REQ-057 criterion 4: the status block of the repository and of the fixture gives the
+    /// number of requirements with the status `implemented`.
+    #[track_caller]
+    fn assert_implemented_count(spec: &Spec, block: &str, fixture: &Fixture) {
+        fixture.replace(
+            &Fixture::req_file(2),
+            "status: implemented",
+            "status: withdrawn",
+        );
+        let _counts = spec::generate(&fixture.root).unwrap();
+        assert!(
+            readme_of(fixture).contains("Implemented: 1. Open items"),
+            "the count follows the status `implemented`"
+        );
+        let implemented = spec
+            .requirements
+            .iter()
+            .filter(|r| r.status == Status::Implemented)
+            .count();
+        assert!(
+            block.contains(&format!("Implemented: {implemented}. Open items")),
+            "the README of the repository gives the number of implemented requirements"
+        );
+    }
+
+    /// Verifies REQ-057: a requirement in a `done` package or slice without the status
+    /// `implemented` fails (criterion 1), a requirement with the status `implemented` in no
+    /// package or in a package that is not `done` fails (criterion 2), and a withdrawn
+    /// requirement makes no failure of these rules (criterion 3).
+    #[test]
+    fn status_follows_the_plan() {
+        fixture_passes();
+        let slice = "docs/plan/SLICE-01.md";
+        let (one, two, three) = (req(1), req(2), req(3));
+        let one_file = Fixture::req_file(1);
+        let three_file = Fixture::req_file(3);
+        for status in ["draft", "accepted"] {
+            let needle = format!(
+                "{one} is in SLICE-01 WP-1, which is done, but its status is `{status}`, not \
+                 `implemented`"
+            );
+            rejects(slice_rules, 57, &needle, |f| {
+                f.replace(
+                    &one_file,
+                    "status: implemented",
+                    &format!("status: {status}"),
+                );
+            });
+        }
+        let in_done_slice = format!(
+            "{three} is in SLICE-01 WP-2, which is done, but its status is `draft`, not \
+             `implemented`"
+        );
+        rejects(slice_rules, 57, &in_done_slice, |f| {
+            f.replace(slice, "status: in-progress", "status: done");
+        });
+        let not_done =
+            format!("{three} has the status `implemented`, but SLICE-01 WP-2 is not done");
+        rejects(slice_rules, 57, &not_done, |f| {
+            f.replace(&three_file, "status: draft", "status: implemented");
+        });
+        let package_not_done =
+            format!("{one} has the status `implemented`, but SLICE-01 WP-1 is not done");
+        rejects(slice_rules, 57, &package_not_done, |f| {
+            f.replace(
+                slice,
+                "    title: Work\n    status: done",
+                "    title: Work\n    status: in-progress",
+            );
+        });
+        let unplanned = format!("{one} has the status `implemented`, but it is in no package");
+        rejects(slice_rules, 57, &unplanned, |f| {
+            f.replace(slice, &format!("[{one}, {two}]"), &format!("[{two}]"));
+        });
+
+        let fixture = Fixture::new();
+        fixture.replace(&one_file, "status: implemented", "status: withdrawn");
+        fixture.replace(&three_file, "status: draft", "status: withdrawn");
+        fixture.replace(slice, "status: in-progress", "status: done");
+        fixture.replace(slice, "    status: planned", "    status: done");
+        assert_not_reported(&fixture.run(slice_rules), 57, "");
+        let fixture = Fixture::new();
+        fixture.replace(&one_file, "status: implemented", "status: withdrawn");
+        fixture.replace(slice, &format!("[{one}, {two}]"), &format!("[{two}]"));
+        assert_not_reported(&fixture.run(slice_rules), 57, "");
+        let fixture = Fixture::new();
+        fixture.replace(&three_file, "status: draft", "status: implemented");
+        fixture.replace(slice, "status: in-progress", "status: done");
+        fixture.replace(slice, "    status: planned", "    status: done");
+        assert_not_reported(&fixture.run(slice_rules), 57, "");
     }
 
     /// Verifies REQ-056: a missing, duplicated or unclosed status marker fails the `indexes`
