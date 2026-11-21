@@ -73,6 +73,8 @@ fn screen_text_has_24_rows_of_40() {
         os_rom: test_os_rom(&[]),
         basic_rom: None,
         cartridge: None,
+        disk: None,
+        fast_sio: false,
         standard: VideoStandard::Ntsc,
         audio_sample_rate: system::TEST_SAMPLE_RATE,
     })

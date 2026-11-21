@@ -48,6 +48,8 @@ pub fn boot(options: BootOptions) -> Result<Machine, HarnessError> {
         os_rom: data::os_rom()?,
         basic_rom,
         cartridge: None,
+        disk: None,
+        fast_sio: false,
         standard: options.standard,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })?)
@@ -124,6 +126,8 @@ pub fn boot_program(program: &[u8], options: BootOptions) -> Result<Machine, Har
         os_rom: test_os_rom(program),
         basic_rom,
         cartridge: None,
+        disk: None,
+        fast_sio: false,
         standard: options.standard,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })?)

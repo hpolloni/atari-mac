@@ -23,7 +23,7 @@ use core::fmt;
 use crate::antic::{Antic, CycleOutput, DmaKind, DmaMemory};
 use crate::cpu::{Bus, Cpu};
 use crate::gtia::{ConsoleKeys, Gtia};
-use crate::media::{Cartridge, SioBus};
+use crate::media::{Cartridge, DiskImage, SioBus};
 use crate::pia::Pia;
 use crate::pokey::Pokey;
 use crate::state::StateError;
@@ -51,6 +51,11 @@ pub struct MachineConfig {
     pub basic_rom: Option<Vec<u8>>,
     /// The cartridge in the slot, if any.
     pub cartridge: Option<Cartridge>,
+    /// The disk image in drive D1:, if any. With `None`, D1: is not on the SIO bus until
+    /// [`Machine::insert_disk`] (`docs/design/media.md`, "Machine configuration").
+    pub disk: Option<DiskImage>,
+    /// The SIOV shortcut (REQ-623) is on.
+    pub fast_sio: bool,
     /// The TV standard.
     pub standard: VideoStandard,
     /// The audio output sample rate in Hz.
@@ -333,6 +338,8 @@ pub struct Machine {
     sio: SioBus,
     /// The PIA CB2 level at the end of the last cycle, for the command line changes.
     cb2: bool,
+    /// The SIOV shortcut is on (REQ-623). A setting of the frontend, not in the save state.
+    fast_sio: bool,
     /// The TV standard.
     standard: VideoStandard,
     /// The last value on the data bus (the floating bus value for an idle cycle).
@@ -377,6 +384,7 @@ impl Machine {
             pia: Pia::new(),
             sio: SioBus::new(config.standard),
             cb2: true,
+            fast_sio: config.fast_sio,
             standard: config.standard,
             data_bus: 0xFF,
             cycles: 0,
@@ -386,6 +394,9 @@ impl Machine {
         };
         // With no disk, D1: is not on the bus (the OS boot then sees no drive).
         machine.sio.set_drive_connected(false);
+        if let Some(image) = config.disk {
+            machine.insert_disk(image);
+        }
         machine.power_on();
         Ok(machine)
     }
@@ -449,6 +460,10 @@ impl Machine {
                 data = out.dma_data;
             }
         } else {
+            // The SIOV shortcut, before the opcode fetch at SIOV (REQ-623).
+            if self.fast_sio && self.cpu.at_opcode_fetch() {
+                siov::shortcut(self);
+            }
             let mut bus = CpuBus {
                 mem: &mut self.mem,
                 antic: &mut self.antic,
@@ -544,6 +559,36 @@ impl Machine {
     /// with [`SioBus::send_device_byte`].
     pub const fn sio_mut(&mut self) -> &mut SioBus {
         &mut self.sio
+    }
+
+    /// Inserts `image` in drive D1: and connects D1: to the SIO bus. An image in D1: is
+    /// replaced. The machine is not reset.
+    pub fn insert_disk(&mut self, image: DiskImage) {
+        self.sio.drive_mut().insert(image);
+        self.sio.set_drive_connected(true);
+    }
+
+    /// Removes the image from D1: and gives it back. The empty drive stays on the bus
+    /// (REQ-633).
+    pub const fn eject_disk(&mut self) -> Option<DiskImage> {
+        self.sio.drive_mut().eject()
+    }
+
+    /// The image in D1:, with all writes and formats (REQ-637).
+    #[must_use]
+    pub const fn disk(&self) -> Option<&DiskImage> {
+        self.sio.drive().image()
+    }
+
+    /// Turns the SIOV shortcut on or off (REQ-623).
+    pub const fn set_fast_sio(&mut self, on: bool) {
+        self.fast_sio = on;
+    }
+
+    /// The SIOV shortcut is on (REQ-623).
+    #[must_use]
+    pub const fn fast_sio(&self) -> bool {
+        self.fast_sio
     }
 
     /// The CPU (for debuggers and tests).
@@ -665,6 +710,7 @@ impl Machine {
 }
 
 mod save;
+mod siov;
 
 #[cfg(test)]
 mod tests {
@@ -716,6 +762,8 @@ mod tests {
             os_rom,
             basic_rom: Some(vec![0xBB; super::BASIC_ROM_SIZE]),
             cartridge,
+            disk: None,
+            fast_sio: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: 48_000,
         }

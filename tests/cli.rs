@@ -77,6 +77,8 @@ fn headless_writes_screenshot() {
         os_rom: fs::read(OS_ROM).expect("OS ROM"),
         basic_rom: Some(fs::read(BASIC_ROM).expect("BASIC ROM")),
         cartridge: None,
+        disk: None,
+        fast_sio: false,
         standard: VideoStandard::Ntsc,
         audio_sample_rate: 48_000,
     })
@@ -151,8 +153,9 @@ fn loads_media() {
     }
 }
 
-/// A 100-byte cartridge gives a message that names the file and exit status 2. `--xex`
-/// and `--disk` are not supported yet and also exit with status 2.
+/// A 100-byte cartridge gives a message that names the file and exit status 2. `--xex` is
+/// not supported yet and also exits with status 2. A missing `--disk` file gives a message
+/// that names the file and exit status 2.
 #[test]
 fn rejects_bad_media() {
     let bad = temp_dir("rejects_bad_media").join("bad.car");
@@ -166,15 +169,27 @@ fn rejects_bad_media() {
     ]);
     assert_eq!(output.status.code(), Some(2), "100-byte cartridge");
     assert!(stderr(&output).contains("bad.car"), "{}", stderr(&output));
-    for option in ["--xex", "--disk"] {
-        let output = run(&["--headless", "--frames", "1", option, "x"]);
-        assert_eq!(output.status.code(), Some(2), "{option}");
-        assert!(
-            stderr(&output).contains("not supported yet"),
-            "{option}: {}",
-            stderr(&output)
-        );
-    }
+    let output = run(&["--headless", "--frames", "1", "--xex", "x"]);
+    assert_eq!(output.status.code(), Some(2), "--xex");
+    assert!(
+        stderr(&output).contains("not supported yet"),
+        "--xex: {}",
+        stderr(&output)
+    );
+    let missing = temp_dir("rejects_bad_media").join("missing.atr");
+    let output = run(&[
+        "--headless",
+        "--frames",
+        "1",
+        "--disk",
+        missing.to_str().expect("path"),
+    ]);
+    assert_eq!(output.status.code(), Some(2), "--disk with a missing file");
+    assert!(
+        stderr(&output).contains("missing.atr"),
+        "--disk: {}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -239,8 +254,8 @@ fn valid_atr() -> Vec<u8> {
 /// cartridge (`--cart`), a valid executable (`--xex`) and a valid ATR image (`--disk`)
 /// (criterion 1).
 ///
-/// Ignored until `--xex` (SLICE-04 WP-1) and `--disk` (the ATR loader of REQ-625, SLICE-05)
-/// exist.
+/// Ignored until `--xex` exists (`Machine::start_xex`, SLICE-05 WP-3). The `--cart` and
+/// `--disk` parts pass.
 #[test]
 #[ignore = "planned: SLICE-05"]
 fn loads_cart_xex_and_disk() {
@@ -271,8 +286,8 @@ fn loads_cart_xex_and_disk() {
 /// Verifies REQ-012: with a 100-byte file, each of `--cart`, `--xex` and `--disk` writes a
 /// message that names the file to standard error and exits with status 2 (criterion 2).
 ///
-/// Ignored until `--xex` (SLICE-04 WP-1) and `--disk` (the ATR loader of REQ-625, SLICE-05)
-/// exist.
+/// Ignored until `--xex` exists (`Machine::start_xex`, SLICE-05 WP-3). The `--cart` and
+/// `--disk` parts pass.
 #[test]
 #[ignore = "planned: SLICE-05"]
 fn rejects_bad_cart_xex_and_disk() {
@@ -378,6 +393,8 @@ fn frame_after_240(standard: VideoStandard) -> Vec<u8> {
         os_rom: fs::read(OS_ROM).expect("OS ROM"),
         basic_rom: Some(fs::read(BASIC_ROM).expect("BASIC ROM")),
         cartridge: None,
+        disk: None,
+        fast_sio: false,
         standard,
         audio_sample_rate: 48_000,
     })

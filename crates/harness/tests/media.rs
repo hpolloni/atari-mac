@@ -36,6 +36,8 @@ mod cartridges {
             os_rom: test_os_rom(&program),
             basic_rom: Some(vec![0xBB; 0x2000]),
             cartridge,
+            disk: None,
+            fast_sio: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })
@@ -488,6 +490,8 @@ mod xex_loader {
             os_rom: os_rom(),
             basic_rom: None,
             cartridge: None,
+            disk: None,
+            fast_sio: false,
             standard: VideoStandard::Ntsc,
             audio_sample_rate: TEST_SAMPLE_RATE,
         })
@@ -693,82 +697,391 @@ mod planned_executables {
     }
 }
 
-/// Planned disk system tests (`docs/design/media.md`, "System test method for disks and
-/// executables").
+/// Disk system tests (`docs/design/media.md`, "System test method for disks and
+/// executables"): `AltirraOS` and the BASIC ROM boot an ATR image from D1:, with the SIOV
+/// shortcut off or on, and the test waits for a marker byte that the boot code writes.
 #[cfg(test)]
-mod planned_disks {
-    use super::planned;
+mod disks {
+    use std::path::Path;
+
+    use atari_core::media::DiskImage;
+    use atari_core::{Machine, MachineConfig, VideoStandard};
+    use atari_harness::HarnessError;
+    use atari_harness::data::{FETCH_ROMS, basic_rom, os_rom, read_test_file};
+    use atari_harness::system::{TEST_SAMPLE_RATE, run_until};
+
+    /// The marker address of the boot code.
+    const MARKER: u16 = 0x0600;
+    /// The marker value.
+    const DONE: u8 = 0xA5;
+    /// The SIOV test program stores Y here (REQ-623).
+    const RESULT_Y: u16 = 0x0680;
+    /// The SIOV test program stores the processor status here (REQ-623).
+    const RESULT_P: u16 = 0x0681;
+    /// `DSTATS`.
+    const DSTATS: u16 = 0x0303;
+    /// The buffer of the SIOV test requests.
+    const BUFFER: u16 = 0x4000;
+    /// The frame limit of the SIOV tests (REQ-623).
+    const SIOV_FRAMES: u32 = 600;
+    /// The user-supplied Atari XL/XE OS ROM of REQ-623 criterion 7 (not in git).
+    const XL_OS_ROM: &str = "roms/atari-xl-os.rom";
+
+    /// An ATR file with the sectors `sectors` (sector 1 first). Sectors 1-3 have 128 bytes,
+    /// the others `sector_size` bytes.
+    fn atr(sector_size: u16, sectors: &[Vec<u8>]) -> Vec<u8> {
+        let data: Vec<u8> = sectors.iter().flatten().copied().collect();
+        let paragraphs = u16::try_from(data.len() / 16).unwrap();
+        let mut file = vec![0x96, 0x02];
+        file.extend(paragraphs.to_le_bytes());
+        file.extend(sector_size.to_le_bytes());
+        file.extend([0; 10]);
+        file.extend(data);
+        file
+    }
+
+    /// Sector 1 of a boot image: the boot header `00 count 00 07 00 07` and `code` at
+    /// offset 6, then `$00` bytes.
+    fn boot_sector(count: u8, code: &[u8]) -> Vec<u8> {
+        let mut sector = vec![0x00, count, 0x00, 0x07, 0x00, 0x07];
+        sector.extend(code);
+        assert!(sector.len() <= 128, "the boot code fits in sector 1");
+        sector.resize(128, 0);
+        sector
+    }
+
+    /// The SD boot image of REQ-636 criterion 1: 1 boot sector with `LDA #$A5`,
+    /// `STA $0600`, `JMP $070B`; the other sectors hold `$00`.
+    fn sd_boot_image() -> DiskImage {
+        let mut sectors = vec![boot_sector(
+            1,
+            &[0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x4C, 0x0B, 0x07],
+        )];
+        sectors.resize(720, vec![0; 128]);
+        DiskImage::from_atr(&atr(128, &sectors)).unwrap()
+    }
+
+    /// The DD boot image of REQ-636 criterion 4: 3 boot sectors, `JMP $0800` in sector 1,
+    /// and `LDA #$A5`, `STA $0600`, `JMP $0805` at the start of sector 3.
+    fn dd_boot_image() -> DiskImage {
+        let mut sectors = vec![boot_sector(3, &[0x4C, 0x00, 0x08]), vec![0; 128]];
+        let mut third = vec![0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x4C, 0x05, 0x08];
+        third.resize(128, 0);
+        sectors.push(third);
+        sectors.resize(720, vec![0; 256]);
+        let image = DiskImage::from_atr(&atr(256, &sectors)).unwrap();
+        assert_eq!(image.geometry().sector_size, 256, "a DD image");
+        image
+    }
+
+    /// The SD test image of REQ-619 (each byte of sector `n` holds `n & $FF`) with the boot
+    /// header and `code` in sector 1 (REQ-623).
+    fn siov_image(code: &[u8]) -> DiskImage {
+        let mut sectors = vec![boot_sector(1, code)];
+        for n in 2..=720_u16 {
+            let [low, _] = n.to_le_bytes();
+            sectors.push(vec![low; 128]);
+        }
+        DiskImage::from_atr(&atr(128, &sectors)).unwrap()
+    }
+
+    /// A machine with `os`, the BASIC ROM and no cartridge, `disk` in D1: and the SIOV
+    /// shortcut `fast_sio`, after power-on.
+    fn machine_with(
+        os: Vec<u8>,
+        disk: DiskImage,
+        standard: VideoStandard,
+        fast_sio: bool,
+    ) -> Machine {
+        Machine::new(MachineConfig {
+            os_rom: os,
+            basic_rom: Some(basic_rom().unwrap()),
+            cartridge: None,
+            disk: Some(disk),
+            fast_sio,
+            standard,
+            audio_sample_rate: TEST_SAMPLE_RATE,
+        })
+        .unwrap()
+    }
+
+    /// [`machine_with`] with `AltirraOS`.
+    fn machine(disk: DiskImage, standard: VideoStandard, fast_sio: bool) -> Machine {
+        machine_with(os_rom().unwrap(), disk, standard, fast_sio)
+    }
+
+    /// The frames from the cold reset until `$0600` holds `$A5`, at most `max_frames`.
+    fn boot_frames(machine: &mut Machine, max_frames: u32) -> Option<u32> {
+        run_until(machine, max_frames, |m| m.peek_ram(MARKER) == DONE)
+    }
+
+    /// `LDA #value`, `STA addr`.
+    fn store(addr: u16, value: u8) -> Vec<u8> {
+        let [lo, hi] = addr.to_le_bytes();
+        vec![0xA9, value, 0x8D, lo, hi]
+    }
+
+    /// A device control block of the SIOV test program: buffer `$4000`, `DTIMLO` = 7 and
+    /// `DBYT` = 128 (REQ-623).
+    #[derive(Clone, Copy)]
+    struct Dcb {
+        /// `DDEVIC`.
+        device: u8,
+        /// `DUNIT`.
+        unit: u8,
+        /// `DCOMND`.
+        command: u8,
+        /// `DSTATS` (the direction).
+        stats: u8,
+        /// `DAUX1` (`DAUX2` is 0).
+        aux: u8,
+    }
+
+    /// A Read of sector `aux` from D1: into `$4000`.
+    const fn read_sector(aux: u8) -> Dcb {
+        Dcb {
+            device: 0x31,
+            unit: 0x01,
+            command: 0x52,
+            stats: 0x40,
+            aux,
+        }
+    }
+
+    /// The SIOV test program of REQ-623: `prefix`, then it fills the device control block,
+    /// executes `JSR $E459`, stores Y at `$0680` and the processor status at `$0681`, writes
+    /// `$A5` to `$0600` and loops.
+    fn siov_program(prefix: &[u8], dcb: Dcb) -> Vec<u8> {
+        let mut code = prefix.to_vec();
+        for (addr, value) in [
+            (0x0300, dcb.device),
+            (0x0301, dcb.unit),
+            (0x0302, dcb.command),
+            (0x0303, dcb.stats),
+            (0x0304, 0x00),
+            (0x0305, 0x40),
+            (0x0306, 0x07),
+            (0x0308, 0x80),
+            (0x0309, 0x00),
+            (0x030A, dcb.aux),
+            (0x030B, 0x00),
+        ] {
+            code.extend(store(addr, value));
+        }
+        code.extend([
+            0x20, 0x59, 0xE4, // JSR $E459
+            0x8C, 0x80, 0x06, // STY $0680
+            0x08, // PHP
+            0x68, // PLA
+            0x8D, 0x81, 0x06, // STA $0681
+            0xA9, 0xA5, // LDA #$A5
+            0x8D, 0x00, 0x06, // STA $0600
+        ]);
+        // JMP to itself: the code starts at $0706.
+        let [lo, hi] = (0x0706 + u16::try_from(code.len()).unwrap()).to_le_bytes();
+        code.extend([0x4C, lo, hi]);
+        code
+    }
+
+    /// Fills `$4000-$407F` with `$5A`: `LDX #$7F`, `LDA #$5A`, `STA $4000,X`, `DEX`, `BPL`.
+    const FILL_5A: [u8; 10] = [0xA2, 0x7F, 0xA9, 0x5A, 0x9D, 0x00, 0x40, 0xCA, 0x10, 0xFA];
+
+    /// The 128 bytes at `$4000`.
+    fn buffer(machine: &Machine) -> Vec<u8> {
+        (BUFFER..BUFFER + 128)
+            .map(|a| machine.peek_ram(a))
+            .collect()
+    }
+
+    /// Boots the SIOV test program of `prefix` and `dcb` with `os` and the SIOV shortcut on,
+    /// and waits for `$0600` = `$A5`.
+    fn run_siov(os: Vec<u8>, prefix: &[u8], dcb: Dcb, name: &str) -> Machine {
+        let mut m = machine_with(
+            os,
+            siov_image(&siov_program(prefix, dcb)),
+            VideoStandard::Ntsc,
+            true,
+        );
+        let frames = boot_frames(&mut m, SIOV_FRAMES);
+        assert!(
+            frames.is_some(),
+            "{name}: no $A5 at $0600 after {SIOV_FRAMES} frames"
+        );
+        m
+    }
+
+    /// Checks criteria 1 and 2 of REQ-623 with the OS ROM `os`.
+    fn check_read_and_nak(os: &[u8], os_name: &str) {
+        let m = run_siov(os.to_vec(), &[], read_sector(2), os_name);
+        assert_eq!(buffer(&m), vec![0x02; 128], "{os_name} 1: the buffer");
+        assert_eq!(m.peek_ram(RESULT_Y), 0x01, "{os_name} 1: Y");
+        assert_eq!(m.peek_ram(DSTATS), 0x01, "{os_name} 1: DSTATS");
+        assert_eq!(m.peek_ram(RESULT_P) & 0x80, 0, "{os_name} 1: N flag");
+
+        let m = run_siov(os.to_vec(), &[], read_sector(0), os_name);
+        assert_eq!(m.peek_ram(RESULT_Y), 0x8B, "{os_name} 2: Y");
+        assert_eq!(m.peek_ram(DSTATS), 0x8B, "{os_name} 2: DSTATS");
+        assert_eq!(m.peek_ram(RESULT_P) & 0x80, 0x80, "{os_name} 2: N flag");
+    }
 
     /// Verifies REQ-623: with `AltirraOS` and fast SIO on, a Read of sector 2 fills
     /// `$4000-$407F` and gives status `$01`; a Read of sector 0 gives `$8B` (criteria 1, 2).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req623_fast_sio_read() {
-        planned();
+        check_read_and_nak(&os_rom().unwrap(), "AltirraOS");
     }
 
     /// Verifies REQ-623: with fast SIO on, a Put of sector 5 gives status `$01`, and sector 5
     /// of the image then holds 128 bytes of `$5A` (criterion 3).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req623_fast_sio_put() {
-        planned();
+        let put = Dcb {
+            device: 0x31,
+            unit: 0x01,
+            command: 0x50,
+            stats: 0x80,
+            aux: 5,
+        };
+        let m = run_siov(os_rom().unwrap(), &FILL_5A, put, "Put");
+        assert_eq!(m.peek_ram(RESULT_Y), 0x01, "3: Y");
+        let sector = m.disk().unwrap().sector(5).unwrap();
+        assert_eq!(sector, [0x5A; 128].as_slice(), "3: sector 5 of the image");
     }
 
     /// Verifies REQ-623: fast SIO does not handle a request for another device, a request
     /// whose bus ID wraps to `$31`, or a call of `$E459` with the OS ROM off (criteria 4-6).
+    ///
+    /// Ignored: criterion 5 fails with `AltirraOS`. The shortcut does not handle `DDEVIC` =
+    /// `$5F`, but the OS routine itself sends the request with `DUNIT` = `$D3` on the bus as
+    /// bus ID `$31` (also with the shortcut off), and D1: answers on the real serial path,
+    /// so `$4000-$407F` holds 128 bytes of `$02`. The HRM (9.1) says that the SIO routines
+    /// intercept `DDEVIC` = `$5F`; OI-046 asks which value the OS checks. Criteria 4 and 6
+    /// pass.
     #[test]
     #[ignore = "planned: SLICE-05"]
     fn req623_fast_sio_not_intercepted() {
-        planned();
+        // 4: D2: is not emulated, so the OS routine runs and times out.
+        let d2 = Dcb {
+            unit: 0x02,
+            ..read_sector(2)
+        };
+        let m = run_siov(os_rom().unwrap(), &[], d2, "4");
+        assert_eq!(m.peek_ram(RESULT_Y), 0x8A, "4: the OS timeout status");
+
+        // 5: DDEVIC = $5F is never intercepted, also when the bus ID wraps to $31.
+        let cassette = Dcb {
+            device: 0x5F,
+            unit: 0xD3,
+            ..read_sector(2)
+        };
+        let mut m = machine(
+            siov_image(&siov_program(&[], cassette)),
+            VideoStandard::Ntsc,
+            true,
+        );
+        for _ in 0..300 {
+            m.run_frame();
+        }
+        assert_ne!(
+            buffer(&m),
+            vec![0x02; 128],
+            "5: the buffer after 300 frames"
+        );
+
+        // 6: with the OS ROM off, `$E459` is RAM with `LDY #$77`, `RTS`.
+        let mut prefix = FILL_5A.to_vec();
+        prefix.extend([
+            0x78, // SEI
+            0xA9, 0x00, 0x8D, 0x0E, 0xD4, // LDA #$00, STA NMIEN
+            0xAD, 0x01, 0xD3, // LDA PORTB
+            0x29, 0xFE, // AND #$FE
+            0x8D, 0x01, 0xD3, // STA PORTB
+        ]);
+        prefix.extend(store(0xE459, 0xA0));
+        prefix.extend(store(0xE45A, 0x77));
+        prefix.extend(store(0xE45B, 0x60));
+        let m = run_siov(os_rom().unwrap(), &prefix, read_sector(2), "6");
+        assert_eq!(m.peek_ram(RESULT_Y), 0x77, "6: the RAM code ran");
+        assert_eq!(buffer(&m), vec![0x5A; 128], "6: the buffer is not changed");
     }
 
     /// Verifies REQ-623: criteria 1 and 2 pass with a user-supplied Atari XL/XE OS ROM
-    /// (criterion 7). The real test needs the ROM (`docs/design/media.md`, "Tests").
+    /// (criterion 7). The ROM is `roms/atari-xl-os.rom`. When the file is missing, the test
+    /// prints a message that names the missing ROM and does no check (criterion 7). The
+    /// test stays ignored until OI-040 is decided, so it never counts as a running test.
     #[test]
     #[ignore = "planned: SLICE-05"]
     fn req623_fast_sio_xl_os() {
-        planned();
+        match read_test_file(XL_OS_ROM, FETCH_ROMS) {
+            Ok(os) => check_read_and_nak(&os, "XL/XE OS"),
+            Err(HarnessError::Missing { path, .. }) => {
+                println!(
+                    "req623_fast_sio_xl_os: no check: the Atari XL/XE OS ROM {} is missing",
+                    Path::new(&path).display()
+                );
+            }
+            Err(error) => panic!("{error}"),
+        }
     }
 
     /// Verifies REQ-623: the SD boot test reaches `$0600` = `$A5` in fewer frames with fast
     /// SIO on than with fast SIO off (criterion 8).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req623_fast_sio_boot_faster() {
-        planned();
+        let slow = boot_frames(
+            &mut machine(sd_boot_image(), VideoStandard::Ntsc, false),
+            300,
+        );
+        let fast = boot_frames(
+            &mut machine(sd_boot_image(), VideoStandard::Ntsc, true),
+            300,
+        );
+        let (slow, fast) = (slow.unwrap(), fast.unwrap());
+        assert!(
+            fast < slow,
+            "fast SIO: {fast} frames, real serial path: {slow} frames"
+        );
+    }
+
+    /// Checks REQ-636 criterion 1 or 2: the SD image boots within `max_frames`.
+    fn check_sd_boot(standard: VideoStandard, fast_sio: bool, max_frames: u32) {
+        let mut m = machine(sd_boot_image(), standard, fast_sio);
+        let frames = boot_frames(&mut m, max_frames);
+        assert!(
+            frames.is_some(),
+            "{standard:?}, fast SIO {fast_sio}: no $A5 at $0600 after {max_frames} frames"
+        );
     }
 
     /// Verifies REQ-636: NTSC: the SD test image boots after a cold reset, and its boot code
     /// writes `$A5` to `$0600` within the frame limit of the criterion (criterion 1).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req636_boot_sd_ntsc() {
-        planned();
+        check_sd_boot(VideoStandard::Ntsc, false, 300);
     }
 
     /// Verifies REQ-636: the SD boot of criterion 1 also passes for PAL, within 250 frames
     /// (criterion 2).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req636_boot_sd_pal() {
-        planned();
+        check_sd_boot(VideoStandard::Pal, false, 250);
     }
 
     /// Verifies REQ-636: the SD boots of criteria 1 and 2 pass with fast SIO on
     /// (criterion 3).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req636_boot_fast_sio() {
-        planned();
+        check_sd_boot(VideoStandard::Ntsc, true, 300);
+        check_sd_boot(VideoStandard::Pal, true, 250);
     }
 
     /// Verifies REQ-636: the DD test image (720 sectors of 256 bytes, 3 boot sectors) boots,
     /// and its code in sector 3 writes `$A5` to `$0600` (criterion 4).
     #[test]
-    #[ignore = "planned: SLICE-05"]
     fn req636_boot_dd() {
-        planned();
+        let mut m = machine(dd_boot_image(), VideoStandard::Ntsc, false);
+        let frames = boot_frames(&mut m, 300);
+        assert!(frames.is_some(), "DD: no $A5 at $0600 after 300 frames");
     }
 }
 

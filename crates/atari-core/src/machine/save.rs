@@ -33,6 +33,9 @@ impl_state!(Machine {
     frames,
     last_out,
     last_access,
+} skip {
+    // A setting of the frontend: a load keeps the setting of the running machine.
+    fast_sio
 });
 
 impl State for Memory {

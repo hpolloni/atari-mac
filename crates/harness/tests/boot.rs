@@ -15,6 +15,8 @@ fn config() -> Result<MachineConfig, HarnessError> {
         os_rom: data::os_rom()?,
         basic_rom: Some(data::basic_rom()?),
         cartridge: None,
+        disk: None,
+        fast_sio: false,
         standard: VideoStandard::Ntsc,
         audio_sample_rate: TEST_SAMPLE_RATE,
     })

@@ -324,8 +324,9 @@ impl Machine {
 }
 ```
 
-At each instruction boundary (before the opcode fetch cycle), the machine checks these
-conditions:
+At each instruction boundary (before the opcode fetch cycle: `Cpu::at_opcode_fetch`, in a
+cycle where ANTIC does not halt the CPU, `system.md` "Timing" step 4), the machine checks
+these conditions:
 
 1. The SIOV shortcut is on.
 2. `regs.pc == 0xE459` (SIOV).
@@ -334,7 +335,8 @@ conditions:
 If all are true, the machine reads the device control block at `$0300-$030B` with no side
 effects. The bus ID is `DDEVIC + DUNIT - 1`, with 8-bit wrap. A `DDEVIC` of `$5F` is never
 intercepted. The data direction comes from `DSTATS`: bit 7 = send, bit 6 = receive, neither =
-no data. The machine then calls `SioBus::transact`.
+no data. With both bits set, the direction is send. `DBYT` gives the length, and the send
+bytes are read from `DBUF` with no side effects. The machine then calls `SioBus::transact`.
 
 If the result is `NoDevice`, the machine does nothing and the CPU executes the OS code. Else
 the machine:
@@ -445,6 +447,10 @@ pub tape: Option<Tape>,
 
 ```rust
 pub fn insert_disk(&mut self, image: DiskImage);
+/// The SIOV shortcut (REQ-623). `MachineConfig::fast_sio` gives the power-on value. It is a
+/// setting, not machine state: a save state does not contain it.
+pub fn set_fast_sio(&mut self, on: bool);
+pub fn fast_sio(&self) -> bool;
 pub fn eject_disk(&mut self) -> Option<DiskImage>;
 pub fn disk(&self) -> Option<&DiskImage>;
 /// Puts the boot image of `xex` in D1:, does a cold reset and holds OPTION (REQ-612).
@@ -1050,3 +1056,15 @@ The seek model of REQ-638 exists (SLICE-05 WP-2), so the REQ-638 tests run. The 
     `Machine::start_xex` need D1: (REQ-636): the SIO bus, the disk drive and the POKEY serial
     input (SLICE-05). SLICE-04 WP-1 has the parser, the boot image and the loader, and tests
     the loader with a synthetic OS. The system tests are planned in SLICE-05 WP-3.
+18. REQ-623 criterion 5 fails with AltirraOS (SLICE-05 WP-2). The shortcut does not handle
+    `DDEVIC` = `$5F`, but the AltirraOS SIO routine sends the request with `DDEVIC` = `$5F`
+    and `DUNIT` = `$D3` on the bus as bus ID `$31`, also with the shortcut off. D1: answers
+    on the real serial path and fills the buffer. A request with `DDEVIC` = `$60` and `DUNIT`
+    = 1 does not reach D1:. See OI-046. `req623_fast_sio_not_intercepted` is ignored until
+    the criterion is decided; its criteria 4 and 6 pass.
+19. `req623_fast_sio_xl_os` reads the user-supplied ROM from `roms/atari-xl-os.rom` (not in
+    git). It follows criterion 7 (a message and no check when the file is missing) and stays
+    ignored until OI-040 is decided.
+20. `--xex` is not wired (`Machine::start_xex`, WP-3), so the REQ-012 tests
+    `loads_cart_xex_and_disk` and `rejects_bad_cart_xex_and_disk` stay ignored. Their
+    `--cart` and `--disk` parts pass.

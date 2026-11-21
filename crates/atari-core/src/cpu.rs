@@ -378,6 +378,14 @@ impl Cpu {
         }
     }
 
+    /// `true` if the next tick is the opcode fetch of an instruction at `PC`: the CPU is at a
+    /// boundary, and no interrupt sequence starts in the next tick. The machine uses it for
+    /// the SIOV shortcut (REQ-623).
+    #[must_use]
+    pub const fn at_opcode_fetch(&self) -> bool {
+        matches!(self.mode, Mode::Fetch) && (!self.poll || self.no_poll_next)
+    }
+
     /// Runs ticks with `rdy = true` until the next boundary. For tests and debuggers. Each
     /// tick is followed by `end_cycle` with the last NMI level, so no new NMI edge occurs.
     pub fn step(&mut self, bus: &mut impl Bus) -> Step {

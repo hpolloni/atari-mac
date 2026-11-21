@@ -108,6 +108,10 @@ impl Cpu {
     /// sequence or the reset sequence.
     pub const fn at_boundary(&self) -> bool;
 
+    /// `true` if the next tick is the opcode fetch of an instruction at `PC` (a boundary
+    /// where no interrupt sequence starts). For the SIOV shortcut (`media.md`).
+    pub const fn at_opcode_fetch(&self) -> bool;
+
     /// Runs ticks with `rdy = true` until the next boundary. For tests and debuggers.
     /// Each tick is followed by `end_cycle` with the last NMI level.
     pub fn step(&mut self, bus: &mut impl Bus) -> Step;

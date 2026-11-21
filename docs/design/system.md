@@ -338,7 +338,9 @@ One call of `Machine::run_cycle` is one machine cycle `c`. The order is:
    register access in cycle `c` sees the events of cycle `c` (`pokey.md`, call contract).
 3. `cpu.set_irq(pokey.irq() || pia.irq())`. The POKEY level is the level of cycle `c`. The
    PIA level is the level from the end of cycle `c - 1`.
-4. If `out.halt` is false: `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
+4. If `out.halt` is false: first the SIOV shortcut, if it is on and
+   `cpu.at_opcode_fetch()` (`media.md`, "SIOV shortcut"; it takes no emulated time), then
+   `cpu.tick(&mut bus, out.rdy)`. The bus decodes the address with
    `portb_pins`. A PIA write updates `portb_pins` at the end of the access. A GTIA write
    also calls `pokey.set_speaker(!gtia.speaker())`: a `CONSOL` bit written as 1 pulls its
    line down (HRM 6.11), so the speaker line is high when bit 3 was written as 0.
