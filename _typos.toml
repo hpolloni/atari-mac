@@ -31,3 +31,8 @@ Pn = "Pn"
 SIZ = "SIZ"
 # POKEY serial state names, for example ser_in_clk.
 ser = "ser"
+# Words copied exactly from the references (section titles and mnemonics in NMS and MCS6500-HW).
+ASO = "ASO"
+TEY = "TEY"
+DBE = "DBE"
+Akkumulator = "Akkumulator"
