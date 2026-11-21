@@ -17,7 +17,7 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-01](docs/plan/SLICE-01.md) | Boot to BASIC and type a command | done | 99 | 0 | 0 | 1 |
 | [SLICE-02](docs/plan/SLICE-02.md) | Graphics modes and player/missile graphics | done | 60 | 0 | 0 | 0 |
 | [SLICE-03](docs/plan/SLICE-03.md) | Sound | in-progress | 19 | 0 | 0 | 0 |
-| [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | in-progress | 23 | 0 | 0 | 0 |
+| [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | done | 23 | 0 | 0 | 0 |
 | [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | planned | 8 | 33 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | planned | 22 | 2 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |

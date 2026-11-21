@@ -1,7 +1,7 @@
 ---
 id: SLICE-04
 title: Cartridges, executables and controllers
-status: in-progress
+status: done
 depends_on: "SLICE-01"
 packages:
   - id: WP-1
