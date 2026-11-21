@@ -13,7 +13,7 @@ use std::fs;
 use std::path::Path;
 
 use atari_core::Machine;
-use atari_core::keyboard::{RETURN, ascii_to_kbcode};
+use atari_core::keyboard::{CAPS, RETURN, SHIFT, ascii_to_kbcode};
 use atari_core::screen::has_row;
 
 use crate::error::FrontendError;
@@ -60,39 +60,71 @@ pub const KEY_READ_TIMEOUT_FRAMES: u32 = 120;
 /// The text typed after the program, unless `--no-run`.
 const RUN: &str = "RUN";
 
+/// The key that switches the OS screen editor to lower case letters: CAPS toggles between
+/// upper and lower case (`SHFLOK` `$02BE`: `$40` upper, `$00` lower).
+const TO_LOWER: u8 = CAPS;
+
+/// The key that switches the OS screen editor back to upper case letters: SHIFT + CAPS
+/// always sets upper case.
+const TO_UPPER: u8 = CAPS | SHIFT;
+
 /// Converts one line of text to key codes, without RETURN.
-fn line_codes(path: &Path, number: usize, line: &str) -> Result<Vec<u8>, FrontendError> {
-    line.chars()
-        .map(|character| {
-            ascii_to_kbcode(character).ok_or_else(|| FrontendError::BasCharacter {
-                path: path.to_owned(),
-                line: number,
-                character,
-            })
-        })
-        .collect()
+///
+/// The OS starts with upper case letters, and a letter key gives the letter in the case of
+/// the editor. So before a lower case letter in upper case mode the codes have
+/// [`TO_LOWER`], and before an upper case letter in lower case mode [`TO_UPPER`]. `lower`
+/// is the case mode before and after the line.
+fn line_codes(
+    path: &Path,
+    number: usize,
+    line: &str,
+    lower: &mut bool,
+) -> Result<Vec<u8>, FrontendError> {
+    let mut codes = Vec::with_capacity(line.len());
+    for character in line.chars() {
+        let code = ascii_to_kbcode(character).ok_or_else(|| FrontendError::BasCharacter {
+            path: path.to_owned(),
+            line: number,
+            character,
+        })?;
+        if character.is_ascii_lowercase() && !*lower {
+            codes.push(TO_LOWER);
+            *lower = true;
+        } else if character.is_ascii_uppercase() && *lower {
+            codes.push(TO_UPPER);
+            *lower = false;
+        }
+        codes.push(code);
+    }
+    Ok(codes)
 }
 
 /// The key codes for the program `text` of the file `path`: each program line, then RETURN.
 /// With `run`, `RUN` and RETURN follow.
 ///
 /// A line ends with LF or CR LF. A line that is empty or has only spaces is not typed.
+/// Lower case letters are typed in lower case (see [`line_codes`]); after the program, the
+/// editor is in upper case again.
 ///
 /// # Errors
 ///
 /// [`FrontendError::BasCharacter`] for the first character without an Atari key, with the
 /// line number (from 1).
 pub fn program_codes(path: &Path, text: &str, run: bool) -> Result<Vec<u8>, FrontendError> {
-    let mut codes = Vec::with_capacity(text.len() + RUN.len() + 1);
+    let mut codes = Vec::with_capacity(text.len() + RUN.len() + 2);
+    let mut lower = false;
     for (index, line) in text.lines().enumerate() {
         if line.trim_matches(' ').is_empty() {
             continue;
         }
-        codes.extend(line_codes(path, index + 1, line)?);
+        codes.extend(line_codes(path, index + 1, line, &mut lower)?);
         codes.push(RETURN);
     }
+    if lower {
+        codes.push(TO_UPPER);
+    }
     if run {
-        codes.extend(line_codes(path, 0, RUN)?);
+        codes.extend(line_codes(path, 0, RUN, &mut lower)?);
         codes.push(RETURN);
     }
     Ok(codes)

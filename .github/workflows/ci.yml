@@ -77,21 +77,13 @@ jobs:
       - run: cargo clippy --package atari-mac --all-targets --all-features --locked
       - run: cargo doc --package atari-mac --no-deps --document-private-items --all-features --locked
 
+  # The tests on macOS: the whole workspace with the frontend. On Linux, the job `coverage`
+  # runs the same tests (with the coverage counters), so the SingleStepTests suite runs once
+  # on each OS.
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test (macos-latest)
+    runs-on: macos-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux: the core and the harness. macOS: the whole workspace with the frontend.
-          - os: ubuntu-latest
-            packages: --workspace --exclude atari-mac
-          - os: macos-latest
-            packages: --workspace
-    env:
-      PACKAGES: ${{ matrix.packages }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -108,20 +100,11 @@ jobs:
       - run: scripts/fetch-roms.sh --single-step
         shell: bash
       - name: Tests
-        shell: bash
-        run: |
-          read -ra packages <<< "$PACKAGES"
-          cargo test "${packages[@]}" --all-targets --all-features --locked
+        run: cargo test --workspace --all-targets --all-features --locked
       - name: Doc tests
-        shell: bash
-        run: |
-          read -ra packages <<< "$PACKAGES"
-          cargo test "${packages[@]}" --doc --all-features --locked
+        run: cargo test --workspace --doc --all-features --locked
       - name: Release build (overflow checks on, LTO)
-        shell: bash
-        run: |
-          read -ra packages <<< "$PACKAGES"
-          cargo build "${packages[@]}" --release --locked
+        run: cargo build --workspace --release --locked
 
   doc:
     name: Docs
@@ -166,10 +149,12 @@ jobs:
       - run: cargo hack check --rust-version --workspace --exclude atari-mac --all-targets --locked
       - run: cargo hack check --feature-powerset --workspace --exclude atari-mac --all-targets --locked
 
+  # The tests on Linux (the core and the harness), with the coverage counters: `cargo
+  # llvm-cov --all-targets` runs the same tests as `cargo test --all-targets`.
   coverage:
     name: Coverage (cargo-llvm-cov)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -189,7 +174,11 @@ jobs:
       - run: scripts/fetch-roms.sh --single-step
         shell: bash
       # Keep the threshold in sync with COVERAGE_MIN in the Makefile.
-      - run: cargo llvm-cov --workspace --exclude atari-mac --all-features --locked --fail-under-lines 80
+      - run: cargo llvm-cov --workspace --exclude atari-mac --all-targets --all-features --locked --fail-under-lines 80
+      - name: Doc tests
+        run: cargo test --workspace --exclude atari-mac --doc --all-features --locked
+      - name: Release build (overflow checks on, LTO)
+        run: cargo build --workspace --exclude atari-mac --release --locked
 
   workflows:
     name: Workflow lint (actionlint, zizmor)
@@ -216,7 +205,7 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: actionlint
       - run: zizmor --offline .github/workflows
-      - run: shellcheck .githooks/pre-commit scripts/fetch-roms.sh
+      - run: shellcheck .githooks/pre-commit scripts/fetch-roms.sh scripts/worktree-setup.sh
 
   spec:
     name: Specification

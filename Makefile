@@ -20,10 +20,13 @@ PACKAGES := --workspace --exclude atari-mac
 endif
 
 .PHONY: check pre-commit fmt fmt-check spec-check clippy test doc deny typos toml-check \
-        machete msrv features coverage roms test-data reference worktree-setup tools hooks clean
+        machete msrv features coverage doc-test release roms test-data reference worktree-setup \
+        tools hooks clean
 
-## Full gate set (same as CI, except the OS matrix).
-check: fmt-check toml-check typos spec-check clippy test doc deny machete msrv features coverage
+## Full gate set (same as CI, except the OS matrix). `coverage` runs the tests of `test`
+## (`cargo llvm-cov --all-targets`), so `check` does not run them a second time.
+check: fmt-check toml-check typos spec-check clippy coverage doc-test release doc deny machete \
+       msrv features
 
 ## Fast subset used by the git pre-commit hook.
 pre-commit: fmt-check spec-check clippy test
@@ -54,9 +57,15 @@ reference:
 worktree-setup:
 	scripts/worktree-setup.sh
 
-test: roms
+test: roms doc-test
 	cargo test $(PACKAGES) --all-targets --all-features --locked
+
+doc-test:
 	cargo test $(PACKAGES) --doc --all-features --locked
+
+## The release build of CI (overflow checks on, LTO).
+release:
+	cargo build $(PACKAGES) --release --locked
 
 doc:
 	cargo doc $(PACKAGES) --no-deps --document-private-items --all-features --locked
@@ -86,7 +95,7 @@ features:
 	cargo hack check --feature-powerset $(PACKAGES) --all-targets --locked
 
 coverage: roms
-	cargo llvm-cov $(PACKAGES) --all-features --locked --fail-under-lines $(COVERAGE_MIN)
+	cargo llvm-cov $(PACKAGES) --all-targets --all-features --locked --fail-under-lines $(COVERAGE_MIN)
 
 tools:
 	cargo install --locked cargo-deny cargo-hack cargo-llvm-cov cargo-machete taplo-cli typos-cli
