@@ -10,10 +10,11 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-use atari_core::media::{Cartridge, DiskImage, MediaError, Xex};
+use atari_core::media::{Cartridge, DiskImage, MediaError, Tape, Xex};
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
 use minifb::Key;
 
+use crate::audio::AudioSink;
 use crate::bas::{NotReady, READY_TIMEOUT_FRAMES, Typist};
 use crate::cli::Options;
 use crate::error::FrontendError;
@@ -84,7 +85,8 @@ pub fn xex_warnings(xex: &Xex) -> Vec<String> {
 /// [`FrontendError::Read`] when a file cannot be read, [`FrontendError::Rom`] for a ROM
 /// with the wrong size and [`FrontendError::Media`] for a cartridge, an executable or a disk
 /// image that is not valid. With `--xex`, the machine starts the executable
-/// ([`Machine::start_xex`], REQ-612).
+/// ([`Machine::start_xex`], REQ-612). With `--cas`, the machine boots the tape
+/// ([`Machine::start_tape`], REQ-081): START is held from the cold reset until frame 60.
 pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, FrontendError> {
     let os_rom = read(&options.os)?;
     let basic_rom = read(&options.basic)?;
@@ -111,6 +113,15 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
         None => None,
     };
     let xex = options.xex.as_deref().map(load_xex).transpose()?;
+    let tape = match &options.cas {
+        Some(path) => Some(
+            Tape::from_cas(&read(path)?).map_err(|error| FrontendError::Media {
+                path: path.clone(),
+                error,
+            })?,
+        ),
+        None => None,
+    };
     let mut machine = Machine::new(MachineConfig {
         os_rom,
         basic_rom: Some(basic_rom),
@@ -130,6 +141,9 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
     })?;
     if let Some(xex) = &xex {
         machine.start_xex(xex);
+    }
+    if let Some(tape) = tape {
+        machine.start_tape(tape);
     }
     Ok(machine)
 }
@@ -272,6 +286,9 @@ pub struct Frontend {
     typist: Option<Typist>,
     /// The audio samples of the last frame that ran (REQ-011).
     audio: Vec<f32>,
+    /// The last frame that ran started with a tape inserted and the motor line low
+    /// (REQ-082). `false` when the last step ran no frame.
+    tape_turbo: bool,
 }
 
 impl Frontend {
@@ -286,6 +303,7 @@ impl Frontend {
             last_frame_cycles: 0,
             typist: None,
             audio: Vec::new(),
+            tape_turbo: false,
         }
     }
 
@@ -312,6 +330,14 @@ impl Frontend {
     /// The machine, for changes outside the key input (for example a test that writes RAM).
     pub const fn machine_mut(&mut self) -> &mut Machine {
         &mut self.machine
+    }
+
+    /// The window runs the frames in turbo (no real-time pacing): while the BASIC program
+    /// is typed (REQ-080 criterion 7), and when the last frame started with a tape inserted
+    /// and the motor line low (`Machine::tape_motor_on`, REQ-082 criteria 1 and 2).
+    #[must_use]
+    pub const fn turbo(&self) -> bool {
+        self.typist.is_some() || self.tape_turbo
     }
 
     /// The emulation is paused.
@@ -355,6 +381,7 @@ impl Frontend {
                 self.typist = None;
             }
         }
+        self.tape_turbo = self.machine.tape_motor_on();
         let start = self.machine.cycle_count();
         self.machine.run_frame();
         self.last_frame_cycles = self.machine.cycle_count() - start;
@@ -373,6 +400,7 @@ impl Frontend {
     /// [`FrontendError::BasicNotStarted`] when the typist does not see the `Ready` prompt.
     pub fn step(&mut self, keys: &[Key]) -> Result<Flow, FrontendError> {
         self.audio.clear();
+        self.tape_turbo = false;
         let input = InputState::from_keys(keys, &self.input);
         if input.quit {
             return Ok(Flow::Quit);
@@ -589,6 +617,53 @@ impl Pacing {
     }
 }
 
+/// The audio output as the frame loop sees it ([`AudioSink`], or a fake device in the
+/// tests).
+pub trait FrameAudio {
+    /// Sends the samples of one frame ([`AudioSink::push`]).
+    fn send_frame(&mut self, samples: &[f32]);
+    /// Stops the sound ([`AudioSink::stop`]): pause and turbo. This is not an underrun.
+    fn stop_sound(&mut self);
+    /// The correction of the next frame wait in seconds ([`AudioSink::correction`]).
+    fn wait_correction(&self) -> f64;
+}
+
+impl FrameAudio for AudioSink {
+    fn send_frame(&mut self, samples: &[f32]) {
+        Self::push(self, samples);
+    }
+
+    fn stop_sound(&mut self) {
+        Self::stop(self);
+    }
+
+    fn wait_correction(&self) -> f64 {
+        Self::correction(self)
+    }
+}
+
+/// The frame loop after [`Frontend::step`] at `now`: the audio, then the pacing.
+///
+/// `docs/design/architecture.md`, "Turbo while the tape motor runs": in turbo
+/// ([`Frontend::turbo`]) or while paused, the sound stops (REQ-082 criterion 5); else the
+/// samples of the frame go to `audio`, and its level corrects the wait (REQ-011). Then
+/// [`Pacing::after_frame`] gives the wait and whether to show the frame.
+pub fn after_step(
+    frontend: &Frontend,
+    pacing: &mut Pacing,
+    audio: &mut impl FrameAudio,
+    now: Instant,
+) -> AfterFrame {
+    let turbo = frontend.turbo();
+    if turbo || frontend.paused() {
+        audio.stop_sound();
+    } else {
+        audio.send_frame(frontend.audio());
+        pacing.correct(audio.wait_correction());
+    }
+    pacing.after_frame(turbo, now)
+}
+
 #[cfg(test)]
 #[expect(
     clippy::disallowed_methods,
@@ -602,15 +677,16 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-    use atari_core::media::{CartKind, MediaError, Xex};
+    use atari_core::media::{CartKind, MediaError, Tape, Xex};
     use atari_core::{Machine, MachineConfig, VideoStandard, keyboard, palette};
     use minifb::Key;
 
     use super::{
-        DisplayFilters, Flow, Frontend, Pacer, Pacing, TURBO_PRESENT_INTERVAL, cartridge_from_file,
-        convert_row, load_machine, render, window_size, window_title, xex_warnings,
+        AfterFrame, DisplayFilters, Flow, FrameAudio, Frontend, Pacer, Pacing,
+        TURBO_PRESENT_INTERVAL, after_step, cartridge_from_file, convert_row, load_machine, render,
+        window_size, window_title, xex_warnings,
     };
-    use crate::audio::SampleRing;
+    use crate::audio::{MAX_CORRECTION, SampleRing};
     use crate::bas::{CH, READY_TIMEOUT_FRAMES, Typist, program_codes};
     use crate::cli::Options;
     use crate::error::FrontendError;
@@ -1307,49 +1383,329 @@ mod tests {
         assert_eq!(out[..], plain[..], "PAL: row 0 is not blended");
     }
 
-    /// Planned tests: a package replaces each stub with the real test.
-    fn planned() {
-        panic!("planned test: a package replaces this stub with the real test");
+    /// The frame loop audio of the tests: a [`SampleRing`] that a [`FakeDevice`] plays.
+    struct FakeAudio {
+        /// The ring.
+        ring: SampleRing,
+        /// The sample rate of the ring.
+        rate: u32,
+    }
+
+    impl FrameAudio for FakeAudio {
+        fn send_frame(&mut self, samples: &[f32]) {
+            self.ring.push(samples);
+        }
+
+        fn stop_sound(&mut self) {
+            self.ring.stop();
+        }
+
+        fn wait_correction(&self) -> f64 {
+            self.ring.correction(self.rate)
+        }
+    }
+
+    /// The RAM byte that the motor test program copies to `PACTL`.
+    const MOTOR: u16 = 0x0080;
+    /// `PACTL` with the motor line low (motor on).
+    const MOTOR_ON: u8 = 0x34;
+    /// `PACTL` with the motor line high (motor off).
+    const MOTOR_OFF: u8 = 0x3C;
+
+    /// A machine whose OS ROM copies the RAM byte [`MOTOR`] to `PACTL` in a loop, so that
+    /// a test sets the motor line with `poke_ram`, and `tape` in the deck. The motor is off
+    /// after the first frame.
+    fn motor_machine(tape: Option<Tape>) -> Machine {
+        let mut rom = vec![0xEA; 0x4000];
+        let program = [
+            0xA9, MOTOR_OFF, 0x85, 0x80, // LDA #$3C, STA $80
+            0xA5, 0x80, 0x8D, 0x02, 0xD3, // loop: LDA $80, STA PACTL
+            0x4C, 0x04, 0xC0, // JMP loop
+        ];
+        rom[..program.len()].copy_from_slice(&program);
+        rom[0x3FF0] = 0x40; // RTI
+        rom[0x3FFA..].copy_from_slice(&[0xF0, 0xFF, 0x00, 0xC0, 0xF0, 0xFF]);
+        let mut machine = Machine::new(MachineConfig {
+            os_rom: rom,
+            basic_rom: None,
+            cartridge: None,
+            disk: None,
+            fast_sio: false,
+            tape,
+            standard: VideoStandard::Ntsc,
+            audio_sample_rate: 48_000,
+        })
+        .unwrap();
+        machine.run_frame();
+        machine
+    }
+
+    /// A tape with one `data` chunk (gap 100 ms, 600 baud) of 64 bytes.
+    fn test_tape() -> Tape {
+        let mut file = b"FUJI".to_vec();
+        file.extend([0; 4]);
+        file.extend(b"data");
+        file.extend(64_u16.to_le_bytes());
+        file.extend(100_u16.to_le_bytes());
+        file.extend((0..64).map(|i: u8| i.wrapping_mul(37)));
+        Tape::from_cas(&file).unwrap()
+    }
+
+    /// The motor byte of frame `frame` of the turbo tests: off, then on in frames 20-139,
+    /// then off.
+    const fn motor_at(frame: u32) -> u8 {
+        if frame >= 20 && frame < 140 {
+            MOTOR_ON
+        } else {
+            MOTOR_OFF
+        }
+    }
+
+    /// The window loop with a fake clock and a fake audio device.
+    struct Loop {
+        /// The fake host time.
+        clock: Instant,
+        /// The start of the fake host time.
+        start: Instant,
+        /// The pacing.
+        pacing: Pacing,
+        /// The audio.
+        audio: FakeAudio,
+        /// The device that plays the audio.
+        device: FakeDevice,
+    }
+
+    impl Loop {
+        /// A loop at the current host time.
+        fn new() -> Self {
+            let start = Instant::now();
+            Self {
+                clock: start,
+                start,
+                pacing: Pacing::new(VideoStandard::Ntsc, start),
+                audio: FakeAudio {
+                    ring: SampleRing::new(48_000),
+                    rate: 48_000,
+                },
+                device: device(48_000.0),
+            }
+        }
+
+        /// Plays the device up to the fake time.
+        fn play(&mut self) {
+            let seconds = (self.clock - self.start).as_secs_f64();
+            self.device.run_until(&mut self.audio.ring, seconds);
+        }
+
+        /// One frame of the window loop: sets the motor byte to `motor`, steps the frontend
+        /// with `keys` (the frame takes 3 ms of host time), runs [`after_step`] and the
+        /// wait, and plays the device up to the new time. Returns the tape motor state at
+        /// the frame start and the result of [`after_step`].
+        fn frame(
+            &mut self,
+            frontend: &mut Frontend,
+            motor: u8,
+            keys: &[Key],
+        ) -> (bool, AfterFrame) {
+            frontend.machine_mut().poke_ram(MOTOR, motor);
+            let motor_on = frontend.machine().tape_motor_on();
+            step(frontend, keys);
+            self.clock += Duration::from_millis(3);
+            self.play();
+            let after = after_step(frontend, &mut self.pacing, &mut self.audio, self.clock);
+            self.clock += after.wait;
+            self.play();
+            (motor_on, after)
+        }
+    }
+
+    /// The largest change of a paced frame by the audio level correction
+    /// ([`MAX_CORRECTION`]), and 1 µs for the rounding.
+    fn correction_limit() -> Duration {
+        Duration::from_secs_f64(MAX_CORRECTION) + Duration::from_micros(1)
     }
 
     /// Verifies REQ-082: with a tape inserted, a frame that starts while the motor line is
     /// low runs in turbo (no wait), and a frame that starts while it is high has the
     /// real-time pacing of REQ-007 (criterion 1, fake clock).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn tape_turbo_follows_motor_line() {
-        planned();
+        let mut frontend = Frontend::new(motor_machine(Some(test_tape())));
+        let mut run = Loop::new();
+        let period = Pacer::new(VideoStandard::Ntsc, run.start).period();
+        let (mut turbo, mut paced) = (0, 0);
+        let mut last_turbo = false;
+        for frame in 0..200 {
+            let before = run.clock;
+            let (motor_on, after) = run.frame(&mut frontend, motor_at(frame), &[]);
+            assert_eq!(frontend.turbo(), motor_on, "frame {frame}: turbo");
+            if motor_on {
+                turbo += 1;
+                assert_eq!(
+                    after.wait,
+                    Duration::ZERO,
+                    "frame {frame}: no wait in turbo"
+                );
+            } else if frame > 0 && !last_turbo {
+                // The first paced frame after turbo starts a new pacer from its end.
+                paced += 1;
+                assert!(
+                    (run.clock - before).abs_diff(period) <= correction_limit(),
+                    "frame {frame} takes one period: {:?}",
+                    run.clock - before
+                );
+            }
+            last_turbo = motor_on;
+        }
+        assert_eq!(turbo, 120, "the frames that start with the motor on");
+        assert!(paced > 70, "paced frames: {paced}");
     }
 
     /// Verifies REQ-082: without a tape, the motor line low has no effect on the pacing
     /// (criterion 2, fake clock).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn motor_line_without_tape_keeps_pacing() {
-        planned();
+        let mut frontend = Frontend::new(motor_machine(None));
+        let mut run = Loop::new();
+        let period = Pacer::new(VideoStandard::Ntsc, run.start).period();
+        for frame in 0..60 {
+            let before = run.clock;
+            let (motor_on, after) = run.frame(&mut frontend, MOTOR_ON, &[]);
+            assert!(!motor_on, "frame {frame}: no tape, so no tape motor");
+            assert!(!frontend.turbo(), "frame {frame}: no turbo");
+            assert!(after.present, "frame {frame} is shown");
+            if frame > 0 {
+                assert!(
+                    (run.clock - before).abs_diff(period) <= correction_limit(),
+                    "frame {frame} takes one period: {:?}",
+                    run.clock - before
+                );
+            }
+        }
+        assert_eq!(
+            frontend.machine().peek(0xD302) & 0x3F,
+            MOTOR_ON,
+            "the motor line is low"
+        );
     }
 
     /// Verifies REQ-082: in tape turbo, the window loop shows a frame at least every 100 ms
     /// of host time (criterion 3, fake clock).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn tape_turbo_presents_frames() {
-        planned();
+        let mut frontend = Frontend::new(motor_machine(Some(test_tape())));
+        let mut run = Loop::new();
+        let mut last_present = run.clock;
+        let mut longest_gap = Duration::ZERO;
+        let mut shown = 0;
+        let mut turbo = 0;
+        for _ in 0..400 {
+            let (motor_on, after) = run.frame(&mut frontend, MOTOR_ON, &[]);
+            if motor_on {
+                turbo += 1;
+            }
+            if after.present {
+                longest_gap = longest_gap.max(run.clock - last_present);
+                last_present = run.clock;
+                if motor_on {
+                    shown += 1;
+                }
+            }
+        }
+        assert_eq!(turbo, 399, "the frames after the first run in turbo");
+        assert!(shown > 10, "frames shown in turbo: {shown}");
+        assert!(
+            longest_gap <= Duration::from_millis(100),
+            "a frame at least every 100 ms: {longest_gap:?}"
+        );
     }
 
     /// Verifies REQ-082: after the same frames and the same key input, the frame buffer and
     /// the RAM are the same with tape turbo and without it (criterion 4).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn tape_turbo_keeps_machine_state() {
-        planned();
+        let mut with_turbo = Frontend::new(motor_machine(Some(test_tape())));
+        let mut paced = Frontend::new(motor_machine(Some(test_tape())));
+        let mut turbo_run = Loop::new();
+        let mut paced_run = Loop::new();
+        let mut turbo_frames = 0;
+        for frame in 0..160 {
+            let keys: &[Key] = if (30..40).contains(&frame) {
+                &[Key::A]
+            } else {
+                &[]
+            };
+            let motor = motor_at(frame);
+            let (motor_on, _) = turbo_run.frame(&mut with_turbo, motor, keys);
+            if motor_on {
+                turbo_frames += 1;
+            }
+            // The same frame at real-time speed: this pacing never uses turbo.
+            paced.machine_mut().poke_ram(MOTOR, motor);
+            step(&mut paced, keys);
+            paced_run.clock += Duration::from_millis(3);
+            let after = paced_run.pacing.after_frame(false, paced_run.clock);
+            paced_run.clock += after.wait;
+        }
+        assert_eq!(turbo_frames, 120, "frames in turbo");
+        assert!(
+            turbo_run.clock < paced_run.clock,
+            "turbo is faster: {:?} and {:?}",
+            turbo_run.clock - turbo_run.start,
+            paced_run.clock - paced_run.start
+        );
+        assert_eq!(
+            with_turbo.machine().frame(),
+            paced.machine().frame(),
+            "the frame buffer"
+        );
+        for addr in 0..=u16::MAX {
+            assert_eq!(
+                with_turbo.machine().peek_ram(addr),
+                paced.machine().peek_ram(addr),
+                "RAM at ${addr:04X}"
+            );
+        }
+        assert_eq!(
+            with_turbo.machine().tape_position(),
+            paced.machine().tape_position(),
+            "the tape position"
+        );
+        assert!(
+            with_turbo.machine().tape_position() > Some(0),
+            "the tape moved"
+        );
     }
 
     /// Verifies REQ-082: in tape turbo, the frame loop plays no audio and counts no
     /// underrun, and the audio plays again after turbo (criterion 5, fake device).
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn tape_turbo_stops_audio() {
-        planned();
+        let mut frontend = Frontend::new(motor_machine(Some(test_tape())));
+        let mut run = Loop::new();
+        for frame in 0..400 {
+            let motor = if (100..250).contains(&frame) {
+                MOTOR_ON
+            } else {
+                MOTOR_OFF
+            };
+            let (motor_on, _) = run.frame(&mut frontend, motor, &[]);
+            let ring = &run.audio.ring;
+            if motor_on {
+                assert!(
+                    !frontend.audio().is_empty(),
+                    "frame {frame}: the core makes samples"
+                );
+                assert_eq!(ring.queued(), 0, "frame {frame}: no samples in turbo");
+                assert!(!ring.playing(), "frame {frame}: no audio in turbo");
+            }
+            if frame == 99 || frame == 399 {
+                assert!(
+                    ring.playing(),
+                    "frame {frame}: the audio plays at real-time speed"
+                );
+            }
+            assert_eq!(ring.underruns(), 0, "frame {frame}: no underrun");
+        }
     }
 }

@@ -91,7 +91,14 @@ impl fmt::Display for FrontendError {
             Self::Unsupported(option) => write!(f, "{option} is not supported yet"),
             Self::Read { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Rom { path, error } => write!(f, "{}: {error}", path.display()),
-            Self::Media { path, error } => write!(f, "{}: {error}", path.display()),
+            Self::Media { path, error } => {
+                write!(
+                    f,
+                    "{}: {error} ({})",
+                    path.display(),
+                    media_error_name(error)
+                )
+            }
             Self::Screenshot { path, source } => write!(f, "{}: {source}", path.display()),
             Self::BasCharacter {
                 path,
@@ -111,6 +118,15 @@ impl fmt::Display for FrontendError {
             Self::Output(error) => write!(f, "standard output: {error}"),
         }
     }
+}
+
+/// The name of the variant of `error`, for example `CasSignature`: the start of its
+/// `Debug` text. A media message names it (REQ-081 criterion 2).
+fn media_error_name(error: &MediaError) -> String {
+    format!("{error:?}")
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .collect()
 }
 
 impl Error for FrontendError {
@@ -175,7 +191,23 @@ mod tests {
                     path: path.clone(),
                     error: MediaError::BadSize(100),
                 },
-                "x.rom: unsupported cartridge size: 100 bytes",
+                "x.rom: unsupported cartridge size: 100 bytes (BadSize)",
+                2,
+            ),
+            (
+                FrontendError::Media {
+                    path: PathBuf::from("t.cas"),
+                    error: MediaError::CasSignature,
+                },
+                "t.cas: CAS file does not start with a FUJI chunk (CasSignature)",
+                2,
+            ),
+            (
+                FrontendError::Media {
+                    path: PathBuf::from("t.cas"),
+                    error: MediaError::CasTruncated { offset: 8 },
+                },
+                "t.cas: CAS chunk at offset 8 goes past the end of the file (CasTruncated)",
                 2,
             ),
             (
