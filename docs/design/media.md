@@ -216,6 +216,9 @@ impl SioBus {
     pub fn new(standard: VideoStandard) -> Self;
     pub const fn drive(&self) -> &DiskDrive;
     pub const fn drive_mut(&mut self) -> &mut DiskDrive;
+    /// Connects D1: to the bus or removes it. A new bus has D1: connected.
+    pub const fn set_drive_connected(&mut self, on: bool);
+    pub const fn drive_connected(&self) -> bool;
     /// The PIA CB2 output changed. `low` = command line asserted.
     pub fn set_command_line(&mut self, low: bool, now: u64);
     /// POKEY finished sending `byte` (from `Pokey::take_serial_byte`).
@@ -226,8 +229,18 @@ impl SioBus {
     pub fn data_in_level(&self, now: u64) -> bool;
     /// The start cycle of the first scheduled device byte of the current transaction, for tests.
     pub fn next_device_byte_start(&self) -> Option<u64>;
-    /// The scheduled device bytes of the current transaction as `(value, start, bit_cycles)`,
-    /// for tests. A falling edge of the command line clears them.
+    /// Schedules a byte on SIO DATA IN for a device that is not D1: (the tests, later the
+    /// cassette deck): start bit in cycle `start`, `bit_cycles` per bit. These bytes are in
+    /// their own queue `external`: the drive protocol does not change them, and each
+    /// command line change removes the bytes that ended. The bytes must not overlap.
+    pub fn send_device_byte(&mut self, value: u8, start: u64, bit_cycles: u32);
+    /// The command line level, and the bytes from the computer since the command line
+    /// last went low (at most 300), for tests (SLICE-05 WP-1).
+    pub const fn command_line_low(&self) -> bool;
+    pub fn host_bytes(&self) -> &[u8];
+    /// The scheduled device bytes of the current transaction and of `send_device_byte` as
+    /// `(value, start, bit_cycles)` in start order, for tests. A falling edge of the
+    /// command line clears the bytes of the transaction.
     pub fn scheduled_device_bytes(&self) -> Vec<(u8, u64, u32)>;
     /// A complete transaction at once, for the SIOV shortcut (REQ-623).
     pub fn transact(&mut self, request: &SioRequest<'_>) -> SioOutcome;
@@ -292,6 +305,12 @@ Call contract for the machine:
 3. In each machine cycle, before the POKEY `tick`, the machine calls
    `pokey.set_serial_in(sio.data_in_level(now))`. POKEY receives the bits from the line
    level with its own serial timing (REQ-526, REQ-528). The interface is decided in OI-038.
+   `now` is the number of the cycle in the count of `Pokey::cycle` and
+   `Machine::cycle_count` (both count the cycles up to and including this one), so the
+   device bytes and `SerialByte` use the same cycles. `Machine::sio` and `Machine::sio_mut`
+   give the bus to the devices and the tests. The level is the wired AND of the drive
+   reply (`out`) and the bytes of `send_device_byte` (`external`): a space of either gives
+   a space.
 4. `SioBus` never reads the cycle counter by itself. All times come from the `now` and `start`
    arguments, so the core stays deterministic (REQ-014).
 
@@ -442,6 +461,12 @@ pub fn tape_motor_on(&self) -> bool;
 pub fn start_tape(&mut self, tape: Tape);
 ```
 
+D1: is on the bus when the configuration has a disk or after the first `insert_disk`
+(`SioBus::set_drive_connected`). With no disk in the configuration and no `insert_disk`,
+no device answers a frame for D1:, so the OS boot sees an empty bus and BASIC starts after
+the timeouts (REQ-005). `eject_disk` leaves the empty drive on the bus: it then answers as
+REQ-633 gives. A cold reset does not change the connection or the image.
+
 ## State
 
 ### Cartridge
@@ -487,12 +512,15 @@ pub fn start_tape(&mut self, tape: Tape);
 | Field | Type | Power-on value | Contents |
 | --- | --- | --- | --- |
 | `drive` | `DiskDrive` | See above | Drive D1: |
+| `drive_connected` | `bool` | `true` for `SioBus::new`; the machine sets it (see "Machine configuration") | D1: is on the bus. With `false`, D1: answers no frame and `transact` gives `NoDevice`. |
 | `timing` | `SioTiming` | From the video standard | The cycle counts of the Timing section |
 | `command_low` | `bool` | `false` | Command line level |
 | `phase` | `BusPhase` | `Idle` | Protocol state |
 | `frame` | `[u8; 5]`, `u8` | Empty | Command frame bytes and count |
 | `data_in` | `Vec<u8>` | Empty | Data frame from the computer |
 | `out` | `VecDeque<DeviceByte>` | Empty | Scheduled device bytes. `DeviceByte { value, start, bit_cycles }` is private to `SioBus`; its last cycle is `start + 10 * bit_cycles`. |
+| `host` | `Vec<u8>` | Empty | The values of the bytes from the computer since the last falling edge of the command line, at most 300 (`host_bytes`) |
+| `external` | `VecDeque<DeviceByte>` | Empty | The bytes of `send_device_byte`, in start order |
 
 ```rust
 enum BusPhase {
@@ -505,6 +533,10 @@ enum BusPhase {
     Reply,
 }
 ```
+
+The save state (REQ-018) has each `SioBus` field except `timing`, which comes from the video
+standard. The `DiskDrive` fields are in it with the complete `DiskImage` (all its fields),
+because writes change the image and the frontend can insert another image.
 
 `SioBus` also has the field `deck: TapeDeck` (power-on: the tape of the configuration, at
 position 0, motor off).

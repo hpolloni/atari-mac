@@ -7,6 +7,7 @@
 
 use super::disk::{DiskImage, Geometry};
 use super::sio::CommandFrame;
+use crate::state::{Reader, State, StateError, Writer};
 
 /// Format disk (REQ-632).
 const CMD_FORMAT: u8 = 0x21;
@@ -87,7 +88,7 @@ pub struct Completion {
 }
 
 /// The emulated disk drive D1: (REQ-624 to REQ-638).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiskDrive {
     /// The inserted image.
     image: Option<DiskImage>,
@@ -97,6 +98,56 @@ pub struct DiskDrive {
     format_geometry: Option<Geometry>,
     /// The track of the head, for the seek time (REQ-638).
     head_track: u16,
+}
+
+// `Option<DiskImage>` has no `Default` element, so the drive writes the image flag itself.
+impl State for DiskDrive {
+    fn save(&self, w: &mut Writer) {
+        let Self {
+            image,
+            error_bits,
+            format_geometry,
+            head_track,
+        } = self;
+        image.is_some().save(w);
+        if let Some(image) = image {
+            image.save(w);
+        }
+        format_geometry.is_some().save(w);
+        if let Some(geometry) = format_geometry {
+            geometry.save(w);
+        }
+        error_bits.save(w);
+        head_track.save(w);
+    }
+
+    fn load(&mut self, r: &mut Reader<'_>) -> Result<(), StateError> {
+        let Self {
+            image,
+            error_bits,
+            format_geometry,
+            head_track,
+        } = self;
+        let mut some = false;
+        some.load(r)?;
+        *image = if some {
+            let mut loaded = DiskImage::blank(Geometry::SD);
+            loaded.load(r)?;
+            Some(loaded)
+        } else {
+            None
+        };
+        some.load(r)?;
+        *format_geometry = if some {
+            let mut loaded = Geometry::SD;
+            loaded.load(r)?;
+            Some(loaded)
+        } else {
+            None
+        };
+        error_bits.load(r)?;
+        head_track.load(r)
+    }
 }
 
 /// The sector number of a command frame: AUX1 is the low byte, AUX2 the high byte.

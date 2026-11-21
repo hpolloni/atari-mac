@@ -1,12 +1,12 @@
 ---
 id: SLICE-05
 title: Disk drive
-status: planned
+status: in-progress
 depends_on: "SLICE-04"
 packages:
   - id: WP-1
     title: POKEY serial port
-    status: planned
+    status: done
     requirements: [REQ-502, REQ-516, REQ-517, REQ-525, REQ-526, REQ-527, REQ-528, REQ-529, REQ-530, REQ-531, REQ-532, REQ-533]
   - id: WP-2
     title: SIO disk drive and ATR images

@@ -6,6 +6,7 @@
 //! it.
 
 use super::MediaError;
+use crate::state::impl_state;
 
 /// The size of the ATR header (REQ-625).
 const ATR_HEADER: usize = 16;
@@ -27,6 +28,11 @@ pub struct Geometry {
     /// The size of sectors 4 and up: 128 or 256 bytes.
     pub sector_size: u16,
 }
+
+impl_state!(Geometry {
+    sectors,
+    sector_size,
+});
 
 impl Geometry {
     /// Single density: 720 sectors of 128 bytes.
@@ -94,6 +100,17 @@ pub struct DiskImage {
     /// `true` after a successful write or format since `from_atr` or `blank`.
     changed: bool,
 }
+
+// The image is in the save state: the writes change it, and the frontend can insert another
+// image at run time.
+impl_state!(DiskImage {
+    geometry,
+    data,
+    header_extra,
+    full_boot_sectors,
+    write_protected,
+    changed,
+});
 
 /// The little-endian 16-bit value at `offset` of `bytes`. The caller checks the length.
 fn le16(bytes: &[u8], offset: usize) -> u16 {

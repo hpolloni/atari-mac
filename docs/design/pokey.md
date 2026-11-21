@@ -316,6 +316,18 @@ Asynchronous receive (REQ-528): while `SKCTL` bit 4 is 1 and the input waits for
 timers 3 and 4 are held: `counter = audf`, no decrement, and no fire. At the falling edge of
 SIO DATA IN, POKEY treats timers 3 and 4 like an `STIMER` write on that cycle.
 
+Order in a tick (SLICE-05 WP-1): the timers first give the fires of the cycle
+(`Timers::take_fires`). Then the two-tone resync runs (REQ-533). Then the reloads and the
+counts of the cycle run (`Timers::advance`, with the hold of timers 3 and 4). So a resync on
+the fire cycle E also stops the counts of timers 1 and 2 on E.
+
+Two-tone resync model (REQ-533): a toggle by a fire visible on E sets the reload of timers 1
+and 2 to E+1 (two cycles after the reload E-1 of the firing timer) and cancels the fires of
+timers 1 and 2 with a visible cycle of E+2 or later. A timer that fires one cycle after the
+resyncing timer still fires (HRM 5.6 Two-tone resync timing, second effect). With
+`AUDF1` = 0 at 1.79 MHz this gives the fires T+8, T+14, T+20, and the `AUDF1` deadlines
+T+8 and T+14 of ACID800 pokey_timertiming.
+
 ### Channel output (HRM 5.3)
 
 On an audio clock of channel n (index 0-3), POKEY evaluates `AUDCn`:
@@ -613,7 +625,7 @@ after the table tells what it does.
 | REQ-523 | `pokey.rs` `each_key_latches_its_code` [1]; `keyboard.rs` `key_constants_match_table` [2], `no_key_codes_unused` [3, 4] |
 | REQ-524 | `keyboard.rs` `ascii_letters` [1], `ascii_digits_and_space` [2], `ascii_shifted_symbols` [3], `ascii_unshifted_symbols` [4, 5], `ascii_control_characters` [6], `ascii_without_key_is_none` [7], `ascii_never_sets_control` [8] (new) |
 | REQ-525 | `pokey.rs` `serial_output_load_and_ready_irq` [1], `serial_output_frame_4f` [2], `serial_output_back_to_back` [3], `serout_overwrite_before_load` [4], `no_ready_irq_at_end` [5], `serial_byte_reported_with_cycle` [6] |
-| REQ-526 | `pokey.rs` `serial_input_frame_43` [1], `serial_input_irq_timing` [2], `serial_input_busy_bit` [3], `serin_read_no_side_effect` [4], `serial_input_256_bytes` [5], `serial_input_without_irq` [6] (new); `crates/harness/tests/pokey_serial.rs` `os_sio_receives_frame` (system check) |
+| REQ-526 | `pokey.rs` `serial_input_frame_43` [1], `serial_input_irq_timing` [2], `serial_input_busy_bit` [3], `serin_read_no_side_effect` [4], `serial_input_256_bytes` [5], `serial_input_without_irq` [6] (new); `crates/atari-core/src/media/sio.rs` `device_bytes_on_data_in` (the SIO DATA IN line of the machine contract); `crates/harness/tests/pokey_serial.rs` `os_sio_receives_frame` (system check) |
 | REQ-527 | `pokey.rs` `serial_clock_mode_table` [1, 3], `async_output_clock_stops` [2] (new), `bidirectional_clock_drive` [4] (new), `external_clock_shifts_on_clock_in` [5], `serial_clock_edges` [6], `serial_bit_rate_half_fire_rate` [7], `serial_clock_ignores_audc` [8] |
 | REQ-528 | `pokey.rs` `async_holds_timers_3_4` [1], `async_first_timer4_fire` [2] (new), `async_19_timer4_fires_per_byte` [3], `async_tolerates_3_percent` [4], `async_silences_ch3_ch4` [5] |
 | REQ-529 | `pokey.rs` `framing_error` [1], `serial_overrun` [2], `serin_read_does_not_prevent_overrun` [3], `no_overrun_when_disabled` [4], `skres_clears_serial_errors` [5] |
@@ -662,8 +674,11 @@ New tests:
 
 The harness test `basic_sound_middle_c` types `SOUND 0,121,10,8` in BASIC. BASIC sets
 `AUDF1` = 121 and `AUDC1` = `$A8`, so the tone is 1789773 / (122 x 28 x 2) = 262.0 Hz on
-NTSC. The test accepts 261.5-262.5 Hz. The test `os_sio_receives_frame` needs the SIO bus
-model of REQ-600 and later.
+NTSC. The test accepts 261.5-262.5 Hz. The test `os_sio_receives_frame` plays a device on
+the SIO bus: it waits for the command frame of a SIOV read that a small program in page 6
+makes, and sends ACK, Complete, 128 data bytes and the checksum with
+`SioBus::send_device_byte` (the delays of `media.md`, "Timing"). It checks that each byte
+reaches `SERIN` with `IRQST` bit 5, the SIOV status 1 and the buffer.
 
 ## Open issues
 
@@ -704,8 +719,9 @@ model of REQ-600 and later.
     outside this range (panic, clamp or error) is not decided.
 17. WP-5 part 2 (2026-11-19): the code has the test accessor `test_fired()` (the timers that fired
     on the last tick) instead of the `test_fires()` log of "Test accessors". The tests build
-    the fire log from it. The external serial clock (`SKCTL` bits 6-4 = `000` and `001`) has
-    no edges yet. At power-on the speaker level is `false`, but the real line is high
+    the fire log from it. SLICE-05 WP-1 added the external serial clock: the output shifts on
+    a rising edge of SIO CLOCK IN, the input samples on a falling edge. In the external
+    output modes, `serial_clock_out` keeps the flip-flop level. At power-on the speaker level is `false`, but the real line is high
     (`CONSOL` = `$00`, HRM 6.11). The machine sends the level only after the first GTIA write.
 18. The REQ-522 system check `break_stops_basic_program`: after BREAK, Altirra BASIC prints
     `Stopped at line 10` and no new prompt. The test then types `PRINT 2+2` to show that the
@@ -714,6 +730,10 @@ model of REQ-600 and later.
     before T+4 (HRM 5.3 STIMER preemption). So a timer that ran before the write can still
     fire on T+1 to T+3. The tests of REQ-507 criteria 2 and 4, REQ-508 criterion 2 and
     REQ-510 criterion 5 start the timers so that no fire is scheduled at T.
+21. SLICE-05 WP-1 (2026-11-20): in two-tone mode, the data bit for a timer 1 fire is the
+    output shift register level before the shift of that cycle. A two-tone toggle also
+    happens in initialization mode, because only the timers drive it. No requirement
+    covers these two cases.
 20. SLICE-04 WP-2 (2026-11-20): HRM 5.9 Polling status says that an input that "dips back
     below input threshold during the scan" sets its `ALLPOT` bit to 1 again and its `POTn`
     follows the counter again. The model has no such case: the charge only grows during a
