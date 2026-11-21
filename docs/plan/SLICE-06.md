@@ -32,6 +32,17 @@ The CPU, the PIA and the machine meet the remaining timing and power-on requirem
 
 On 2026-11-20, at the user's request, the lead moved REQ-007 (real-time speed and the headless speed limit) from SLICE-03 WP-2 to WP-3.
 
+Speed baseline for REQ-007 criterion 2 (`--headless --frames 6000`, release build, Apple M4), from the speed work that was merged on 2026-11-20:
+
+| Build | Time (3 runs) |
+| --- | --- |
+| Before the POKEY audio (`42f7b17`) | 10.05 s (1 run) |
+| After the POKEY audio (`96517b2`) | 12.19 s, 11.92 s, 12.04 s |
+| Speed branch on `96517b2` | 7.84 s, 7.57 s, 7.61 s |
+| `main` after the merge (with the pot scan of SLICE-04) | 8.38 s, 8.32 s, 8.21 s |
+
+The profile before the work: `Pokey::tick` 29 %, `Machine::run_cycle` (CPU and ANTIC) 26 %, `Gtia::color_clock` 22 %. The largest gains: fat LTO (about 10 %), GTIA shifters as one 64-bit word (about 12 %), and GTIA work that is skipped when it has no effect (about 4 %). After boot, the OS leaves `AUDCTL` = `$28` and `AUDF` = 0, so the linked timers 3 and 4 have an event every 3 or 4 cycles. One more option is not taken: `overflow-checks = false` in the release profile gives about 4 %, but `Cargo.toml` keeps the overflow checks. The rest of the speed work for REQ-007 is in this package.
+
 On 2026-11-20 the lead moved REQ-227 (the CA2 and CB2 output modes) to SLICE-08 WP-2, because the cassette motor needs CA2.
 | WP-3 | Product qualities and save states | REQ-001, REQ-007, REQ-014, REQ-015, REQ-018, REQ-040, REQ-041, REQ-042 |
 
