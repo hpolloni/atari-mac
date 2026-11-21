@@ -1108,3 +1108,69 @@ fn bas_typed_listing_keeps_lower_case() {
     let file: Vec<&str> = LOWER_CASE_PROGRAM.lines().collect();
     assert_eq!(listing, file, "the listing on the screen: {rows:#?}");
 }
+
+/// Fails the test that calls it. A planned stub calls this function, so that the stub never
+/// passes when it runs (`cargo test -- --include-ignored`).
+fn planned() {
+    panic!("planned test: a package replaces this stub with the real test");
+}
+
+/// Verifies REQ-083: `--headless --stats` with enough frames for more than 2 s of host time
+/// writes lines to standard error in the format of criterion 1, with `shown 0`,
+/// `underruns 0`, `turbo off` and `motor -`. The frame numbers increase, and the number of
+/// lines is the elapsed seconds of the run (from standard output), rounded down, or one
+/// less (criteria 1, 4 and 7).
+#[test]
+#[ignore = "planned: SLICE-09"]
+fn stats_headless_lines() {
+    planned();
+}
+
+/// Verifies REQ-083: a headless run without `--stats` writes no line that starts with
+/// `stats:` to standard error (criterion 8).
+#[test]
+#[ignore = "planned: SLICE-09"]
+fn no_stats_without_option() {
+    planned();
+}
+
+/// Verifies REQ-083: `--help` lists `--stats` (criterion 9).
+#[test]
+#[ignore = "planned: SLICE-09"]
+fn stats_help_lists_option() {
+    planned();
+}
+
+/// Verifies REQ-085: `--headless --log tape --cas` with the tape of `boot_tape_file` and
+/// RETURN after the prompt tone writes lines `[frame <f> cycle <c>] tape: <message>` to
+/// standard error: the motor on line, the record lines and the motor off line, with frame
+/// and cycle counts that increase (criterion 2). Needs the core records of SLICE-09 WP-1.
+#[test]
+#[ignore = "planned: SLICE-09"]
+fn log_writes_tape_lines() {
+    planned();
+}
+
+/// Verifies REQ-085: `--log tape,disk` and `--log sio:trace` give exit status 2 before the
+/// machine starts, and standard error names `disk` and `sio:trace` (criterion 4).
+#[test]
+#[ignore = "planned: SLICE-09"]
+fn log_rejects_unknown_category() {
+    planned();
+}
+
+/// Verifies REQ-085: a headless run with a tape and a disk without `--log` writes no line
+/// that starts with `[frame` to standard error. `atari_mac::run` in the test process without
+/// `--log` leaves `log::max_level()` at `Off` (criterion 5).
+#[test]
+#[ignore = "planned: SLICE-09"]
+fn no_log_without_option() {
+    planned();
+}
+
+/// Verifies REQ-085: `--help` lists `--log <categories>` (criterion 6).
+#[test]
+#[ignore = "planned: SLICE-09"]
+fn log_help_lists_option() {
+    planned();
+}

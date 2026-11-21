@@ -8,6 +8,8 @@
 //! | [`cli`] | The command line |
 //! | [`bas`] | A BASIC program from a text file, typed at the `Ready` prompt (REQ-080) |
 //! | [`keymap`] | Host key to Atari key (REQ-009, REQ-010, REQ-017) |
+//! | [`logging`] | The log output of `--log` (REQ-085) |
+//! | [`stats`] | The speed statistics of `--stats` (REQ-083) |
 //! | [`frontend`] | Machine setup, input, pause, frame conversion, pacing, PNG screenshot |
 //! | [`window`] | The `minifb` window loop (REQ-008) |
 //! | [`error`] | The errors and the exit status |
@@ -23,8 +25,10 @@ pub mod cli;
 pub mod error;
 pub mod frontend;
 pub mod keymap;
+pub mod logging;
 #[cfg(test)]
 mod planned;
+pub mod stats;
 pub mod window;
 
 use std::ffi::OsString;

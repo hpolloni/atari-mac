@@ -3,16 +3,16 @@
 ## Scope
 
 This document gives the crate structure, the data flow between the chips, the scheduling
-model and the frontend. It covers REQ-001 to REQ-019, REQ-040 to REQ-042, REQ-080 and REQ-081. The chip
-designs are in the other documents in this directory.
+model, the frontend, and the logging and the statistics. It covers REQ-001 to REQ-019, REQ-040 to
+REQ-042 and REQ-080 to REQ-085. The chip designs are in the other documents in this directory.
 
 ## Crates
 
 | Crate | Path | Contents | Dependencies |
 | --- | --- | --- | --- |
-| `atari-core` | `crates/atari-core` | All emulation: chips, memory map, media formats | None (REQ-015) |
-| `atari-harness` | `crates/harness` | Test helpers and the system test suites | `atari-core`, `serde`, `serde_json`, `png` |
-| `atari-mac` | `.` (root) | The frontend binary: window, audio, input, command line | `atari-core`, window and audio crates |
+| `atari-core` | `crates/atari-core` | All emulation: chips, memory map, media formats | `log` only (REQ-015, "Logging and statistics") |
+| `atari-harness` | `crates/harness` | Test helpers and the system test suites | `atari-core`, `serde`, `serde_json`, `png`, `yaml-rust2`; `log` for the tests only |
+| `atari-mac` | `.` (root) | The frontend binary: window, audio, input, command line, log output | `atari-core`, `log`, window and audio crates |
 
 The workspace lints apply to all three crates. The core has no I/O. The frontend owns all
 files, the clock of the host, the window and the audio device (REQ-014).
@@ -33,6 +33,7 @@ files, the clock of the host, the window and the audio device (REQ-014).
 | `media` | Cartridges, executables, disk images, SIO devices | [media.md](media.md) |
 | `timing` | Clock and frame constants | This document |
 | `state` | The byte format of the save states | This document, "Save states" |
+| `events` (crate-private) | The `log` targets and the record macro of the machine event log (REQ-084) | This document, "Logging and statistics" |
 
 A module talks to another module only through the public interface in its design document.
 
@@ -355,6 +356,424 @@ shown frame, and a new `Pacer` from `now` after turbo. In turbo the frame loop c
 Turbo changes only the host pacing, so the emulated machine gives the same frames and RAM
 (criterion 4).
 
+## Logging and statistics
+
+This section is the design of SLICE-09: the machine event log in the core (REQ-084, WP-1),
+the `--log` option (REQ-085, WP-2) and the `--stats` option (REQ-083, WP-2). WP-1 changes
+`crates/atari-core` and adds the test file `crates/harness/tests/event_log.rs`. WP-2 changes
+only the frontend (`src/`, `tests/`, the root `Cargo.toml` and the README options table).
+WP-2 uses no item of WP-1: it uses the target names and the key names below as strings. So
+the two packages can run in parallel.
+
+### The `log` dependency (REQ-015)
+
+The `[dependencies]` table of `crates/atari-core/Cargo.toml` has one entry:
+
+```toml
+# The machine event log (REQ-084). `kv` gives the frame and cycle counts to the logger.
+log = { version = "0.4.35", default-features = false, features = ["kv"] }
+```
+
+- The `log` crate has no default features. The core does not turn on `std`, because the
+  core uses only the `info!` and `debug!` macros.
+- The `kv` feature has no dependency and does no I/O. The core does not use `kv_std`,
+  `kv_serde`, `kv_sval` or a `max_level_*` feature. The frontend sets the level at run time.
+- Version 0.4.35 is already in `Cargo.lock` (an Android dependency of the audio crates), so
+  `Cargo.lock` gets no new crate version. Its license is MIT OR Apache-2.0, which
+  `cargo-deny` accepts.
+- The frontend (`[dependencies]` of the root `Cargo.toml`, WP-2) and the harness
+  (`[dev-dependencies]` of `crates/harness/Cargo.toml`, WP-1) use the same line. The
+  frontend installs its logger with `log::set_logger` and `Box::leak`, so it does not need
+  the `std` feature either.
+
+### Record format (REQ-084 criteria 1 and 2, REQ-085 criterion 2)
+
+| Part | Value |
+| --- | --- |
+| Target | `atari::tape`, `atari::sio`, `atari::reset`, `atari::media` (core), `atari::frontend` (frontend) |
+| Level | `Info`. The SIO data byte records are `Debug`. |
+| Key `frame` | A `u64`: the frame count at the event (`Machine::frame_count`, the frames that completed before the event) |
+| Key `cycle` | A `u64`: the number of the machine cycle of the event (see below) |
+| Message | The text of the event tables below. The message does not contain the counts. |
+
+The cycle number:
+
+- Outside `Machine::run_cycle` (an insert, a reset, a frontend record), `cycle` is
+  `Machine::cycle_count()` at the call.
+- In `Machine::run_cycle`, `cycle` is `now` = `cycles + 1`, the number of the cycle in
+  progress. This is the number that the SIO bus and POKEY use (`media.md`, "SIO bus and disk
+  drive", contract 3). After the cycle, `Machine::cycle_count` gives the same number.
+
+The counts are `log` key-values, not text in the message. The frontend reads them with
+`record.key_values().get(Key::from_str("frame"))` and `Value::to_u64`, so it parses no text.
+Another frontend can show the counts in its own format.
+
+### The module `events` of the core
+
+A new crate-private module `crates/atari-core/src/events.rs` (`mod events;` in `lib.rs`)
+holds the targets and the record macro. The name is not `log`, because a module `log` makes
+the path `log::info!` ambiguous.
+
+```rust
+pub(crate) const TAPE: &str = "atari::tape";
+pub(crate) const SIO: &str = "atari::sio";
+pub(crate) const RESET: &str = "atari::reset";
+pub(crate) const MEDIA: &str = "atari::media";
+
+/// Sends one record with the frame count and the cycle count (REQ-084 criterion 2).
+/// `$level` is `info` or `debug`. `$frame` and `$cycle` are `u64` values.
+macro_rules! record {
+    ($level:ident, $target:expr, $frame:expr, $cycle:expr, $($message:tt)+) => {
+        ::log::$level!(target: $target, frame = $frame, cycle = $cycle; $($message)+)
+    };
+}
+pub(crate) use record;
+```
+
+Each record of the core uses `record!`. The core calls no other item of the `log` crate.
+
+### Where the core sends each record (REQ-084 criterion 1)
+
+`$xx` is a byte in hexadecimal with two digits. `<r>` is the index of a block in
+`Tape::blocks`, from 0. `<b>` is the index of the data byte in block `<r>` at the tape
+position (bit index / 10). It is 0 in the gap of a block and in a signal block.
+
+| Category | Event | Module and function | Level | Message |
+| --- | --- | --- | --- | --- |
+| `tape` | The motor starts | `machine.rs`, the new private `Machine::motor_line(low, now)`. `run_cycle` step 6 and `power_on` call it at each change of CA2. | Info | `motor on, record <r> byte <b>`, or `motor on, no tape` |
+| `tape` | The motor stops | `Machine::motor_line` | Info | `motor off, record <r> byte <b>`, or `motor off, no tape` |
+| `tape` | A data record starts | `Machine::run_cycle` step 2, when `now` is the cycle of the next tape mark (see below) | Info | `record <r> starts: <n> bytes at <baud> baud` |
+| `tape` | The tape ends | `Machine::run_cycle` step 2, as above | Info | `tape ends` |
+| `sio` | A command frame ends | `media/sio.rs`, `SioBus::set_command_line`, at the rising edge in `BusPhase::Command` | Info | `command device $31 command $52 aux1 $01 aux2 $00 checksum ok` (or `checksum bad`). A frame with a bad bit time or not 5 bytes: `command frame not valid: <n> bytes`. |
+| `sio` | A device replies ACK or NAK | `SioBus::end_command_frame` (the command) and `SioBus::end_data_frame` (the data frame) | Info | `reply ACK at cycle <c>` or `reply NAK at cycle <c>` |
+| `sio` | A device replies COMPLETE or ERROR | `SioBus::schedule_result` | Info | `reply COMPLETE at cycle <c>, data frame <n> bytes` (or `ERROR`). `<n>` is 0 without a data frame. |
+| `sio` | The SIOV shortcut does a request | `machine/siov.rs`, `shortcut`, after `SioBus::transact` | Info | `SIOV device $31 command $52 aux1 $01 aux2 $00 status $01`, or the same text with `no device` in place of the status |
+| `sio` | The computer sends a byte | `SioBus::host_byte` | Debug | `sent $xx` |
+| `sio` | A device sends a data frame byte | `SioBus::schedule_result`, for each byte of the data frame and its checksum | Debug | `received $xx at cycle <c>` |
+| `reset` | A cold reset | `Machine::power_on`, at its start | Info | `cold reset` |
+| `reset` | A warm reset | `Machine::press_reset` | Info | `warm reset (RESET key)` |
+| `media` | A cartridge is inserted | `Machine::new`, for the cartridge of the configuration | Info | `cartridge, <n> bytes, CAR type <t>` |
+| `media` | An executable is inserted | `Machine::start_xex`, before `insert_disk` | Info | `executable, <n> bytes in <s> segments` |
+| `media` | A disk image is inserted | `Machine::insert_disk` (also from `Machine::new` and `start_xex`) | Info | `disk, <n> bytes, <k> sectors of <z> bytes` |
+| `media` | A tape image is inserted | `Machine::insert_tape` (also from `Machine::new` and `start_tape`) | Info | `tape, <n> bytes in <k> blocks` |
+
+The data of the records:
+
+- Cartridge: `<n>` is `CartKind::rom_size`, and `<t>` is the CAR type number. WP-1 adds
+  `CartKind::car_type(self) -> u32` (1, 2, 41, 42). The message does not use `Debug`
+  (the lint `clippy::use_debug`).
+- Executable: `<n>` is the sum of the data lengths of the segments, and `<s>` is the
+  number of segments.
+- Disk: `<n>` is the sum of the sector lengths (`Geometry::sector_len`). `<k>` and `<z>` are
+  the fields of `Geometry`.
+- Tape: `<n>` is the sum of the byte counts of the data blocks, and `<k>` is the number of
+  blocks.
+- SIOV: `status $xx` is the status byte of `SioOutcome::Done`. `no device` is
+  `SioOutcome::NoDevice`. A cassette request (`DDEVIC` = `$60`) does not reach `transact` and
+  has no record.
+- `Machine::new`, `start_xex` and `start_tape` call `power_on`, so each of them also sends
+  `cold reset`. The reset records have the counts before the reset.
+
+The counts of the SIO bus records:
+
+- `SioBus` gets the field `log_frame: u64` and the function
+  `pub(crate) const fn set_log_frame(&mut self, frame: u64)`. The machine calls it in
+  `power_on`, at each frame end (`run_cycle` step 7) and after `load_state`. The field is in
+  the `skip` list of `impl_state!`, so the save state does not change.
+- The `cycle` of a record of the bus is the `now` argument of the call. For `host_byte`, it
+  is `byte.end_cycle`.
+- The bus schedules the reply bytes before they start on SIO DATA IN. So a reply record and
+  a received byte record have the cycle of the decision (the end of the command frame or
+  the data frame), and the message gives the start cycle `<c>` of the byte. A record at the
+  start of each byte would need a check in each cycle.
+
+The tape marks. A data record and the tape end start at a tape time, not at a call. So the
+machine calculates the cycle of the next mark:
+
+```rust
+// crates/atari-core/src/media/deck.rs
+pub enum TapeMark {
+    /// A data block starts its first start bit (after its gap).
+    Record { index: usize, len: usize, baud: u16 },
+    /// The end of the last block.
+    End,
+}
+
+impl TapeDeck {
+    /// The block and the data byte at tape time `p` (`<r>` and `<b>`). `None` with no tape.
+    /// After the end of the tape: the number of blocks and 0.
+    pub fn locate(&self, p: u64) -> Option<(usize, usize)>;
+    /// The first mark at tape time `p` or later, with its tape time. `None` with no tape and
+    /// after the end.
+    pub fn next_mark(&self, p: u64) -> Option<(u64, TapeMark)>;
+}
+```
+
+- The machine gets the fields `tape_mark_at: u64` and `tape_mark: TapeMark`. `tape_mark_at`
+  is the cycle of the next mark while the motor runs with a tape, else `u64::MAX`.
+- The private function `Machine::plan_tape_mark(n)` sets the fields. `n` is the next cycle:
+  `now + 1` in `run_cycle`, or `cycle_count() + 1` outside. For the mark at tape time `t`,
+  `tape_mark_at = n + t - deck.position(n)`.
+- The machine calls `plan_tape_mark` after each motor change, after `insert_tape`,
+  `eject_tape` and `power_on`, after each mark, and after `load_state`.
+- `run_cycle` step 2 compares `now` with `tape_mark_at`. When they are equal, it sends the
+  record of the mark and calls `plan_tape_mark(now + 1)`. This is one comparison in each
+  cycle.
+- The fields are not in the save state: `load_state` calculates them again. They do not
+  depend on the log level, so the machine is the same with the log on and off (criterion 4).
+
+### No formatting when the log is off (REQ-084 criterion 5)
+
+- The `log` macros compare the level with `log::STATIC_MAX_LEVEL` and `log::max_level()`
+  first. Only then do they make the `format_args!` and call the logger. With the level `Off`,
+  the core calls no logger function and formats nothing.
+- Each message argument of `record!` is a value or a field (`u8`, `u16`, `u64`, `usize`,
+  `&str`). An argument never calls `format!`, `to_string` or a function that allocates.
+  `format_args!` only borrows the arguments.
+- So the cost with the log off is one atomic load for each record call (a few for each SIO
+  command) and the `tape_mark_at` comparison in each cycle. WP-1 measures the headless
+  command of REQ-007 before and after the change and gives the two times in its report
+  (REQ-084 Notes).
+- The test `no_logger_calls_when_off` installs a logger that counts the calls of `enabled`,
+  `log` and `flush`. With the level `Off`, it does the runs of criterion 3, and each count
+  stays 0.
+
+### Test logger of the core tests
+
+The tests of REQ-084 are in `crates/harness/tests/event_log.rs`, because they need the free
+ROMs and the boot media. The file makes the boot test tape of REQ-643 and the SD boot image
+of REQ-636 criterion 1 in code (the same bytes as `crates/harness/tests/media.rs`).
+
+- The logger and the maximum level are global to the process. So all tests of the file
+  share one capture logger (installed once with `log::set_logger`), and each test holds one
+  static `Mutex` while it runs. Each test sets the level that it needs (`Debug` or `Off`)
+  after it gets the lock.
+- The capture logger keeps each record as (target, level, frame, cycle, message text).
+- No other test binary of the core and the harness installs a logger. So the other tests
+  run with the level `Off`.
+
+### Frontend logger (REQ-085)
+
+The new module `src/logging.rs` holds the logger. The frontend writes its own small
+`log::Log` implementation and uses no logger crate (for example `env_logger`). REQ-085 fixes
+the line format and the category list, and a logger crate brings its own format, its own
+filter syntax and more dependencies.
+
+```rust
+/// A category of `--log` (REQ-085 criterion 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Category { Tape, Sio, Reset, Media, Frontend }
+
+impl Category {
+    pub const ALL: [Self; 5];
+    /// `tape`, `sio`, `reset`, `media`, `frontend`.
+    pub const fn name(self) -> &'static str;
+    /// The category of the target `atari::<name>`. `None` for another target.
+    pub fn from_target(target: &str) -> Option<Self>;
+}
+
+/// The categories that `--log` turns on, each at `Info` or `Debug`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Categories { /* one level for each category, or off */ }
+
+impl Categories {
+    /// Parses the value of `--log`.
+    ///
+    /// # Errors
+    ///
+    /// `FrontendError::Usage` that names the first item that is not valid.
+    pub fn parse(text: &str) -> Result<Self, FrontendError>;
+    /// A record of `target` at `level` is written.
+    pub fn enabled(&self, target: &str, level: log::Level) -> bool;
+    /// `Debug` when a category has `:debug`, else `Info`.
+    pub fn max_level(&self) -> log::LevelFilter;
+}
+
+/// The line of a record: `[frame <f> cycle <c>] <category>: <message>`. A count that the
+/// record does not have is `-`. `None` for a target that is not a category.
+pub fn format_line(record: &log::Record<'_>) -> Option<String>;
+
+/// The logger of `--log`: writes the line of each enabled record to standard error.
+#[derive(Debug)]
+pub struct StderrLogger { /* categories: Categories */ }
+
+impl log::Log for StderrLogger { /* enabled, log, flush */ }
+
+/// Installs a `StderrLogger` (`log::set_logger` with `Box::leak`) and sets the maximum
+/// level to `categories.max_level()`. A second call keeps the first logger.
+pub fn install(categories: Categories);
+```
+
+The parser of `--log`:
+
+1. Split the value at each `,`.
+2. Each item is `<name>` or `<name>:debug`. `<name>` is a category name or `all`. `all` is
+   each category.
+3. A category without `:debug` writes its `Info` records. With `:debug`, it also writes its
+   `Debug` records. When a category is in more than one item, the highest level applies.
+4. An item that is not valid (also an empty item) gives
+   `FrontendError::Usage("unknown --log category \"<item>\" (known: tape, sio, reset, media, frontend, all, each with an optional :debug)")`.
+   The exit status is 2 (REQ-085 criterion 4). `cli::parse` calls the parser, so the error
+   comes before the machine starts.
+
+The command line and the run:
+
+- `cli::Options` gets `pub log: Option<Categories>` (`--log <categories>`) and
+  `pub stats: bool` (`--stats`). A second `--log` replaces the first.
+- The help lines:
+  `--log <categories>   Write log records to standard error: tape,sio,reset,media,frontend,all`
+  and `--stats              Each second, write the speed statistics to standard error`.
+  WP-2 adds the two rows to the README options table, because the README gate (REQ-056
+  criterion 6) compares the table with `--help`.
+- `run_machine` calls `logging::install` before `start_at` when `options.log` is `Some`.
+  Without `--log`, the frontend does not call `log::set_logger` or `log::set_max_level`, so
+  the level stays `Off`, the default of the `log` crate (criterion 5).
+- `StderrLogger::log` writes the line and `\n` with one `write_all` to the locked standard
+  error, so the lines of two threads do not mix. A logger cannot give an error, so it
+  ignores a write error.
+
+### Frontend records (REQ-085 criterion 3)
+
+The frontend sends its records with
+`log::info!(target: "atari::frontend", frame = f, cycle = c; "...")`. `f` and `c` are
+`Machine::frame_count()` and `Machine::cycle_count()` at the call, so they are the counts at
+the start of the frame that comes next (criterion 2).
+
+| Event | Function in `src/frontend.rs` | Message |
+| --- | --- | --- |
+| Turbo starts | `Frontend::run_frame`, before the frame, when the turbo cause changes | `turbo on (BASIC typing)` or `turbo on (tape motor)` |
+| Turbo stops | `Frontend::run_frame`, as above | `turbo off` |
+| Pause | `Frontend::apply`, at the F9 edge, when the emulation stops | `paused` |
+| Continue | `Frontend::apply`, at the F9 edge, when the emulation continues | `continued` |
+| Cold reset from F10 | `Frontend::apply`, at the F10 edge, before `Machine::power_on` | `cold reset (F10)` |
+
+The turbo cause:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurboCause {
+    /// The typist types the BASIC program (REQ-080 criterion 7).
+    Typing,
+    /// A tape is inserted and the motor line is low (REQ-082).
+    TapeMotor,
+}
+
+impl Frontend {
+    /// The turbo cause of the last frame that ran, or `None` for real-time speed.
+    pub const fn turbo_cause(&self) -> Option<TurboCause>;
+}
+```
+
+Before each frame, `run_frame` calculates the cause: `Typing` while the typist is active,
+else `TapeMotor` when `Machine::tape_motor_on()`, else `None`. When the cause is not the
+cause of the last frame, it sends the record. So a change from `Typing` to `TapeMotor` sends
+`turbo on (tape motor)` and no `turbo off`. A pause runs no frame, so the cause does not
+change. `Frontend::turbo` does not change.
+
+### Speed statistics (REQ-083)
+
+The new module `src/stats.rs` holds the accumulator. It takes the host time as an argument,
+as `Pacing` does, so the unit tests use a fake clock.
+
+```rust
+/// One second of statistics.
+pub const INTERVAL: Duration = Duration::from_secs(1);
+
+/// The cassette motor at a frame (REQ-083 criterion 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motor { On, Off, NoTape }
+
+impl Motor {
+    /// `NoTape` when `Machine::tape_position()` is `None`, else `On` or `Off` from the deck.
+    pub fn of(machine: &Machine) -> Self;
+    /// `on`, `off`, `-`.
+    pub const fn name(self) -> &'static str;
+}
+
+/// The totals that other parts of the frontend count since the start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Counters {
+    /// The frames that the window showed. 0 with `--headless`.
+    pub shown: u64,
+    /// The audio underruns (REQ-011). 0 with `--headless`.
+    pub underruns: u64,
+}
+
+/// One frame that ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameStats {
+    /// The host time of the emulation of the frame: `Frontend::step` or one frame of
+    /// `Frontend::run_frames`, without the wait and without the window update.
+    pub emulation: Duration,
+    /// `Frontend::turbo()` after the frame.
+    pub turbo: bool,
+    /// `Motor::of` the machine after the frame.
+    pub motor: Motor,
+}
+
+#[derive(Debug, Clone)]
+pub struct Stats { /* see below */ }
+
+impl Stats {
+    /// Starts the first second at `now`, the start of the first frame. `counters` are the
+    /// totals at `now`, and `motor` is the motor before the first frame.
+    pub fn new(standard: VideoStandard, now: Instant, counters: Counters, motor: Motor) -> Self;
+    /// Counts one frame that ran.
+    pub fn frame(&mut self, frame: FrameStats);
+    /// Called at `now` after each step. When `INTERVAL` or more passed since the start of
+    /// the current second, gives the line and starts the next second at `now`.
+    pub fn tick(&mut self, now: Instant, counters: Counters) -> Option<String>;
+}
+```
+
+The line of `tick`:
+`stats: frame <n> fps <f> speed <p>% shown <s> emu <m> ms turbo <on|off> motor <on|off|-> underruns <u>`.
+
+| Value | Calculation |
+| --- | --- |
+| `<n>` | The count of `frame` calls since `new` |
+| `<f>` | The frames of this second divided by `(now - start of the second).as_secs_f64()`, `{:.1}` |
+| `<p>` | `<f>` / `standard.frames_per_second()` x 100, `f64::round`, as an integer |
+| `<s>` | `counters.shown` minus the total at the start of the second |
+| `<m>` | The mean `emulation` of the frames of this second in ms, `{:.2}`. `0.00` when no frame ran. |
+| `turbo`, `motor` | The values of the last frame that ran. Before the first frame: `off` and the `motor` of `new`. |
+| `<u>` | `counters.underruns` minus the total at the start of the second |
+
+The next second starts at `now`, not at the start time plus `INTERVAL`. So after a stop of
+the host, the frontend writes one line and not a series of lines.
+
+The window loop (`src/window.rs`, `emulate`), with `--stats`:
+
+1. `Shared` gets `shown: AtomicU64`. The window thread adds 1 after each
+   `update_with_buffer` of a new frame that succeeds.
+2. `FrameAudio` gets `fn underruns(&self) -> u64`. `AudioSink::underruns` gives the count of
+   its ring, or 0 without a stream. The fake devices of the tests give their own count.
+3. `emulate` makes the `Stats` at `start` (before the first step).
+4. For each step: `t0 = Instant::now()`, `Frontend::step`, `t1 = Instant::now()`. When
+   `frames_run` increased, it calls `stats.frame` with `t1 - t0`. Then it calls `after_step`
+   at `t1`, and `stats.tick(t1, counters)` with `shared.shown` and `audio.underruns()`.
+5. A line from `tick` goes to standard error with `writeln!` (an error is
+   `FrontendError::Output`). Then the thread waits (`after.wait`).
+
+The headless loop (`src/lib.rs`, `run_machine`), with `--stats`: it runs the frames one at a
+time with `Frontend::run_frames(1)`, measures each frame as in step 4, and calls `tick` with
+`Counters::default()` after each frame. Without `--stats`, the loops do not change and make
+no `Stats`.
+
+### Tests of the slice
+
+The rows for REQ-083 to REQ-085 are in "Test plan" below.
+
+- `src/stats.rs` and `src/logging.rs`: unit tests with a fake clock, and records that the
+  test makes with `log::Record::builder` and `key_values`. They install no logger.
+- `tests/frontend_log.rs`: a separate test binary with a capture logger (one record list for
+  each thread), so that the level of the other frontend tests stays `Off`.
+- `tests/cli.rs`: the binary, in a child process. `no_log_without_option` also calls
+  `atari_mac::run` in the test process and checks that `log::max_level()` is `Off` after it.
+- `crates/harness/tests/event_log.rs`: the core records, with the free ROMs.
+- `log_writes_tape_lines` needs the records of WP-1. Until WP-1 is merged, WP-2 keeps it as
+  a stub.
+
 ## Error handling
 
 The core returns errors as values (`ConfigError`, `MediaError`). It never panics (REQ-016).
@@ -375,6 +794,9 @@ file error.
 | REQ-080 | `tests/cli.rs` `bas_runs_program` (1), `bas_no_run_only_types` (2), `bas_line_endings` (3), `bas_rejects_unknown_character` (4), `bas_missing_file` (5), `bas_waits_for_ready` (6), `bas_window_shows_typing` (7), `bas_help_and_no_run_alone` (8), `bas_typed_listing_equals_file` (9), `bas_typed_listing_keeps_lower_case` (9), `bas_pong_typing_frames` (10); `src/frontend.rs` unit test `bas_turbo_until_typed` (7) |
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
 | REQ-082 | `src/frontend.rs` unit tests `tape_turbo_follows_motor_line` (1, fake clock), `motor_line_without_tape_keeps_pacing` (2), `tape_turbo_presents_frames` (3), `tape_turbo_keeps_machine_state` (4), `tape_turbo_stops_audio` (5, fake device) |
+| REQ-083 | `src/stats.rs` unit tests `stats_line_each_second` (1, fake clock), `stats_frame_rate_and_speed` (2, 3), `stats_shown_and_underruns` (4, 7), `stats_emulation_time` (5), `stats_turbo_and_motor` (6); `tests/cli.rs` `stats_headless_lines` (1, 4, 7), `no_stats_without_option` (8), `stats_help_lists_option` (9) |
+| REQ-084 | `crates/harness/tests/event_log.rs` `tape_records` (1, 2, 3), `sio_records` (1, 2, 3, the serial path and the SIOV shortcut), `reset_records` (1, 2, 3), `media_records` (1, 2, 3), `log_keeps_machine_state` (4), `no_logger_calls_when_off` (5) |
+| REQ-085 | `src/logging.rs` unit tests `log_categories_parse` (1, 4), `logger_filters_category_and_level` (1), `log_line_format` (2); `tests/frontend_log.rs` `frontend_records` (2, 3); `tests/cli.rs` `log_writes_tape_lines` (2), `log_rejects_unknown_category` (4), `no_log_without_option` (5), `log_help_lists_option` (6) |
 | REQ-019 | `tests/cli.rs` `filters_off_without_flags` (1), `artifacting_flag_filters_screenshot` (2), `pal_blending_flag_filters_screenshot` (3), `help_lists_filter_flags` (4), `filter_flag_needs_matching_standard` (5); `src/cli.rs` unit test `filter_flags_and_standards` (5); `src/frontend.rs` unit test `filters_apply_to_their_standard` (2, 3) |
 | REQ-007 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-007.md`. The pacing logic: `src/frontend.rs` unit tests `paced_frames_keep_the_frame_rate` (1, fake clock), `pacer_keeps_the_frame_rate` |
 | REQ-011 | Demonstration: the commands in the acceptance criteria; evidence `docs/verification/REQ-011.md`. The ring and the wait correction: `src/audio.rs` unit tests `ring_plays_samples_in_order`, `ring_without_samples_is_silent`, `ring_counts_underruns`, `ring_drops_oldest_when_full`, `correction_follows_the_level`; `src/frontend.rs` unit tests `audio_ring_has_no_underruns` (1, fake clock and device), `step_hands_over_the_frame_audio` |
