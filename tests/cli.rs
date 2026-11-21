@@ -242,7 +242,7 @@ fn valid_atr() -> Vec<u8> {
 /// Ignored until `--xex` (SLICE-04 WP-1) and `--disk` (the ATR loader of REQ-625, SLICE-05)
 /// exist.
 #[test]
-#[ignore = "planned: SLICE-04"]
+#[ignore = "planned: SLICE-05"]
 fn loads_cart_xex_and_disk() {
     let dir = temp_dir("loads_cart_xex_and_disk");
     for (option, name, bytes) in [
@@ -274,7 +274,7 @@ fn loads_cart_xex_and_disk() {
 /// Ignored until `--xex` (SLICE-04 WP-1) and `--disk` (the ATR loader of REQ-625, SLICE-05)
 /// exist.
 #[test]
-#[ignore = "planned: SLICE-04"]
+#[ignore = "planned: SLICE-05"]
 fn rejects_bad_cart_xex_and_disk() {
     let dir = temp_dir("rejects_bad_cart_xex_and_disk");
     for (option, name) in [

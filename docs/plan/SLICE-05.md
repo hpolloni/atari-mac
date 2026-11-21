@@ -11,7 +11,7 @@ packages:
   - id: WP-2
     title: SIO disk drive and ATR images
     status: planned
-    requirements: [REQ-615, REQ-616, REQ-617, REQ-618, REQ-619, REQ-620, REQ-621, REQ-622, REQ-623, REQ-624, REQ-625, REQ-626, REQ-627, REQ-628, REQ-629, REQ-630, REQ-631, REQ-632, REQ-633, REQ-634, REQ-635, REQ-636, REQ-637, REQ-638]
+    requirements: [REQ-012, REQ-615, REQ-616, REQ-617, REQ-618, REQ-619, REQ-620, REQ-621, REQ-622, REQ-623, REQ-624, REQ-625, REQ-626, REQ-627, REQ-628, REQ-629, REQ-630, REQ-631, REQ-632, REQ-633, REQ-634, REQ-635, REQ-636, REQ-637, REQ-638]
 ---
 # SLICE-05: Disk drive
 
@@ -24,7 +24,7 @@ The emulator has an emulated disk drive D1: on the SIO bus. It boots an ATR disk
 | Package | Title | Requirements |
 | --- | --- | --- |
 | WP-1 | POKEY serial port | REQ-502, REQ-516, REQ-517, REQ-525, REQ-526, REQ-527, REQ-528, REQ-529, REQ-530, REQ-531, REQ-532, REQ-533 |
-| WP-2 | SIO disk drive and ATR images | REQ-615, REQ-616, REQ-617, REQ-618, REQ-619, REQ-620, REQ-621, REQ-622, REQ-623, REQ-624, REQ-625, REQ-626, REQ-627, REQ-628, REQ-629, REQ-630, REQ-631, REQ-632, REQ-633, REQ-634, REQ-635, REQ-636, REQ-637, REQ-638 |
+| WP-2 | SIO disk drive and ATR images | REQ-012, REQ-615, REQ-616, REQ-617, REQ-618, REQ-619, REQ-620, REQ-621, REQ-622, REQ-623, REQ-624, REQ-625, REQ-626, REQ-627, REQ-628, REQ-629, REQ-630, REQ-631, REQ-632, REQ-633, REQ-634, REQ-635, REQ-636, REQ-637, REQ-638 |
 
 Some requirements in this slice already have tests that run (from SLICE-01). The package must still check them against the full acceptance criteria.
 

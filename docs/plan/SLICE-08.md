@@ -15,7 +15,7 @@ packages:
   - id: WP-3
     title: Tape boot and the --cas option
     status: planned
-    requirements: [REQ-643, REQ-081]
+    requirements: [REQ-643, REQ-081, REQ-016]
 ---
 # SLICE-08: Cassette tape
 
@@ -29,7 +29,7 @@ The user starts the emulator with `--cas game.cas`. The emulator inserts the CAS
 | --- | --- | --- |
 | WP-1 | CAS tape images | REQ-639, REQ-640 |
 | WP-2 | Tape deck, motor and signal | REQ-641, REQ-642 |
-| WP-3 | Tape boot and the --cas option | REQ-643, REQ-081 |
+| WP-3 | Tape boot and the --cas option | REQ-643, REQ-081, REQ-016 |
 
 WP-1 is in the core only (`Tape::from_cas`). WP-2 needs WP-1, the POKEY serial input and `SKSTAT` bit 4 (SLICE-05 WP-1: REQ-526, REQ-530), and the PIA CA2 output (REQ-227). WP-3 needs WP-2.
 
