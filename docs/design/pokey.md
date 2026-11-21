@@ -223,7 +223,7 @@ All state is in `Pokey`. Power-on values are the values after `new` and `reset` 
 | `clock_hz`, `sample_rate` | `u32` | from `new` | 1789773 (NTSC) or 1773447 (PAL); host rate |
 | `phase` | `u64` | 0 | Resampler phase, in units of 1 / (`clock_hz` x `sample_rate`) s |
 | `acc_pokey`, `acc_spk` | `f64` | 0 | Sums for the current sample |
-| `hp1`, `hp2` | `f32` | 0 | Capacitor states of the two high-pass stages |
+| `hp1`, `hp2` | `f64` | 0 | Capacitor states of the two high-pass stages (the sample is `f32`) |
 | `samples` | `Vec<f32>` | empty | Samples not yet drained |
 
 ## Behavior
@@ -694,9 +694,14 @@ model of REQ-600 and later.
 16. `Pokey::new` takes a sample rate of 8000 to 192000 Hz (REQ-538). The behavior for a rate
     outside this range (panic, clamp or error) is not decided.
 17. WP-5 part 2 (2026-11-19): the code has the test accessor `test_fired()` (the timers that fired
-    on the last tick) instead of the `test_fires()` log of "Test accessors". The external
-    serial clock (`SKCTL` bits 6-4 = `000` and `001`) has no edges yet. At power-on the
-    speaker level is `false`, but the real line is high (`CONSOL` = `$00`, HRM 6.11).
+    on the last tick) instead of the `test_fires()` log of "Test accessors". The tests build
+    the fire log from it. The external serial clock (`SKCTL` bits 6-4 = `000` and `001`) has
+    no edges yet. At power-on the speaker level is `false`, but the real line is high
+    (`CONSOL` = `$00`, HRM 6.11). The machine sends the level only after the first GTIA write.
 18. The REQ-522 system check `break_stops_basic_program`: after BREAK, Altirra BASIC prints
     `Stopped at line 10` and no new prompt. The test then types `PRINT 2+2` to show that the
     program stopped.
+19. SLICE-03 WP-1 (2026-11-20): an `STIMER` write does not cancel a fire whose visible cycle is
+    before T+4 (HRM 5.3 STIMER preemption). So a timer that ran before the write can still
+    fire on T+1 to T+3. The tests of REQ-507 criteria 2 and 4, REQ-508 criterion 2 and
+    REQ-510 criterion 5 start the timers so that no fire is scheduled at T.

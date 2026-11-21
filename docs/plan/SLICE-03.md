@@ -1,12 +1,12 @@
 ---
 id: SLICE-03
 title: Sound
-status: planned
+status: in-progress
 depends_on: "SLICE-01"
 packages:
   - id: WP-1
     title: POKEY timers and audio
-    status: planned
+    status: done
     requirements: [REQ-438, REQ-503, REQ-504, REQ-505, REQ-506, REQ-507, REQ-508, REQ-509, REQ-510, REQ-511, REQ-512, REQ-513, REQ-514, REQ-538, REQ-539, REQ-540, REQ-541]
   - id: WP-2
     title: Frontend audio and speed

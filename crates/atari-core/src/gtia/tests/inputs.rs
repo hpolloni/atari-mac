@@ -1,5 +1,6 @@
 //! Trigger latch and console speaker tests (REQ-436, REQ-438).
 
+use super::{CONSOL, Gtia, VideoStandard};
 use crate::planned::planned;
 
 /// Verifies REQ-436: with `GRACTL` = `$04`, a press and release of the port 1 button makes
@@ -22,7 +23,18 @@ fn trigger_latch_all_triggers() {
 /// Verifies REQ-438: the GTIA speaker state follows `CONSOL` bit 3 of the last write: `$08`
 /// and `$0F` give 1, `$00` and `$07` give 0 (criteria 1 and 2).
 #[test]
-#[ignore = "planned: SLICE-03"]
 fn speaker_follows_consol_bit_3() {
-    planned();
+    let mut gtia = Gtia::new(VideoStandard::Ntsc);
+    // Criterion 1.
+    gtia.write(CONSOL, 0x08);
+    assert!(gtia.speaker(), "after $08");
+    gtia.write(CONSOL, 0x00);
+    assert!(!gtia.speaker(), "after $00");
+    // Criterion 2: only bit 3 of the last write counts.
+    gtia.write(CONSOL, 0x08);
+    gtia.write(CONSOL, 0x0F);
+    assert!(gtia.speaker(), "after $08 and $0F");
+    gtia.write(CONSOL, 0x00);
+    gtia.write(CONSOL, 0x07);
+    assert!(!gtia.speaker(), "after $00 and $07");
 }

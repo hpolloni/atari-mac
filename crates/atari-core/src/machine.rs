@@ -597,7 +597,7 @@ impl Machine {
     }
 
     /// Moves all audio samples produced since the last call into `out`.
-    pub const fn drain_audio(&mut self, out: &mut Vec<f32>) {
+    pub fn drain_audio(&mut self, out: &mut Vec<f32>) {
         self.pokey.drain_samples(out);
     }
 }

@@ -106,6 +106,11 @@ impl SerialOut {
         self.level
     }
 
+    /// The output clock flip-flop (SIO CLOCK OUT).
+    pub(super) const fn clock(&self) -> bool {
+        self.clock
+    }
+
     /// Initialization mode (REQ-531): the output stops, a pending `SEROUT` is discarded, and
     /// SIO DATA OUT keeps its level.
     pub(super) const fn stop(&mut self) {
