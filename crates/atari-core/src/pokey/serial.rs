@@ -246,6 +246,14 @@ pub(super) struct SerialIn {
     last_level: bool,
 }
 
+impl_state!(SerialIn {
+    data,
+    bits,
+    clock,
+    running,
+    last_level,
+});
+
 impl SerialIn {
     /// The power-on state: the input waits, and the line was idle (1).
     pub(super) const fn new() -> Self {

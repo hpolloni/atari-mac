@@ -12,6 +12,7 @@
 use std::collections::VecDeque;
 
 use crate::pokey::SerialByte;
+use crate::state::impl_state;
 use crate::timing::VideoStandard;
 
 /// The number of bit cells in one byte on the line: start bit, 8 data bits, stop bit.
@@ -21,7 +22,7 @@ const FRAME_BITS: u64 = 10;
 const HOST_BYTES: usize = 300;
 
 /// A byte that a device sends on SIO DATA IN.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct DeviceByte {
     /// The 8 data bits.
     value: u8,
@@ -30,6 +31,12 @@ struct DeviceByte {
     /// The cycles of one bit cell.
     bit_cycles: u32,
 }
+
+impl_state!(DeviceByte {
+    value,
+    start,
+    bit_cycles,
+});
 
 impl DeviceByte {
     /// The first cycle after the stop bit.
@@ -58,6 +65,12 @@ pub struct SioBus {
     /// The scheduled device bytes, in the order of their start cycles.
     out: VecDeque<DeviceByte>,
 }
+
+impl_state!(SioBus {
+    command_low,
+    host,
+    out,
+});
 
 impl SioBus {
     /// The idle bus: no device byte and the command line high.

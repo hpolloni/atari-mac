@@ -6,10 +6,10 @@
 //! each for one bit time.
 
 use super::{
-    AUDC1, AUDC3, AUDCTL, AUDF1, AUDF2, AUDF3, AUDF4, BIT, IRQ_DONE, IRQ_NEEDED, IRQEN,
-    SEROUT, SKCTL, SKRES, STIMER, all_reads, clear_irq, fire_log, fires_of,
-    frame_levels, irqst, levels, new_pokey, run, run_checking, run_to,
-    run_until, send, serial_pokey, skstat, spacing, timer_pokey,
+    AUDC1, AUDC3, AUDCTL, AUDF1, AUDF2, AUDF3, AUDF4, BIT, IRQ_DONE, IRQ_NEEDED, IRQEN, SEROUT,
+    SKCTL, SKRES, STIMER, all_reads, clear_irq, fire_log, fires_of, frame_levels, irqst, levels,
+    new_pokey, run, run_checking, run_to, run_until, send, serial_pokey, skstat, spacing,
+    timer_pokey,
 };
 use crate::keyboard;
 use crate::pokey::Pokey;
@@ -612,7 +612,12 @@ fn framing_error() {
     let mut p = receive_pokey(0x20);
     let mut log = Vec::new();
     let _s = receive(&mut p, 0x43, false, BIT, |p| {
-        log.push((p.cycle(), irqst(p) & IRQ_IN, skstat(p) & SK_FRAMING, p.peek(SERIN)));
+        log.push((
+            p.cycle(),
+            irqst(p) & IRQ_IN,
+            skstat(p) & SK_FRAMING,
+            p.peek(SERIN),
+        ));
     });
     let e = log
         .iter()
@@ -621,7 +626,11 @@ fn framing_error() {
         .expect("IRQST bit 5 goes to 0");
     for (cycle, irq, framing, serin) in log {
         if cycle < e {
-            assert_eq!((irq, framing), (IRQ_IN, SK_FRAMING), "cycle {cycle} before E");
+            assert_eq!(
+                (irq, framing),
+                (IRQ_IN, SK_FRAMING),
+                "cycle {cycle} before E"
+            );
         } else {
             assert_eq!((irq, framing, serin), (0, 0, 0x43), "cycle {cycle} from E");
         }
@@ -645,7 +654,11 @@ fn serial_overrun() {
     let mut p = receive_pokey(0x20);
     let first = two_frames(&mut p, |_| {});
     assert_ne!(first & SK_OVERRUN_IN, 0, "no overrun after the first frame");
-    assert_eq!(skstat(&p) & SK_OVERRUN_IN, 0, "overrun after the second frame");
+    assert_eq!(
+        skstat(&p) & SK_OVERRUN_IN,
+        0,
+        "overrun after the second frame"
+    );
     assert_eq!(p.peek(SERIN), 0x55, "SERIN");
 }
 
@@ -656,7 +669,11 @@ fn serin_read_does_not_prevent_overrun() {
     let _first = two_frames(&mut p, |p| {
         assert_eq!(p.read(SERIN), 0x43, "SERIN between the frames");
     });
-    assert_eq!(skstat(&p) & SK_OVERRUN_IN, 0, "overrun after the second frame");
+    assert_eq!(
+        skstat(&p) & SK_OVERRUN_IN,
+        0,
+        "overrun after the second frame"
+    );
     assert_eq!(p.peek(SERIN), 0x55, "SERIN");
 }
 
@@ -829,7 +846,11 @@ fn two_tone_off_resets_tone_ff() {
         if p.test_fired() & (T1 | T2) != 0 {
             return true;
         }
-        assert!(!p.serial_out(), "0 before the next fire, cycle {}", p.cycle());
+        assert!(
+            !p.serial_out(),
+            "0 before the next fire, cycle {}",
+            p.cycle()
+        );
         false
     });
     assert!(fire.is_some(), "timer 1 or 2 fires");
@@ -1040,7 +1061,11 @@ fn two_tone_resync_no_fire() {
             clear_irq(&mut p, 0x03, 0x01);
         }
     }
-    assert!(latched.len() > 100, "IRQST bit 0 changes: {}", latched.len());
+    assert!(
+        latched.len() > 100,
+        "IRQST bit 0 changes: {}",
+        latched.len()
+    );
     assert!(
         latched.iter().all(|c| fires.contains(c)),
         "IRQST bit 0 changes only on the fires of timer 1"

@@ -62,8 +62,12 @@ fn init_mode_keeps_fast_timers() {
     p.write(AUDCTL, 0x40);
     p.write(STIMER, 0x00);
     let t = p.cycle();
-    run_checking(&mut p, 7, "IRQST bit 0 before T+8", |p| irqst(p) & 0x01 != 0);
-    run_checking(&mut p, 1000, "IRQST bit 0 from T+8", |p| irqst(p) & 0x01 == 0);
+    run_checking(&mut p, 7, "IRQST bit 0 before T+8", |p| {
+        irqst(p) & 0x01 != 0
+    });
+    run_checking(&mut p, 1000, "IRQST bit 0 from T+8", |p| {
+        irqst(p) & 0x01 == 0
+    });
     assert_eq!(p.cycle(), t + 1007, "cycle");
 }
 
@@ -176,7 +180,8 @@ fn init_mode_holds_serial_input() {
     p.write(IRQEN, 0x20);
     run(&mut p, 1000);
     let mut fires = 0;
-    let ok = |p: &Pokey| p.peek(SERIN) == 0x00 && irqst(p) & 0x20 != 0 && p.peek(SKSTAT) & 0x02 != 0;
+    let ok =
+        |p: &Pokey| p.peek(SERIN) == 0x00 && irqst(p) & 0x20 != 0 && p.peek(SKSTAT) & 0x02 != 0;
     let _s = receive(&mut p, 0x43, true, BIT, |p| {
         assert!(ok(p), "the input changed on cycle {}", p.cycle());
         if p.test_fired() & 0b1000 != 0 {

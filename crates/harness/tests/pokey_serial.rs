@@ -63,7 +63,8 @@ fn checksum(bytes: &[u8]) -> u8 {
         sum += u16::from(*byte);
         sum = (sum & 0xFF) + (sum >> 8);
     }
-    u8::try_from(sum).expect("the sum is one byte")
+    let [low, _high] = sum.to_le_bytes();
+    low
 }
 
 /// The 128 data bytes of the device.
@@ -112,7 +113,9 @@ fn os_sio_receives_frame() {
         reply.push((byte, complete + k * BYTE_PERIOD));
     }
     for (value, start) in &reply {
-        machine.sio_mut().send_device_byte(*value, *start, BIT_CYCLES);
+        machine
+            .sio_mut()
+            .send_device_byte(*value, *start, BIT_CYCLES);
     }
     // Each byte reaches `SERIN` with the serial input IRQ.
     let mut received = Vec::new();
@@ -130,6 +133,8 @@ fn os_sio_receives_frame() {
     assert_eq!(received, sent, "the bytes in SERIN with the IRQ");
     assert_eq!(machine.peek_ram(DONE), 0xA5, "SIOV returned");
     assert_eq!(machine.peek_ram(STATUS), 0x01, "SIOV status");
-    let buffer: Vec<u8> = (BUFFER..BUFFER + 128).map(|a| machine.peek_ram(a)).collect();
+    let buffer: Vec<u8> = (BUFFER..BUFFER + 128)
+        .map(|a| machine.peek_ram(a))
+        .collect();
     assert_eq!(buffer, data, "the buffer");
 }
