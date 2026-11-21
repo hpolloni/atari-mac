@@ -1,12 +1,12 @@
 ---
 id: SLICE-10
 title: CPU instruction trace
-status: planned
+status: in-progress
 depends_on: "SLICE-09"
 packages:
   - id: WP-1
     title: Disassembler
-    status: planned
+    status: done
     requirements: [REQ-087]
   - id: WP-2
     title: The --trace option

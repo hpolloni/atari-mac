@@ -18,6 +18,7 @@
 //! | Module | Contents |
 //! | --- | --- |
 //! | [`cpu`] | MOS 6502 (NMOS, with undocumented opcodes), one bus access per cycle |
+//! | [`disasm`] | 6502 disassembler: the text and length of each opcode (REQ-087) |
 //! | [`antic`] | ANTIC: display list, DMA, cycle stealing, NMI, `WSYNC`, `VCOUNT` |
 //! | [`gtia`] | GTIA: playfield colors, player/missile graphics, collisions, triggers, `CONSOL` |
 //! | [`palette`] | GTIA color byte to RGB |
@@ -32,6 +33,7 @@
 
 pub mod antic;
 pub mod cpu;
+pub mod disasm;
 pub mod gtia;
 pub mod keyboard;
 pub mod machine;

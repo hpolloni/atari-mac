@@ -841,6 +841,7 @@ impl Machine {
     }
 }
 
+mod debug;
 mod save;
 mod siov;
 
