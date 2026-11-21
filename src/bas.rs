@@ -103,7 +103,7 @@ fn line_codes(
 /// With `run`, `RUN` and RETURN follow.
 ///
 /// A line ends with LF or CR LF. A line that is empty or has only spaces is not typed.
-/// Lower case letters are typed in lower case (see [`line_codes`]); after the program, the
+/// Lower case letters are typed in lower case (see `line_codes`); after the program, the
 /// editor is in upper case again.
 ///
 /// # Errors
