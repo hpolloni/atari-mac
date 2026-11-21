@@ -1,7 +1,7 @@
 ---
 id: SLICE-08
 title: Cassette tape
-status: in-progress
+status: done
 depends_on: "SLICE-05 WP-1 (POKEY serial input)"
 packages:
   - id: WP-1
@@ -14,7 +14,7 @@ packages:
     requirements: [REQ-641, REQ-642, REQ-227]
   - id: WP-3
     title: Tape boot and the --cas option
-    status: in-progress
+    status: done
     requirements: [REQ-643, REQ-081, REQ-082]
 ---
 # SLICE-08: Cassette tape

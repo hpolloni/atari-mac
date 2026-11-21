@@ -1440,21 +1440,26 @@ mod tape_boot {
         bytes
     }
 
-    /// One tape record: `55 55 FC`, the 128 bytes of `data` (`$00` after its end) and the
-    /// checksum of the 131 bytes before it (REQ-616).
-    fn record(data: &[u8]) -> Vec<u8> {
-        let mut bytes = vec![0x55, 0x55, 0xFC];
+    /// One tape record: `55 55`, the control byte `control` (`$FC` data, `$FE` end of
+    /// file), the 128 bytes of `data` (`$00` after its end) and the checksum of the 131
+    /// bytes before it (REQ-616).
+    fn record(control: u8, data: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x55, 0x55, control];
         bytes.extend(data);
         bytes.resize(131, 0);
         bytes.push(sio_checksum(&bytes));
         bytes
     }
 
-    /// The boot test tape of REQ-643 as a CAS file. With `bad_checksum`, bit 0 of the
-    /// checksum of record 2 is changed (criterion 4).
+    /// The boot test tape of REQ-643 as a CAS file: two boot records and the end-of-file
+    /// record. With `bad_checksum`, bit 0 of the checksum of record 2 is changed
+    /// (criterion 4).
     fn boot_tape_file(bad_checksum: bool) -> Vec<u8> {
-        let first = record(&[0x00, 0x02, 0x00, 0x07, 0x86, 0x07, 0x4C, 0x80, 0x07]);
-        let mut second = record(&[0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x18, 0x60]);
+        let first = record(
+            0xFC,
+            &[0x00, 0x02, 0x00, 0x07, 0x86, 0x07, 0x4C, 0x80, 0x07],
+        );
+        let mut second = record(0xFC, &[0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x18, 0x60]);
         if bad_checksum {
             second[131] ^= 0x01;
         }
@@ -1462,6 +1467,7 @@ mod tape_boot {
         file.extend(chunk(*b"baud", 600, &[]));
         file.extend(chunk(*b"data", 20_000, &first));
         file.extend(chunk(*b"data", 3_000, &second));
+        file.extend(chunk(*b"data", 3_000, &record(0xFE, &[])));
         file
     }
 
@@ -1561,13 +1567,7 @@ mod tape_boot {
     /// 60 and RETURN in frames 180-186: `$0600` holds `$A5` within 2,400 frames; the motor
     /// line is high at the end of each frame before frame 180 and low at the end of a frame
     /// from 181 to 300 (criteria 1, 3).
-    ///
-    /// Ignored: with `AltirraOS`, the boot of the tape of the criteria does not end. After
-    /// the two records, the OS reads one more record, the EOF record (TRN SRC-MONORG line
-    /// 3927, "GET EOF RECORD, BUT DON'T USE IT"; TRN OS-5 "File Structure"), and the tape
-    /// has none. The lead changes the tape of the requirement.
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn req643_boot_tape_ntsc() {
         let run = check_boot(VideoStandard::Ntsc, false, 2_400);
         assert!(
@@ -1586,13 +1586,7 @@ mod tape_boot {
 
     /// Verifies REQ-643: PAL, START until frame 60 and RETURN in frames 150-156: `$0600`
     /// holds `$A5` within 2,000 frames (criterion 2).
-    ///
-    /// Ignored: with `AltirraOS`, the boot of the tape of the criteria does not end. After
-    /// the two records, the OS reads one more record, the EOF record (TRN SRC-MONORG line
-    /// 3927, "GET EOF RECORD, BUT DON'T USE IT"; TRN OS-5 "File Structure"), and the tape
-    /// has none. The lead changes the tape of the requirement.
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn req643_boot_tape_pal() {
         let _run = check_boot(VideoStandard::Pal, false, 2_000);
     }
@@ -1601,6 +1595,11 @@ mod tape_boot {
     /// after 2,400 frames (NTSC), `$0600` does not hold `$A5` (criterion 4).
     #[test]
     fn req643_bad_checksum_no_boot() {
+        let mut good = machine(boot_tape(false), VideoStandard::Ntsc, false);
+        assert!(
+            run_boot(&mut good, 2_400).done.is_some(),
+            "4: the tape without the change boots"
+        );
         let mut m = machine(boot_tape(true), VideoStandard::Ntsc, false);
         let run = run_boot(&mut m, 2_400);
         assert_eq!(run.done, None, "4: no boot with a bad checksum");
@@ -1610,13 +1609,7 @@ mod tape_boot {
     /// Verifies REQ-643: the NTSC boot of criterion 1 also passes with the SIOV shortcut
     /// on, and each SIOV call of the boot names the cassette (`DDEVIC` `$60` or `$5F`), not
     /// D1: (`$31`), so the shortcut handles none of them (criterion 5).
-    ///
-    /// Ignored: with `AltirraOS`, the boot of the tape of the criteria does not end. After
-    /// the two records, the OS reads one more record, the EOF record (TRN SRC-MONORG line
-    /// 3927, "GET EOF RECORD, BUT DON'T USE IT"; TRN OS-5 "File Structure"), and the tape
-    /// has none. The lead changes the tape of the requirement.
     #[test]
-    #[ignore = "planned: SLICE-08"]
     fn req643_boot_tape_siov_shortcut() {
         let run = check_boot(VideoStandard::Ntsc, true, 2_400);
         eprintln!("DDEVIC at SIOV: {:02X?}", run.siov_devices);
@@ -1632,13 +1625,13 @@ mod tape_boot {
         );
     }
 
-    /// The CAS file of the boot test tape is the file of the criteria: 4 chunks, and
-    /// records of 132 bytes with a valid checksum.
+    /// The CAS file of the boot test tape is the file of the criteria: 5 chunks, and
+    /// records of 132 bytes.
     #[test]
     fn boot_tape_layout() {
         let file = boot_tape_file(false);
-        assert_eq!(file.len(), 8 + 8 + 2 * (8 + 132), "the CAS file size");
+        assert_eq!(file.len(), 8 + 8 + 3 * (8 + 132), "the CAS file size");
         let tape = boot_tape(false);
-        assert_eq!(tape.blocks().len(), 2, "two data blocks");
+        assert_eq!(tape.blocks().len(), 3, "three data blocks");
     }
 }
