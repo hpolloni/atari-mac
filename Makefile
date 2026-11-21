@@ -20,7 +20,7 @@ PACKAGES := --workspace --exclude atari-mac
 endif
 
 .PHONY: check pre-commit fmt fmt-check spec-check clippy test doc deny typos toml-check \
-        machete msrv features coverage roms test-data reference tools hooks clean
+        machete msrv features coverage roms test-data reference worktree-setup tools hooks clean
 
 ## Full gate set (same as CI, except the OS matrix).
 check: fmt-check toml-check typos spec-check clippy test doc deny machete msrv features coverage
@@ -48,6 +48,11 @@ test-data:
 ## The pinned references of docs/spec/references/ (REQ-020). No other target downloads them.
 reference:
 	scripts/fetch-roms.sh --references
+
+## In a new git worktree: fast-forward to main, copy the ROMs and link test-data/ from the
+## main checkout. It does nothing in the main checkout.
+worktree-setup:
+	scripts/worktree-setup.sh
 
 test: roms
 	cargo test $(PACKAGES) --all-targets --all-features --locked

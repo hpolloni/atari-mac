@@ -165,7 +165,9 @@ finds new security advisories.
 ## How the work is done
 
 Large tasks are split into independent parts. Each part is done in its own git worktree, then
-merged and checked again. [CLAUDE.md](CLAUDE.md) gives the rules.
+merged and checked again. [CLAUDE.md](CLAUDE.md) gives the rules. In a new worktree,
+`make worktree-setup` fast-forwards the branch to `main`, copies the ROMs and links `test-data/`
+from the main checkout.
 
 Each change follows this order:
 
