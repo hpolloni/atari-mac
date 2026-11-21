@@ -1,16 +1,19 @@
-//! Cartridge and executable file formats.
+//! Cartridge, executable and tape file formats.
 //!
-//! Design: `docs/design/media.md`. Requirements: REQ-600 to REQ-638. The cartridge
+//! Design: `docs/design/media.md`. Requirements: REQ-600 to REQ-643. The cartridge
 //! interface is decided in OI-003. The standard 8 KB and 16 KB cartridges, the Atarimax
-//! `MaxFlash` cartridges, the XEX parser and the XEX boot image exist now.
+//! `MaxFlash` cartridges, the XEX parser, the XEX boot image and the CAS
+//! tape image loader exist now.
 
 use core::error::Error;
 use core::fmt;
 
 mod disk;
+mod tape;
 mod xex;
 
 pub use disk::{DiskImage, Geometry};
+pub use tape::{Tape, TapeBlock};
 pub use xex::{SegmentDefect, Xex, XexDefect, XexSegment};
 
 /// The size of the CAR file header (REQ-605).
@@ -50,6 +53,36 @@ pub enum MediaError {
     XexSignature,
     /// An XEX file has no complete segment. The defect, if any, is the first one.
     XexNoSegment(Option<XexDefect>),
+    /// A CAS file is shorter than one chunk header (8 bytes).
+    CasHeader,
+    /// The first chunk of a CAS file is not `FUJI`.
+    CasSignature,
+    /// The chunk at `offset` has an incomplete header, or its data goes past the end.
+    CasTruncated {
+        /// The file offset of the chunk header.
+        offset: usize,
+    },
+    /// The chunk at `offset` has a type that the emulator does not support (OI-048).
+    CasChunkType {
+        /// The file offset of the chunk header.
+        offset: usize,
+        /// The 4 type bytes of the chunk.
+        chunk_type: [u8; 4],
+    },
+    /// The `baud` chunk at `offset` gives the baud rate 0.
+    CasBaud {
+        /// The file offset of the chunk header.
+        offset: usize,
+    },
+    /// The `fsk ` chunk at `offset` has an odd data length.
+    CasFskLength {
+        /// The file offset of the chunk header.
+        offset: usize,
+        /// The data length of the chunk.
+        length: u16,
+    },
+    /// The CAS file has no `data` chunk and no `fsk ` chunk.
+    CasEmpty,
 }
 
 impl fmt::Display for MediaError {
@@ -79,6 +112,25 @@ impl fmt::Display for MediaError {
                 defect.kind.describe(),
                 defect.offset
             ),
+            Self::CasHeader => write!(f, "CAS file is shorter than one 8-byte chunk header"),
+            Self::CasSignature => write!(f, "CAS file does not start with a FUJI chunk"),
+            Self::CasTruncated { offset } => write!(
+                f,
+                "CAS chunk at offset {offset} goes past the end of the file"
+            ),
+            Self::CasChunkType { offset, chunk_type } => write!(
+                f,
+                "CAS chunk at offset {offset} has the unsupported type \"{}\"",
+                chunk_type.escape_ascii()
+            ),
+            Self::CasBaud { offset } => {
+                write!(f, "CAS baud chunk at offset {offset} gives the baud rate 0")
+            }
+            Self::CasFskLength { offset, length } => write!(
+                f,
+                "CAS fsk chunk at offset {offset} has the odd data length {length}"
+            ),
+            Self::CasEmpty => write!(f, "CAS file has no data chunk and no fsk chunk"),
         }
     }
 }

@@ -3,7 +3,7 @@
 //! The random bytes come from a `SplitMix64` generator with a fixed seed, so each run tests
 //! the same inputs.
 
-use atari_core::media::Cartridge;
+use atari_core::media::{Cartridge, Tape};
 use atari_core::{Machine, MachineConfig, VideoStandard};
 use atari_harness::system::TEST_SAMPLE_RATE;
 use atari_harness::{HarnessError, data};
@@ -90,6 +90,36 @@ fn random_file(rng: &mut Rng, index: usize) -> Vec<u8> {
     if index % 4 == 2 {
         file.resize([0x2000, 0x4000][index / 4 % 2], 0);
     }
+    // Each fourth file is a CAS image of random chunks with supported types and short
+    // lengths, so that the chunk checks after the signature also run.
+    if index % 4 == 3 {
+        file = random_cas(rng, &file);
+    }
+    file
+}
+
+/// A CAS image: a `FUJI` chunk, then chunks of the supported types (and sometimes an
+/// unsupported one) with random lengths, aux values and data bytes from `bytes`. The last
+/// chunk can go past the end of the file.
+fn random_cas(rng: &mut Rng, bytes: &[u8]) -> Vec<u8> {
+    const KINDS: [&[u8; 4]; 5] = [b"FUJI", b"baud", b"data", b"fsk ", b"pwms"];
+    let mut file = b"FUJI".to_vec();
+    file.extend_from_slice(&[0, 0, 0, 0]);
+    let mut rest = bytes;
+    for _ in 0..rng.below_or_eq(40) {
+        let kind = KINDS[rng.below_or_eq(4)];
+        let length = rng.below_or_eq(200).min(rest.len());
+        let aux = rng.below_or_eq(3) * 300;
+        file.extend_from_slice(kind);
+        file.extend_from_slice(&u16::try_from(length).unwrap_or(u16::MAX).to_le_bytes());
+        file.extend_from_slice(&u16::try_from(aux).unwrap_or(u16::MAX).to_le_bytes());
+        let (data, tail) = rest.split_at(length);
+        file.extend_from_slice(data);
+        rest = tail;
+    }
+    // Cut the file at a random length.
+    let len = file.len() - rng.below_or_eq(8).min(file.len());
+    file.truncate(len);
     file
 }
 
@@ -97,18 +127,23 @@ fn random_file(rng: &mut Rng, index: usize) -> Vec<u8> {
 /// with no panic (criterion 2). Each load returns `Ok` or an `Err` value. A cartridge that
 /// loads is also inserted in a machine, which runs 2 frames.
 ///
-/// The media types with a loader now: raw cartridge (`Cartridge::from_raw`) and CAR file
-/// (`Cartridge::from_car`). The XEX loader (`Xex::parse`, SLICE-04 WP-1), the ATR loader
-/// (`DiskImage::from_atr`, SLICE-05) and the CAS loader (`Tape::from_cas`, SLICE-08) join
-/// this test when they exist.
+/// The media types with a loader now: raw cartridge (`Cartridge::from_raw`), CAR file
+/// (`Cartridge::from_car`) and CAS tape image (`Tape::from_cas`, SLICE-08 WP-1). The XEX
+/// loader (`Xex::parse`, SLICE-04 WP-1) and the ATR loader (`DiskImage::from_atr`, SLICE-05)
+/// join this test when they exist.
 ///
 /// Verifies REQ-016
 #[test]
 fn random_files_do_not_panic() {
     let mut rng = Rng(FILE_SEED);
     let mut loaded = 0_u32;
+    let mut tapes = 0_u32;
     for index in 0..FILES {
         let file = random_file(&mut rng, index);
+        if let Ok(tape) = Tape::from_cas(&file) {
+            assert!(!tape.blocks().is_empty(), "a tape has at least one block");
+            tapes += 1;
+        }
         let cartridges = [
             Cartridge::from_raw(file.clone()),
             Cartridge::from_car(&file),
@@ -120,6 +155,7 @@ fn random_files_do_not_panic() {
         }
     }
     assert!(loaded > 0, "some random raw cartridges load and run");
+    assert!(tapes > 0, "some random CAS images load");
 }
 
 /// With a fixed seed, random bytes in RAM and `PC` = `$0600` run for 600 frames with no

@@ -1,12 +1,12 @@
 ---
 id: SLICE-08
 title: Cassette tape
-status: planned
+status: in-progress
 depends_on: "SLICE-05 WP-1 (POKEY serial input)"
 packages:
   - id: WP-1
     title: CAS tape images
-    status: planned
+    status: done
     requirements: [REQ-639, REQ-640]
   - id: WP-2
     title: Tape deck, motor and signal
