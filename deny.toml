@@ -35,7 +35,7 @@ allow = [
 confidence-threshold = 0.93
 
 [licenses.private]
-# This crate is `publish = false` and has no license yet.
+# The crates of this workspace are `publish = false` (license: MIT OR Apache-2.0).
 ignore = true
 
 [bans]

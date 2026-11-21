@@ -172,3 +172,13 @@ Each change follows this order:
 1. A requirement in `docs/spec/` states the behavior, with exact acceptance criteria.
 2. A design document in `docs/design/` states the interface and names the tests.
 3. The code and the tests are written. Each test names the requirement that it verifies.
+
+## License
+
+The code and the documents of this project are licensed under either of
+[the MIT license](LICENSE-MIT) or [the Apache License, Version 2.0](LICENSE-APACHE), at your
+option. The files in `reference/` are not covered: each one keeps its own license, given in
+[reference/README.md](reference/README.md).
+
+Unless you state otherwise, any contribution that you submit for inclusion in this project, as
+defined in the Apache-2.0 license, is dual licensed as above, with no other terms or conditions.

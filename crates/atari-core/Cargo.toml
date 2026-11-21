@@ -4,6 +4,7 @@ description = "Emulation core for the Atari 65XE: CPU, ANTIC, GTIA, POKEY, PIA a
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [dependencies]

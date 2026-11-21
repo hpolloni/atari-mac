@@ -7,8 +7,9 @@ version = "0.1.0"
 edition = "2024"
 # Keep in sync with `rust-toolchain.toml`. CI verifies this with `cargo hack --rust-version`.
 rust-version = "1.100.0"
-# Not published to crates.io. Remove this line (and add `license`, `repository`,
-# `keywords`, `categories`) before publishing.
+license = "MIT OR Apache-2.0"
+# Not published to crates.io. Remove this line (and add `repository`, `keywords`,
+# `categories`) before publishing.
 publish = false
 
 [workspace.dependencies]
@@ -21,6 +22,7 @@ readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [dependencies]
