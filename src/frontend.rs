@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-use atari_core::media::Cartridge;
+use atari_core::media::{Cartridge, MediaError};
 use atari_core::{ConfigError, Machine, MachineConfig, VideoStandard, palette};
 use minifb::Key;
 
@@ -27,6 +27,20 @@ fn read(path: &Path) -> Result<Vec<u8>, FrontendError> {
     })
 }
 
+/// A cartridge from the bytes of a `--cart` file: a CAR file if it starts with `CART`
+/// (REQ-605, REQ-606), else a raw image (REQ-604).
+///
+/// # Errors
+///
+/// The [`MediaError`] of the CAR or raw image.
+pub fn cartridge_from_file(bytes: Vec<u8>) -> Result<Cartridge, MediaError> {
+    if bytes.starts_with(b"CART") {
+        Cartridge::from_car(&bytes)
+    } else {
+        Cartridge::from_raw(bytes)
+    }
+}
+
 /// Creates the machine from the ROM and media files of `options` (REQ-004, REQ-012), with
 /// the audio sample rate `sample_rate` (the rate of the audio stream, REQ-011).
 ///
@@ -40,7 +54,7 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
     let cartridge = match &options.cart {
         Some(path) => {
             Some(
-                Cartridge::from_raw(read(path)?).map_err(|error| FrontendError::Media {
+                cartridge_from_file(read(path)?).map_err(|error| FrontendError::Media {
                     path: path.clone(),
                     error,
                 })?,
@@ -528,12 +542,13 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
+    use atari_core::media::{CartKind, MediaError};
     use atari_core::{Machine, MachineConfig, VideoStandard, keyboard, palette};
     use minifb::Key;
 
     use super::{
-        DisplayFilters, Flow, Frontend, Pacer, Pacing, TURBO_PRESENT_INTERVAL, convert_row,
-        load_machine, render, window_size, window_title,
+        DisplayFilters, Flow, Frontend, Pacer, Pacing, TURBO_PRESENT_INTERVAL, cartridge_from_file,
+        convert_row, load_machine, render, window_size, window_title,
     };
     use crate::audio::SampleRing;
     use crate::bas::{CH, READY_TIMEOUT_FRAMES, Typist, program_codes};
@@ -561,6 +576,36 @@ mod tests {
 
     fn step(frontend: &mut Frontend, keys: &[Key]) {
         assert_eq!(frontend.step(keys).unwrap(), Flow::Continue, "{keys:?}");
+    }
+
+    /// Verifies REQ-605: a `--cart` file that starts with `CART` loads as a CAR file, and
+    /// other files as raw images (REQ-604). A bad CAR file gives its CAR error (REQ-606).
+    #[test]
+    fn cart_file_car_or_raw() {
+        let data = vec![0x01_u8; 0x2000];
+        let mut car = b"CART".to_vec();
+        car.extend(1_u32.to_be_bytes());
+        car.extend(0x2000_u32.to_be_bytes());
+        car.extend([0; 4]);
+        car.extend(&data);
+        let kind = |bytes: Vec<u8>| cartridge_from_file(bytes).map(|cart| cart.kind());
+        assert_eq!(kind(car.clone()), Ok(CartKind::Standard8k), "CAR type 1");
+        assert_eq!(kind(data), Ok(CartKind::Standard8k), "raw 8 KB");
+        car.truncate(100);
+        assert_eq!(
+            kind(car),
+            Err(MediaError::CarSize {
+                car_type: 1,
+                expected: 0x2000,
+                actual: 84
+            }),
+            "short CAR file"
+        );
+        assert_eq!(
+            kind(vec![0; 100]),
+            Err(MediaError::BadSize(100)),
+            "raw 100 bytes"
+        );
     }
 
     #[test]

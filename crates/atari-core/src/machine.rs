@@ -1313,21 +1313,33 @@ mod tests {
         }
     }
 
-    /// Verifies REQ-209: `PORTB` bit 7 = 0 maps the self-test ROM.
+    /// Verifies REQ-209: `PORTB` pins = `$7F` map the self-test ROM: CPU reads of `$5000`
+    /// and `$57FF` give the OS image bytes `$1000` and `$17FF` (criterion 1).
     #[test]
     fn self_test_rom_mapping() {
-        let mut m = machine();
+        let mut os = os_rom();
+        os[0x1000] = 0x5E;
+        os[0x17FF] = 0x5F;
+        let mut m = Machine::new(config(os, None)).unwrap();
         set_portb(&mut m, 0x7F);
-        assert_eq!(m.peek(0x5000), 0x10, "self-test ROM = OS ROM offset $1000");
-        assert_eq!(m.peek(0x57FF), 0x17, "self-test ROM end");
+        assert_eq!(cpu_read(&mut m, 0x5000), 0x5E, "OS image byte $1000");
+        assert_eq!(cpu_read(&mut m, 0x57FF), 0x5F, "OS image byte $17FF");
+        assert_eq!(m.peek(0x5000), 0x5E, "peek of $5000");
     }
 
-    /// Verifies REQ-209: the self-test ROM needs the OS ROM.
+    /// Verifies REQ-209: the self-test ROM needs the OS ROM: with `PORTB` pins = `$7E`, a CPU
+    /// write and then a CPU read of each address in `$5000-$57FF` give the written value
+    /// (criterion 2).
     #[test]
     fn self_test_needs_os_rom() {
         let mut m = machine();
         set_portb(&mut m, 0x7E);
-        assert_eq!(m.peek(0x5000), 0x00, "no self-test ROM without the OS ROM");
+        for addr in 0x5000..=0x57FF_u16 {
+            let [lo, hi] = addr.to_le_bytes();
+            let value = lo ^ hi ^ 0x3C;
+            cpu_write(&mut m, addr, value);
+            assert_eq!(cpu_read(&mut m, addr), value, "RAM at ${addr:04X}");
+        }
     }
 
     /// Verifies REQ-210: cartridge before BASIC before RAM.
