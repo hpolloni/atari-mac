@@ -1,5 +1,6 @@
 //! End-to-end tests for the `atari-mac` binary.
 
+use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::BufReader;
@@ -11,8 +12,9 @@ use atari_mac::atari_core::keyboard::ascii_to_kbcode;
 use atari_mac::atari_core::screen::{has_row, screen_text};
 use atari_mac::atari_core::{Machine, MachineConfig, VideoStandard, palette};
 use atari_mac::bas::{self, KEY_DOWN_FRAMES, KEY_UP_FRAMES, Phase, Typist};
-use atari_mac::cli::Options;
+use atari_mac::cli::{self, Options};
 use atari_mac::frontend::{Flow, Frontend};
+use atari_mac::logging;
 use atari_mac::start;
 // The binary uses this dependency; this test does not.
 use minifb as _;
@@ -1286,14 +1288,111 @@ fn stats_help_lists_option() {
     );
 }
 
-/// Verifies REQ-085: `--headless --log tape --cas` with the tape of `boot_tape_file` and
-/// RETURN after the prompt tone writes lines `[frame <f> cycle <c>] tape: <message>` to
-/// standard error: the motor on line, the record lines and the motor off line, with frame
-/// and cycle counts that increase (criterion 2). Needs the core records of SLICE-09 WP-1.
+/// The environment variable that makes `log_writes_tape_lines` the child process. Its value
+/// is the path of the tape.
+const LOG_CHILD: &str = "ATARI_MAC_LOG_TAPE_CHILD";
+
+/// The child process of `log_writes_tape_lines`: parses `--headless --frames 2400 --log tape
+/// --cas <tape>` with the free ROMs, installs the logger of `--log` as `run` does, and boots
+/// the tape with RETURN in frames 180-186 (as `cas_boots_tape`). The headless binary presses
+/// no key, so the test process itself is the child. It stops 5 frames after the boot code
+/// wrote `$A5` to `$0600`.
+fn log_tape_child(tape: &str) {
+    let args = [
+        "--os",
+        OS_ROM,
+        "--basic",
+        BASIC_ROM,
+        "--headless",
+        "--frames",
+        "2400",
+        "--log",
+        "tape",
+        "--cas",
+        tape,
+    ];
+    let options = match cli::parse(args.map(OsString::from)) {
+        Ok(cli::Command::Run(options)) => options,
+        other => panic!("the command line: {other:?}"),
+    };
+    logging::install(options.log.expect("--log tape"));
+    let mut frontend = start(&options).expect("start");
+    let mut after = None;
+    for frame in 0..2_400 {
+        if frame == 180 {
+            frontend
+                .machine_mut()
+                .key_down(ascii_to_kbcode('\n').expect("RETURN"));
+        }
+        if frame == 186 {
+            frontend.machine_mut().key_up();
+        }
+        frontend.run_frames(1).expect("run");
+        if after.is_none() && frontend.machine().peek_ram(0x0600) == 0xA5 {
+            after = Some(frame + 5);
+        }
+        if after == Some(frame) {
+            return;
+        }
+    }
+    panic!("no $A5 at $0600 after 2,400 frames");
+}
+
+/// Verifies REQ-085: `--log tape --cas` with the tape of `boot_tape_file` and RETURN after
+/// the prompt tone writes lines `[frame <f> cycle <c>] tape: <message>` to standard error:
+/// the motor on line, the three record lines and the tape ends line, with frame and cycle
+/// counts that increase (criterion 2). The OS does not stop the motor after this boot, so
+/// no motor off line comes (`crates/harness/tests/event_log.rs` `tape_records` presses
+/// RESET to get it).
+///
+/// The headless binary presses no key, so the test runs its own test binary as the child
+/// process (`log_tape_child`, with the variable `LOG_CHILD`). The child installs the logger
+/// of `--log` in its own process, so the level of this process stays `Off`.
 #[test]
-#[ignore = "planned: SLICE-09"]
 fn log_writes_tape_lines() {
-    planned();
+    if let Some(tape) = env::var_os(LOG_CHILD) {
+        log_tape_child(tape.to_str().expect("UTF-8 path"));
+        return;
+    }
+    let tape = boot_tape_file("log_writes_tape_lines");
+    let output = Command::new(env::current_exe().expect("the test binary"))
+        .args(["--exact", "log_writes_tape_lines", "--nocapture"])
+        .env(LOG_CHILD, &tape)
+        .output()
+        .expect("run the child process");
+    let message = stderr(&output);
+    assert!(output.status.success(), "the child: {message}");
+    let mut lines = Vec::new();
+    for line in message.lines().filter(|line| line.starts_with("[frame")) {
+        let rest = line.strip_prefix("[frame ").expect("the prefix");
+        let (frame, rest) = rest.split_once(" cycle ").expect("the cycle");
+        let (cycle, text) = rest.split_once("] tape: ").expect("the category");
+        let frame: u64 = frame.parse().expect("the frame count");
+        let cycle: u64 = cycle.parse().expect("the cycle count");
+        lines.push((frame, cycle, text.to_owned()));
+    }
+    let texts: Vec<&str> = lines.iter().map(|(_, _, text)| text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "motor on, record 0 byte 0",
+            "record 0 starts: 132 bytes at 600 baud",
+            "record 1 starts: 132 bytes at 600 baud",
+            "record 2 starts: 132 bytes at 600 baud",
+            "tape ends",
+        ],
+        "the tape lines: {message}"
+    );
+    for pair in lines.windows(2) {
+        assert!(
+            pair[0].0 <= pair[1].0 && pair[0].1 < pair[1].1,
+            "the counts increase: {pair:?}"
+        );
+    }
+    assert!(
+        lines.first().is_some_and(|(frame, _, _)| *frame >= 180),
+        "the motor starts after RETURN: {lines:?}"
+    );
 }
 
 /// Verifies REQ-085: `--log tape,disk` and `--log sio:trace` give exit status 2 before the
