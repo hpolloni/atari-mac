@@ -50,8 +50,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// part of it (REQ-007).
 ///
 /// `options.scale` is the window scale, and `options.filters` are the display filters of the
-/// window (REQ-019). While a BASIC program is typed, and while the tape motor runs, the
-/// frames run in turbo ([`Pacing`], [`Frontend::turbo`], REQ-080, REQ-082).
+/// window (REQ-019). While a BASIC program is typed, while the tape motor runs, and while
+/// the disk drive transfers data, the frames run in turbo ([`Pacing`], [`Frontend::turbo`],
+/// REQ-080, REQ-082, REQ-095).
 ///
 /// After each frame, the audio samples of the frame go to `audio`, and the level of its
 /// ring corrects the wait (REQ-011). While the emulation is paused or in turbo, the sound
@@ -128,8 +129,8 @@ pub fn run(
 }
 
 /// The emulation thread: runs the frames at real-time speed (or in turbo while a BASIC
-/// program is typed or the tape motor runs) until the user quits, `frames` frames have run
-/// or the window stops. Returns the time from the first frame to the end. With `stats`,
+/// program is typed, the tape motor runs or the disk drive transfers data) until the user
+/// quits, `frames` frames have run or the window stops. Returns the time from the first frame to the end. With `stats`,
 /// it writes a statistics line to standard error after each second (REQ-083).
 #[expect(
     clippy::disallowed_methods,

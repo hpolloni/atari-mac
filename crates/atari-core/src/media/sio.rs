@@ -139,6 +139,17 @@ pub enum SioOutcome {
     },
 }
 
+/// The part of D1: in the transfers on the SIO bus (REQ-095, `docs/design/media.md`, "Disk
+/// transfer").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskTransfer {
+    /// D1: takes part in a transfer in the cycle of the query.
+    pub active: bool,
+    /// The first cycle after the end of the last transfer that ended at or before the cycle
+    /// of the query, or `None` (no transfer since the cold reset).
+    pub last_end: Option<u64>,
+}
+
 /// The cycle counts of the SIO timing for one video standard (Timing section).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SioTiming {
@@ -332,6 +343,9 @@ pub struct SioBus {
     external: VecDeque<DeviceByte>,
     /// The cassette deck (REQ-641, REQ-642).
     deck: TapeDeck,
+    /// The end of the last D1: transfer, or of the scheduled reply: the first cycle after
+    /// its last bit (REQ-095, "Disk transfer").
+    transfer_end: Option<u64>,
     /// The frame count for the `frame` key of the event log records (REQ-084). The machine
     /// sets it; it is not in the save state.
     log_frame: u64,
@@ -350,6 +364,7 @@ impl_state!(SioBus {
     host,
     external,
     deck,
+    transfer_end,
 } skip {
     timing,
     // The frame count of the event log: the machine sets it after a load.
@@ -373,6 +388,7 @@ impl SioBus {
             host: Vec::new(),
             external: VecDeque::new(),
             deck: TapeDeck::new(standard),
+            transfer_end: None,
             log_frame: 0,
         }
     }
@@ -435,12 +451,20 @@ impl SioBus {
         }
         self.command_low = low;
         if low {
+            // A new frame stops the transfer of D1: (REQ-095).
+            if self.transfer_end.is_some_and(|end| end > now)
+                || matches!(self.phase, BusPhase::DataIn { .. })
+                || self.d1_command_frame()
+            {
+                self.transfer_end = Some(now);
+            }
             self.host.clear();
             self.frame_len = 0;
             self.data_in.clear();
             self.out.clear();
             self.phase = BusPhase::Command { bad: false };
         } else if let BusPhase::Command { bad } = self.phase {
+            let d1_frame = self.d1_command_frame();
             self.phase = BusPhase::Idle;
             if bad || usize::from(self.frame_len) != FRAME_LEN {
                 record!(
@@ -466,6 +490,39 @@ impl SioBus {
             if !bad {
                 self.end_command_frame(now);
             }
+            // A frame for D1: with no reply ends its transfer here (REQ-095).
+            if d1_frame && self.phase == BusPhase::Idle {
+                self.transfer_end = Some(now);
+            }
+        }
+    }
+
+    /// D1: is on the bus, the phase is `Command`, and the first byte of the frame is the ID
+    /// of D1:.
+    const fn d1_command_frame(&self) -> bool {
+        self.drive_connected
+            && matches!(self.phase, BusPhase::Command { .. })
+            && self.frame_len > 0
+            && self.frame[0] == DEVICE_D1
+    }
+
+    /// The part of D1: in the transfers on the bus in machine cycle `now` (REQ-095,
+    /// `docs/design/media.md`, "Disk transfer"). `sending` is the data byte of the frame
+    /// that the POKEY shift register sends in `now`. Read-only.
+    #[must_use]
+    pub fn disk_transfer(&self, now: u64, sending: Option<u8>) -> DiskTransfer {
+        let active = self.drive_connected
+            && match self.phase {
+                BusPhase::Command { .. } => {
+                    self.d1_command_frame() || (self.frame_len == 0 && sending == Some(DEVICE_D1))
+                }
+                BusPhase::DataIn { .. } => true,
+                BusPhase::Reply => self.transfer_end.is_some_and(|end| now < end),
+                BusPhase::Idle => false,
+            };
+        DiskTransfer {
+            active,
+            last_end: self.transfer_end.filter(|&end| end <= now),
         }
     }
 
@@ -527,8 +584,10 @@ impl SioBus {
             start,
             bit_cycles: self.timing.bit_period,
         };
+        let byte_end = byte.end();
         let index = self.out.partition_point(|other| other.start <= start);
         self.out.insert(index, byte);
+        self.transfer_end = Some(self.transfer_end.map_or(byte_end, |end| end.max(byte_end)));
     }
 
     /// Schedules the ACK byte at `start`, and gives the first cycle after its stop bit.
@@ -768,6 +827,7 @@ impl SioBus {
         self.out.clear();
         self.host.clear();
         self.external.clear();
+        self.transfer_end = None;
     }
 }
 

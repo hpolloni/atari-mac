@@ -18,7 +18,7 @@ packages:
     requirements: [REQ-612, REQ-613, REQ-614, REQ-012]
   - id: WP-4
     title: Disk speed in the frontend
-    status: planned
+    status: done
     requirements: [REQ-094, REQ-095]
 ---
 # SLICE-05: Disk drive

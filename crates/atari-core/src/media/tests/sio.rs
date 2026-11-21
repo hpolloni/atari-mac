@@ -6,7 +6,8 @@ use super::sio_host::{
     sd_test_image, send_bytes, send_frame, send_frame_with, values, with_checksum,
 };
 use crate::media::{
-    CommandFrame, DiskImage, Geometry, SioBus, SioData, SioOutcome, SioRequest, sio_checksum,
+    CommandFrame, DiskImage, DiskTransfer, Geometry, SioBus, SioData, SioOutcome, SioRequest,
+    sio_checksum,
 };
 use crate::timing::VideoStandard;
 
@@ -468,5 +469,178 @@ fn req623_transact_status() {
         empty.transact(&request(0x53, 0, SioData::None)),
         done(0x01, &[]),
         "status with no data frame"
+    );
+}
+
+/// The end of the last scheduled device byte.
+fn reply_end(bus: &SioBus) -> u64 {
+    device_bytes(bus).into_iter().map(end_of).max().unwrap()
+}
+
+/// Checks that D1: takes part in a transfer in cycles of `from..to`, and not in cycle `to`,
+/// where `last_end` is `Some(to)`.
+fn assert_span(bus: &SioBus, from: u64, to: u64, name: &str) {
+    for now in [from, from + 1, from.midpoint(to), to - 1] {
+        let transfer = bus.disk_transfer(now, None);
+        assert!(transfer.active, "{name}: active in cycle {now}");
+        assert_eq!(transfer.last_end, None, "{name}: no end in cycle {now}");
+    }
+    let after = bus.disk_transfer(to, None);
+    assert!(!after.active, "{name}: not active at the end {to}");
+    assert_eq!(after.last_end, Some(to), "{name}: the end");
+}
+
+/// Verifies REQ-095: `SioBus::disk_transfer` gives the transfer of D1: from the first bit
+/// of a command frame for D1: until the last bit of the reply of the drive, for a read, a
+/// write and a NAK (criterion 1, `docs/design/media.md`, "Disk transfer").
+#[test]
+fn req095_transfer_span() {
+    let mut bus = sd_bus(VideoStandard::Ntsc);
+    let idle = bus.disk_transfer(500, None);
+    assert!(!idle.active, "no transfer before the first frame");
+    assert_eq!(idle.last_end, None, "no transfer since the cold reset");
+
+    // Read sector 1: from the start bit of the first byte.
+    let read = with_checksum(&[0x31, 0x52, 0x01, 0x00]);
+    bus.set_command_line(true, 1_000);
+    assert!(!bus.disk_transfer(1_000, None).active, "no byte yet");
+    assert!(
+        !bus.disk_transfer(1_001, Some(0x32)).active,
+        "a frame for D2:"
+    );
+    assert!(
+        bus.disk_transfer(1_001, Some(0x31)).active,
+        "POKEY sends the first byte, $31"
+    );
+    let end = send_bytes(&mut bus, &read, 1_001, &[HOST_BIT; 5]);
+    bus.set_command_line(false, end + RISE_DELAY);
+    let read_end = reply_end(&bus);
+    assert_eq!(values(&bus).len(), 2 + 128 + 1, "ACK, Complete, data frame");
+    assert_span(&bus, 1_001 + 10 * HOST_BIT, read_end, "read");
+
+    // Put sector 1: the drive waits for the data frame after its ACK.
+    let put = with_checksum(&[0x31, 0x50, 0x01, 0x00]);
+    let start = read_end + 10_000;
+    assert_eq!(
+        bus.disk_transfer(start, None).last_end,
+        Some(read_end),
+        "the end of the read"
+    );
+    let rise = send_frame(&mut bus, &put, start, HOST_BIT);
+    let ack_end = reply_end(&bus);
+    assert!(
+        bus.disk_transfer(ack_end + 50_000, None).active,
+        "the drive waits for the data frame"
+    );
+    let mut data = vec![0x5A; 128];
+    data.push(sio_checksum(&data));
+    let _end = send_bytes(&mut bus, &data, ack_end + 60_000, &[HOST_BIT; 129]);
+    let put_end = reply_end(&bus);
+    assert_eq!(values(&bus), [0x41, 0x41, 0x43], "the Put reply");
+    assert_span(&bus, rise, put_end, "put");
+
+    // A NAK: sector 0.
+    let nak = with_checksum(&[0x31, 0x52, 0x00, 0x00]);
+    let rise = send_frame(&mut bus, &nak, put_end + 10_000, HOST_BIT);
+    assert_eq!(values(&bus), [0x4E], "NAK");
+    assert_span(&bus, rise, reply_end(&bus), "NAK");
+}
+
+/// Verifies REQ-095: a bad frame for D1: ends at the rising edge of the command line, a
+/// frame for another device is no transfer, a new frame cuts a reply, the SIOV shortcut has
+/// no transfer, a removed drive takes no part, and a cold reset clears the end (criterion 1,
+/// `docs/design/media.md`, "Disk transfer").
+#[test]
+fn req095_transfer_edges() {
+    let mut bus = sd_bus(VideoStandard::Ntsc);
+    let read = with_checksum(&[0x31, 0x52, 0x01, 0x00]);
+
+    // A frame for D1: with a bad checksum ends at the rising edge of the command line.
+    let start = 10_000;
+    bus.set_command_line(true, start);
+    let end = send_bytes(
+        &mut bus,
+        &[0x31, 0x52, 0x01, 0x00, 0x00],
+        start + 1,
+        &[HOST_BIT; 5],
+    );
+    assert!(bus.disk_transfer(end, None).active, "the bad frame");
+    let rise = end + RISE_DELAY;
+    bus.set_command_line(false, rise);
+    assert!(device_bytes(&bus).is_empty(), "no reply to a bad frame");
+    let after = bus.disk_transfer(rise, None);
+    assert!(!after.active, "the bad frame ended");
+    assert_eq!(after.last_end, Some(rise), "the end of the bad frame");
+
+    // A frame for D2: is no transfer of D1:.
+    let other = with_checksum(&[0x32, 0x53, 0x00, 0x00]);
+    let start = rise + 10_000;
+    bus.set_command_line(true, start);
+    let end = send_bytes(&mut bus, &other, start + 1, &[HOST_BIT; 5]);
+    assert!(!bus.disk_transfer(end, None).active, "a frame for D2:");
+    bus.set_command_line(false, end + RISE_DELAY);
+    let after = bus.disk_transfer(end + 50_000, None);
+    assert!(!after.active, "no reply for D2:");
+    assert_eq!(after.last_end, Some(rise), "the end of the bad frame");
+
+    // A new command frame cuts the reply: the transfer ends at the falling edge.
+    let rise = send_frame(&mut bus, &read, end + 100_000, HOST_BIT);
+    let cut = rise.midpoint(reply_end(&bus));
+    bus.set_command_line(true, cut);
+    bus.set_command_line(false, cut + 2_000);
+    assert_eq!(
+        bus.disk_transfer(cut + 3_000, None).last_end,
+        Some(cut),
+        "the cut reply"
+    );
+
+    // The SIOV shortcut has no transfer on the bus.
+    let outcome = bus.transact(&SioRequest {
+        frame: CommandFrame {
+            device: 0x31,
+            command: 0x52,
+            aux1: 1,
+            aux2: 0,
+        },
+        data: SioData::Receive(128),
+    });
+    assert!(
+        matches!(outcome, SioOutcome::Done { status: 0x01, .. }),
+        "{outcome:?}"
+    );
+    let after = bus.disk_transfer(cut + 4_000, None);
+    assert!(!after.active, "transact is no transfer");
+    assert_eq!(after.last_end, Some(cut), "transact keeps the end");
+
+    // An empty drive on the bus takes part, a removed drive does not.
+    let mut empty = SioBus::new(VideoStandard::Ntsc);
+    let rise = send_frame(&mut empty, &read, 1_000, HOST_BIT);
+    assert_span(&empty, rise, reply_end(&empty), "empty drive");
+    let mut removed = SioBus::new(VideoStandard::Ntsc);
+    removed.set_drive_connected(false);
+    removed.set_command_line(true, 1_000);
+    assert!(
+        !removed.disk_transfer(1_001, Some(0x31)).active,
+        "a removed drive"
+    );
+    let _rise = send_frame(&mut removed, &read, 2_000, HOST_BIT);
+    assert_eq!(
+        removed.disk_transfer(100_000, None),
+        DiskTransfer {
+            active: false,
+            last_end: None
+        },
+        "no transfer of a removed drive"
+    );
+
+    // A cold reset clears the end: the cycle count starts again.
+    bus.reset();
+    assert_eq!(
+        bus.disk_transfer(cut + 5_000, None),
+        DiskTransfer {
+            active: false,
+            last_end: None
+        },
+        "after the reset"
     );
 }

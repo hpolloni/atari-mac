@@ -531,6 +531,13 @@ impl Pokey {
         }
     }
 
+    /// The data byte of the frame in the output shift register while it sends (`IRQST`
+    /// bit 3 reads 1), else `None`. For `Machine::disk_transfer` (REQ-095).
+    #[must_use]
+    pub const fn serial_out_frame(&self) -> Option<u8> {
+        self.serial.sending()
+    }
+
     /// The SIO CLOCK OUT level: the serial output clock flip-flop (HRM 5.6). In the modes
     /// with the external output clock, the flip-flop does not change.
     #[must_use]

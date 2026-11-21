@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::{fs, mem};
 
 use atari_mac::atari_core::keyboard::ascii_to_kbcode;
-use atari_mac::atari_core::media::Tape;
+use atari_mac::atari_core::media::{DiskImage, Tape};
 use atari_mac::atari_core::{Machine, MachineConfig, VideoStandard};
 use atari_mac::bas::Typist;
 use atari_mac::frontend::{Flow, Frontend, TurboCause};
@@ -272,4 +272,56 @@ fn frontend_records() {
     );
     assert!(step(&mut frontend, &[Key::F10]).is_empty(), "F10 held");
     assert!(step(&mut frontend, &[]).is_empty(), "F10 up");
+}
+
+/// The boot test disk of REQ-636 criterion 1: 720 sectors of 128 bytes, sector 1 has the
+/// boot header `00 01 00 07 00 07` and `LDA #$A5`, `STA $0600`, `JMP $070B`.
+fn boot_disk() -> DiskImage {
+    let data_len: usize = 720 * 128;
+    let mut atr = vec![0_u8; 16 + data_len];
+    atr[..2].copy_from_slice(&[0x96, 0x02]);
+    let paragraphs = u16::try_from(data_len / 16).expect("paragraphs");
+    atr[2..4].copy_from_slice(&paragraphs.to_le_bytes());
+    atr[4..6].copy_from_slice(&128_u16.to_le_bytes());
+    let sector_1 = [
+        0x00, 0x01, 0x00, 0x07, 0x00, 0x07, 0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x4C, 0x0B, 0x07,
+    ];
+    atr[16..16 + sector_1.len()].copy_from_slice(&sector_1);
+    DiskImage::from_atr(&atr).expect("ATR image")
+}
+
+/// Verifies REQ-095: with the boot test disk ([`boot_disk`]) and the SIOV shortcut off, the
+/// `atari::frontend` records give `turbo on (disk drive)` when the disk turbo starts and
+/// `turbo off` when it stops, each with the counts at the start of its frame (criterion 6).
+#[test]
+fn disk_turbo_records() {
+    capture();
+    let machine = Machine::new(MachineConfig {
+        os_rom: fs::read(OS_ROM).expect("OS ROM"),
+        basic_rom: Some(fs::read(BASIC_ROM).expect("BASIC ROM")),
+        cartridge: None,
+        disk: Some(boot_disk()),
+        fast_sio: false,
+        fast_tape: false,
+        tape: None,
+        standard: VideoStandard::Ntsc,
+        audio_sample_rate: 48_000,
+    })
+    .expect("machine");
+    let mut frontend = Frontend::new(machine);
+    let (_, messages) = step_until_record(&mut frontend, 300);
+    assert_eq!(messages, ["turbo on (disk drive)"], "the disk turbo starts");
+    assert_eq!(
+        frontend.turbo_cause(),
+        Some(TurboCause::DiskDrive),
+        "the cause"
+    );
+    let (steps, messages) = step_until_record(&mut frontend, 300);
+    assert_eq!(messages, ["turbo off"], "the disk turbo stops");
+    assert!(
+        steps > 30,
+        "30 frames after the last transfer: {steps} steps"
+    );
+    assert_eq!(frontend.machine().peek_ram(0x0600), 0xA5, "the disk booted");
+    assert_eq!(frontend.turbo_cause(), None, "real time after the load");
 }

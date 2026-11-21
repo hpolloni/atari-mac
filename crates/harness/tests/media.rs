@@ -1223,6 +1223,64 @@ mod disks {
         let frames = boot_frames(&mut m, 300);
         assert!(frames.is_some(), "DD: no $A5 at $0600 after 300 frames");
     }
+
+    /// Verifies REQ-095: with `AltirraOS` and the SIOV shortcut off, the SD boot image of
+    /// REQ-636 boots on the serial path, and in each cycle `Machine::disk_transfer` is active
+    /// exactly from the start bit of the first command byte (the command line is low and
+    /// `IRQST` bit 3 reads 1) until the end of the last scheduled reply byte; after the
+    /// transfer, `last_end` is that end (criterion 1).
+    #[test]
+    fn req095_transfer_on_serial_boot() {
+        let mut m = machine(sd_boot_image(), VideoStandard::Ntsc, false);
+        let limit = 300 * u64::from(VideoStandard::Ntsc.cycles_per_frame());
+        // The transfer that the test sees from the bus lines: its start, and its end after
+        // the rising edge of the command line.
+        let mut start: Option<u64> = None;
+        let mut end: Option<u64> = None;
+        let mut ends = Vec::new();
+        let mut was_low = false;
+        while m.cycle_count() < limit && m.peek_ram(MARKER) != DONE {
+            m.run_cycle();
+            let now = m.cycle_count();
+            let sio = m.sio();
+            let low = sio.command_line_low();
+            let busy = m.peek(0xD20E) & 0x08 != 0;
+            if start.is_none() && low && busy && sio.host_bytes().is_empty() {
+                start = Some(now);
+            }
+            if was_low && !low && start.is_some() {
+                let last = sio
+                    .scheduled_device_bytes()
+                    .iter()
+                    .map(|&(_, at, bit)| at + 10 * u64::from(bit))
+                    .max();
+                end = Some(last.unwrap_or(now));
+            }
+            was_low = low;
+            if let Some(last) = end
+                && now >= last
+            {
+                ends.push(last);
+                start = None;
+                end = None;
+            }
+            let transfer = m.disk_transfer();
+            assert_eq!(
+                transfer.active,
+                start.is_some(),
+                "cycle {now}: the transfer of D1:"
+            );
+            if start.is_none() {
+                assert_eq!(
+                    transfer.last_end,
+                    ends.last().copied(),
+                    "cycle {now}: the end"
+                );
+            }
+        }
+        assert_eq!(m.peek_ram(MARKER), DONE, "the disk boots");
+        assert!(ends.len() >= 2, "transfers: {ends:?}");
+    }
 }
 
 /// Cassette system tests (`docs/design/media.md`, "Test method for the cassette deck"): a

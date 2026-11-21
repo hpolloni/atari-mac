@@ -20,7 +20,7 @@ mod xex;
 pub use deck::{TapeDeck, TapeMark};
 pub use disk::{DiskImage, Geometry};
 pub use drive::{Accept, Completion, DiskDrive};
-pub use sio::{CommandFrame, SioBus, SioData, SioOutcome, SioRequest, sio_checksum};
+pub use sio::{CommandFrame, DiskTransfer, SioBus, SioData, SioOutcome, SioRequest, sio_checksum};
 pub use tape::{Tape, TapeBlock};
 pub use xex::{SegmentDefect, Xex, XexDefect, XexSegment};
 

@@ -133,6 +133,15 @@ impl SerialOut {
         self.bits != 0
     }
 
+    /// The data bits of the frame in the shift register while it sends, else `None`.
+    pub(super) const fn sending(&self) -> Option<u8> {
+        if self.bits == 0 {
+            None
+        } else {
+            Some(self.data())
+        }
+    }
+
     /// SIO DATA OUT from the shift register.
     pub(super) const fn level(&self) -> bool {
         self.level

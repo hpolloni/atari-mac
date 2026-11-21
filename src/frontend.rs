@@ -43,6 +43,32 @@ pub enum TurboCause {
     Typing,
     /// A tape is inserted and the motor line is low (REQ-082).
     TapeMotor,
+    /// D1: has a disk and takes part in a transfer on the SIO bus, or did within
+    /// [`DISK_TURBO_FRAMES`] frames (REQ-095).
+    DiskDrive,
+}
+
+/// The frames after the end of the last disk transfer that still start in turbo (REQ-095
+/// criterion 1).
+pub const DISK_TURBO_FRAMES: u64 = 30;
+
+/// The next frame of `machine` runs in disk turbo (REQ-095 criteria 1-3).
+///
+/// D1: has a disk, and the frame starts while D1: takes part in a transfer or within
+/// [`DISK_TURBO_FRAMES`] frames after its end (`docs/design/architecture.md`, "Turbo while
+/// the disk drive transfers data").
+#[must_use]
+pub fn disk_turbo(machine: &Machine) -> bool {
+    if machine.disk().is_none() {
+        return false;
+    }
+    let transfer = machine.disk_transfer();
+    let start = machine.cycle_count() + 1;
+    let window = DISK_TURBO_FRAMES * u64::from(machine.standard().cycles_per_frame());
+    transfer.active
+        || transfer
+            .last_end
+            .is_some_and(|end| start.saturating_sub(end) <= window)
 }
 
 /// Reads a whole file.
@@ -155,7 +181,7 @@ pub fn load_machine(options: &Options, sample_rate: u32) -> Result<Machine, Fron
         basic_rom: Some(basic_rom),
         cartridge,
         disk,
-        fast_sio: false,
+        fast_sio: options.fast_disk,
         fast_tape: options.fast_tape,
         tape: None,
         standard: options.standard,
@@ -322,8 +348,8 @@ pub struct Frontend {
     /// The audio samples of the last frame that ran (REQ-011).
     audio: Vec<f32>,
     /// The last frame that ran started with a tape inserted and the motor line low
-    /// (REQ-082). `false` when the last step ran no frame.
-    tape_turbo: bool,
+    /// (REQ-082), or with the disk turbo (REQ-095). `false` when the last step ran no frame.
+    media_turbo: bool,
     /// The turbo cause of the last frame that ran (REQ-085 criterion 3).
     turbo_cause: Option<TurboCause>,
     /// The trace writer of `--trace` (REQ-086).
@@ -358,7 +384,7 @@ impl Frontend {
             last_frame_cycles: 0,
             typist: None,
             audio: Vec::new(),
-            tape_turbo: false,
+            media_turbo: false,
             turbo_cause: None,
             trace: None,
             auto_return: false,
@@ -424,11 +450,12 @@ impl Frontend {
     }
 
     /// The window runs the frames in turbo (no real-time pacing): while the BASIC program
-    /// is typed (REQ-080 criterion 7), and when the last frame started with a tape inserted
-    /// and the motor line low (`Machine::tape_motor_on`, REQ-082 criteria 1 and 2).
+    /// is typed (REQ-080 criterion 7), when the last frame started with a tape inserted
+    /// and the motor line low (`Machine::tape_motor_on`, REQ-082 criteria 1 and 2), and when
+    /// it started with the disk turbo ([`disk_turbo`], REQ-095).
     #[must_use]
     pub const fn turbo(&self) -> bool {
-        self.typist.is_some() || self.tape_turbo
+        self.typist.is_some() || self.media_turbo
     }
 
     /// The turbo cause of the last frame that ran, or `None` for real-time speed. A step
@@ -483,14 +510,16 @@ impl Frontend {
                 self.typist = None;
             }
         }
-        self.tape_turbo = self.machine.tape_motor_on();
         let cause = if self.typist.is_some() {
             Some(TurboCause::Typing)
-        } else if self.tape_turbo {
+        } else if self.machine.tape_motor_on() {
             Some(TurboCause::TapeMotor)
+        } else if disk_turbo(&self.machine) {
+            Some(TurboCause::DiskDrive)
         } else {
             None
         };
+        self.media_turbo = matches!(cause, Some(TurboCause::TapeMotor | TurboCause::DiskDrive));
         if cause != self.turbo_cause {
             self.turbo_cause = cause;
             record(
@@ -498,6 +527,7 @@ impl Frontend {
                 match cause {
                     Some(TurboCause::Typing) => "turbo on (BASIC typing)",
                     Some(TurboCause::TapeMotor) => "turbo on (tape motor)",
+                    Some(TurboCause::DiskDrive) => "turbo on (disk drive)",
                     None => "turbo off",
                 },
             );
@@ -525,7 +555,7 @@ impl Frontend {
     /// [`FrontendError::BasicNotStarted`] when the typist does not see the `Ready` prompt.
     pub fn step(&mut self, keys: &[Key]) -> Result<Flow, FrontendError> {
         self.audio.clear();
-        self.tape_turbo = false;
+        self.media_turbo = false;
         let input = InputState::from_keys(keys, &self.input);
         if input.quit {
             return Ok(Flow::Quit);
@@ -807,20 +837,20 @@ pub fn after_step(
 )]
 mod tests {
     use std::env::temp_dir;
-    use std::fs::{create_dir_all, write};
+    use std::fs::{self, create_dir_all, write};
     use std::path::{Path, PathBuf};
     use std::process::id;
     use std::time::{Duration, Instant};
 
     use atari_core::gtia::{FRAME_HEIGHT, FRAME_WIDTH};
-    use atari_core::media::{CartKind, MediaError, Tape, Xex};
+    use atari_core::media::{CartKind, DiskImage, MediaError, Tape, Xex};
     use atari_core::{Machine, MachineConfig, VideoStandard, keyboard, palette};
     use minifb::Key;
 
     use super::{
         AfterFrame, DisplayFilters, Flow, FrameAudio, Frontend, Pacer, Pacing,
-        TURBO_PRESENT_INTERVAL, after_step, cartridge_from_file, convert_row, load_machine, render,
-        window_size, window_title, xex_warnings,
+        TURBO_PRESENT_INTERVAL, TurboCause, after_step, cartridge_from_file, convert_row,
+        load_machine, render, window_size, window_title, xex_warnings,
     };
     use crate::audio::{MAX_CORRECTION, SampleRing};
     use crate::bas::{CH, READY_TIMEOUT_FRAMES, Typist, program_codes};
@@ -1651,13 +1681,20 @@ mod tests {
         ) -> (bool, AfterFrame) {
             frontend.machine_mut().poke_ram(MOTOR, motor);
             let motor_on = frontend.machine().tape_motor_on();
+            (motor_on, self.run(frontend, keys))
+        }
+
+        /// One frame of the window loop: steps the frontend with `keys` (the frame takes
+        /// 3 ms of host time), runs [`after_step`] and the wait, and plays the device up to
+        /// the new time. Returns the result of [`after_step`].
+        fn run(&mut self, frontend: &mut Frontend, keys: &[Key]) -> AfterFrame {
             step(frontend, keys);
             self.clock += Duration::from_millis(3);
             self.play();
             let after = after_step(frontend, &mut self.pacing, &mut self.audio, self.clock);
             self.clock += after.wait;
             self.play();
-            (motor_on, after)
+            after
         }
     }
 
@@ -1849,5 +1886,243 @@ mod tests {
             }
             assert_eq!(ring.underruns(), 0, "frame {frame}: no underrun");
         }
+    }
+
+    /// The free OS ROM (fetched by `scripts/fetch-roms.sh`).
+    const OS_ROM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/roms/altirraos-xl.rom");
+    /// The free BASIC ROM.
+    const BASIC_ROM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/roms/altirra-basic.rom");
+
+    /// The boot test disk of REQ-636 criterion 1: 720 sectors of 128 bytes, sector 1 has the
+    /// boot header `00 01 00 07 00 07` and `LDA #$A5`, `STA $0600`, `JMP $070B`, the other
+    /// sectors hold `$00`.
+    fn boot_disk() -> DiskImage {
+        let data_len: usize = 720 * 128;
+        let mut atr = vec![0_u8; 16 + data_len];
+        atr[..2].copy_from_slice(&[0x96, 0x02]);
+        let paragraphs = u16::try_from(data_len / 16).unwrap();
+        atr[2..4].copy_from_slice(&paragraphs.to_le_bytes());
+        atr[4..6].copy_from_slice(&128_u16.to_le_bytes());
+        let sector_1 = [
+            0x00, 0x01, 0x00, 0x07, 0x00, 0x07, 0xA9, 0xA5, 0x8D, 0x00, 0x06, 0x4C, 0x0B, 0x07,
+        ];
+        atr[16..16 + sector_1.len()].copy_from_slice(&sector_1);
+        DiskImage::from_atr(&atr).unwrap()
+    }
+
+    /// A machine with the free ROMs, `disk` in D1: and the SIOV shortcut off, so that the
+    /// OS loads the disk on the SIO bus (REQ-636).
+    fn disk_machine(disk: Option<DiskImage>) -> Machine {
+        Machine::new(MachineConfig {
+            os_rom: fs::read(OS_ROM).unwrap(),
+            basic_rom: Some(fs::read(BASIC_ROM).unwrap()),
+            cartridge: None,
+            disk,
+            fast_sio: false,
+            fast_tape: false,
+            tape: None,
+            standard: VideoStandard::Ntsc,
+            audio_sample_rate: 48_000,
+        })
+        .unwrap()
+    }
+
+    /// The disk turbo rule of REQ-095 criteria 1 and 2 for the frame that `machine` runs
+    /// next, from `Machine::disk_transfer`: D1: takes part in a transfer, or the frame
+    /// starts at most 30 frames after the end of the last transfer. Gives the rule and the
+    /// cycles from the end to the frame start (0 while D1: takes part).
+    fn disk_rule(machine: &Machine) -> (bool, u64) {
+        let transfer = machine.disk_transfer();
+        let since = if transfer.active {
+            Some(0)
+        } else {
+            transfer.last_end.map(|end| machine.cycle_count() + 1 - end)
+        };
+        let window = 30 * u64::from(VideoStandard::Ntsc.cycles_per_frame());
+        (
+            since.is_some_and(|since| since <= window),
+            since.unwrap_or(u64::MAX),
+        )
+    }
+
+    /// Verifies REQ-095: with the boot test disk ([`boot_disk`]) and the SIOV shortcut off, a
+    /// frame that starts while D1: takes part in a transfer or within 30 frames after the
+    /// end of the last transfer runs in turbo (no wait) with the cause `DiskDrive`, and a
+    /// frame that starts later has the real-time pacing of REQ-007 (criteria 1 and 2, fake
+    /// clock).
+    #[test]
+    fn disk_turbo_follows_transfers() {
+        let mut frontend = Frontend::new(disk_machine(Some(boot_disk())));
+        let mut run = Loop::new();
+        let period = Pacer::new(VideoStandard::Ntsc, run.start).period();
+        let window = 30 * u64::from(VideoStandard::Ntsc.cycles_per_frame());
+        let (mut active, mut after_end, mut paced) = (0, 0, 0);
+        let mut last_turbo = false;
+        for frame in 0..200 {
+            let (rule, since) = disk_rule(frontend.machine());
+            let before = run.clock;
+            let after = run.run(&mut frontend, &[]);
+            assert_eq!(frontend.turbo(), rule, "frame {frame}: turbo");
+            if rule {
+                if since == 0 {
+                    active += 1;
+                } else {
+                    after_end += 1;
+                }
+                assert_eq!(
+                    frontend.turbo_cause(),
+                    Some(TurboCause::DiskDrive),
+                    "frame {frame}: the cause"
+                );
+                assert_eq!(after.wait, Duration::ZERO, "frame {frame}: no wait");
+            } else {
+                assert_eq!(frontend.turbo_cause(), None, "frame {frame}: no cause");
+                assert!(
+                    since > window,
+                    "frame {frame}: more than 30 frames after the end"
+                );
+                if !last_turbo && frame > 0 {
+                    paced += 1;
+                    assert!(
+                        (run.clock - before).abs_diff(period) <= correction_limit(),
+                        "frame {frame} takes one period: {:?}",
+                        run.clock - before
+                    );
+                }
+            }
+            last_turbo = rule;
+        }
+        assert_eq!(frontend.machine().peek_ram(0x0600), 0xA5, "the disk boots");
+        assert!(active > 0, "frames that start in a transfer: {active}");
+        assert!(
+            after_end >= 30,
+            "frames after the end of a transfer: {after_end}"
+        );
+        assert!(paced > 100, "paced frames: {paced}");
+    }
+
+    /// Verifies REQ-095: with an empty drive D1: on the bus, the command frames of the OS
+    /// and the replies of the drive have no effect on the pacing (criterion 3, fake clock).
+    #[test]
+    fn empty_drive_keeps_pacing() {
+        let mut machine = disk_machine(Some(boot_disk()));
+        let _disk = machine.eject_disk();
+        let mut frontend = Frontend::new(machine);
+        let mut run = Loop::new();
+        let period = Pacer::new(VideoStandard::Ntsc, run.start).period();
+        let mut transfers = 0;
+        for frame in 0..200 {
+            if frontend.machine().disk_transfer().active {
+                transfers += 1;
+            }
+            let before = run.clock;
+            let after = run.run(&mut frontend, &[]);
+            assert!(!frontend.turbo(), "frame {frame}: no turbo");
+            assert_eq!(frontend.turbo_cause(), None, "frame {frame}: no cause");
+            assert!(after.present, "frame {frame} is shown");
+            if frame > 0 {
+                assert!(
+                    (run.clock - before).abs_diff(period) <= correction_limit(),
+                    "frame {frame} takes one period: {:?}",
+                    run.clock - before
+                );
+            }
+        }
+        assert!(
+            transfers > 0 || frontend.machine().disk_transfer().last_end.is_some(),
+            "the empty drive takes part in transfers"
+        );
+    }
+
+    /// Verifies REQ-095: in disk turbo, the window loop shows a frame at least every 100 ms
+    /// of host time, plays no audio and counts no underrun, and the audio plays again after
+    /// turbo (criterion 4, fake clock and device).
+    #[test]
+    fn disk_turbo_presents_frames() {
+        let mut frontend = Frontend::new(disk_machine(Some(boot_disk())));
+        let mut run = Loop::new();
+        let mut last_present = run.clock;
+        let mut longest_gap = Duration::ZERO;
+        let (mut turbo, mut shown) = (0, 0);
+        for frame in 0..200 {
+            let after = run.run(&mut frontend, &[]);
+            let ring = &run.audio.ring;
+            if frontend.turbo() {
+                turbo += 1;
+                assert!(
+                    !frontend.audio().is_empty(),
+                    "frame {frame}: the core makes samples"
+                );
+                assert_eq!(ring.queued(), 0, "frame {frame}: no samples in turbo");
+                assert!(!ring.playing(), "frame {frame}: no audio in turbo");
+                if after.present {
+                    shown += 1;
+                }
+            }
+            if after.present {
+                longest_gap = longest_gap.max(run.clock - last_present);
+                last_present = run.clock;
+            }
+            assert_eq!(ring.underruns(), 0, "frame {frame}: no underrun");
+        }
+        assert!(turbo > 30, "frames in turbo: {turbo}");
+        assert!(shown > 1, "frames shown in turbo: {shown}");
+        assert!(
+            longest_gap <= Duration::from_millis(100),
+            "a frame at least every 100 ms: {longest_gap:?}"
+        );
+        assert!(!frontend.turbo(), "real time after the load");
+        assert!(run.audio.ring.playing(), "the audio plays after turbo");
+    }
+
+    /// Verifies REQ-095: after the same frames and the same key input, the frame buffer and
+    /// the RAM are the same with disk turbo and without it (criterion 5).
+    #[test]
+    fn disk_turbo_keeps_machine_state() {
+        let mut with_turbo = Frontend::new(disk_machine(Some(boot_disk())));
+        let mut paced = Frontend::new(disk_machine(Some(boot_disk())));
+        let mut turbo_run = Loop::new();
+        let mut paced_run = Loop::new();
+        let mut turbo_frames = 0;
+        for frame in 0..150 {
+            let keys: &[Key] = if (20..30).contains(&frame) {
+                &[Key::A]
+            } else {
+                &[]
+            };
+            let _after = turbo_run.run(&mut with_turbo, keys);
+            if with_turbo.turbo() {
+                turbo_frames += 1;
+            }
+            // The same frame at real-time speed: this pacing never uses turbo.
+            step(&mut paced, keys);
+            paced_run.clock += Duration::from_millis(3);
+            let after = paced_run.pacing.after_frame(false, paced_run.clock);
+            paced_run.clock += after.wait;
+        }
+        assert!(turbo_frames > 30, "frames in turbo: {turbo_frames}");
+        assert!(
+            turbo_run.clock < paced_run.clock,
+            "turbo is faster: {:?} and {:?}",
+            turbo_run.clock - turbo_run.start,
+            paced_run.clock - paced_run.start
+        );
+        assert_eq!(
+            with_turbo.machine().frame(),
+            paced.machine().frame(),
+            "the frame buffer"
+        );
+        for addr in 0..=u16::MAX {
+            assert_eq!(
+                with_turbo.machine().peek_ram(addr),
+                paced.machine().peek_ram(addr),
+                "RAM at ${addr:04X}"
+            );
+        }
+        assert_eq!(
+            with_turbo.machine().peek_ram(0x0600),
+            0xA5,
+            "the disk booted"
+        );
     }
 }

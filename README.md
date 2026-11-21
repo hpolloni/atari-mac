@@ -18,7 +18,7 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-02](docs/plan/SLICE-02.md) | Graphics modes and player/missile graphics | done | 60 | 0 | 0 | 0 |
 | [SLICE-03](docs/plan/SLICE-03.md) | Sound | done | 18 | 0 | 0 | 0 |
 | [SLICE-04](docs/plan/SLICE-04.md) | Cartridges, executables and controllers | done | 23 | 0 | 0 | 0 |
-| [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | in-progress | 41 | 0 | 2 | 0 |
+| [SLICE-05](docs/plan/SLICE-05.md) | Disk drive | in-progress | 43 | 0 | 0 | 0 |
 | [SLICE-06](docs/plan/SLICE-06.md) | Exact timing and product qualities | in-progress | 25 | 0 | 0 | 4 |
 | [SLICE-07](docs/plan/SLICE-07.md) | Run a BASIC program from a file | done | 1 | 0 | 0 | 0 |
 | [SLICE-08](docs/plan/SLICE-08.md) | Cassette tape | done | 12 | 0 | 0 | 0 |
@@ -26,7 +26,7 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | in-progress | 2 | 0 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
 
-All 294 requirements: 284 tested, 3 pending, 2 missing, 5 not a test requirement. Implemented: 235. Open items with the status `open`: 28.
+All 294 requirements: 286 tested, 3 pending, 0 missing, 5 not a test requirement. Implemented: 237. Open items with the status `open`: 28.
 
 <!-- END GENERATED: status -->
 
@@ -64,6 +64,7 @@ cargo run --release -- --bas examples/audctl.bas   # the POKEY AUDCTL modes
 | `--cart <file>` | Insert a cartridge: a raw image of 8 KB or 16 KB, or a CAR file (type 1, 2, 41 or 42) |
 | `--xex <file>` | Start an executable (XEX): it boots from drive D1: with BASIC disabled (not with `--disk` or `--bas`) |
 | `--disk <file>` | Insert an ATR disk image in drive D1: (the OS boots it at power-on) |
+| `--no-fast-disk` | Read the disk at the real speed, with no SIOV shortcut (REQ-623) |
 | `--cas <file>` | Boot a CAS tape image (holds START at power-on; press RETURN after the tone) |
 | `--no-fast-tape` | Read the tape records at the real speed, with no tape shortcut (REQ-644) |
 | `--auto-return` | With `--cas`: press RETURN after the prompt tone, so the tape boots with no key press (also headless) |
