@@ -23,5 +23,6 @@ implements, the work packages, and the conditions that tell when it is done.
 | [SLICE-09](SLICE-09.md) | Logging and speed statistics: `--stats` and `--log` | Done |
 | [SLICE-10](SLICE-10.md) | CPU instruction trace with `--trace` (needs SLICE-09) | Done |
 | [SLICE-11](SLICE-11.md) | Monitor: stop, step, breakpoints, memory (needs SLICE-10) | Planned |
+| [SLICE-12](SLICE-12.md) | Code quality gates: complexity, file length, mutation testing, parser property tests | Planned |
 
 Each requirement that is not withdrawn is in exactly one work package (REQ-050). SLICE-02 to SLICE-05 are independent of each other, except that SLICE-05 needs SLICE-04, and SLICE-08 needs SLICE-05 and the CA2 output of SLICE-06.

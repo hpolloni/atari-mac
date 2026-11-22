@@ -25,8 +25,9 @@ runs, and `pending` has only planned test stubs.
 | [SLICE-09](docs/plan/SLICE-09.md) | Logging and speed statistics | done | 3 | 0 | 0 | 0 |
 | [SLICE-10](docs/plan/SLICE-10.md) | CPU instruction trace | done | 2 | 0 | 0 | 0 |
 | [SLICE-11](docs/plan/SLICE-11.md) | Monitor | planned | 0 | 3 | 0 | 0 |
+| [SLICE-12](docs/plan/SLICE-12.md) | Code quality gates | planned | 0 | 0 | 3 | 1 |
 
-All 294 requirements: 286 tested, 3 pending, 0 missing, 5 not a test requirement. Implemented: 237. Open items with the status `open`: 28.
+All 298 requirements: 286 tested, 3 pending, 3 missing, 6 not a test requirement. Implemented: 237. Open items with the status `open`: 28.
 
 <!-- END GENERATED: status -->
 
