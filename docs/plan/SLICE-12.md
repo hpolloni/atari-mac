@@ -14,7 +14,7 @@ packages:
     requirements: [REQ-060]
   - id: WP-3
     title: Media parser property tests
-    status: planned
+    status: done
     requirements: [REQ-061]
 ---
 # SLICE-12: Code quality gates

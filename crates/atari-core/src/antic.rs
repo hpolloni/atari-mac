@@ -9,7 +9,7 @@ mod decode;
 #[cfg(test)]
 mod tests;
 
-use crate::state::{Reader, State, StateError, Writer, impl_state};
+use crate::state::{Reader, State, StateError, TIME_LIMIT, Writer, impl_state};
 use crate::timing::{CYCLES_PER_LINE, VBLANK_START_LINE, VideoStandard};
 use decode::{
     blink_invert, char_codes, font_address, font_row, height, is_char, is_hires, mapped_codes,
@@ -1195,6 +1195,19 @@ impl Antic {
             }
             self.pixels.get(x - odd).copied().unwrap_or_default()
         })
+    }
+
+    /// `true` if a loaded state agrees with `config`, the state before the load, and has
+    /// values that the chip can run with (REQ-061): the scan line and the cycle counters
+    /// are in the frame, and the cycle count is below [`TIME_LIMIT`].
+    pub(crate) fn loaded_is_valid(&self, config: &Self) -> bool {
+        let lines = config.standard.lines_per_frame();
+        self.standard == config.standard
+            && self.line < lines
+            && self.cur_line < lines
+            && self.cycle < CYCLES_PER_LINE
+            && self.cur_cycle < CYCLES_PER_LINE
+            && self.total_cycles < TIME_LIMIT
     }
 
     /// Advances the counters to the next cycle.

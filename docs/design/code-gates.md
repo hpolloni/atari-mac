@@ -90,7 +90,7 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
 | REQ-058 | `crates/harness/tests/code_gates.rs` `complexity_counts_each_decision` (criterion 1), `complexity_reads_tracked_files` (2), `complexity_limit_fails` (3), `complexity_baseline_rules` (4, 5), `complexity_gate_passes_on_repository` (3, 5), `code_gates_in_spec_check` (6) |
 | REQ-059 | `crates/harness/tests/code_gates.rs` `file_length_counts_lines` (criterion 1), `file_length_limit_fails` (2), `file_length_baseline_rules` (3, 4), `file_length_gate_passes_on_repository` (2, 4) |
 | REQ-060 | Inspection: a review of `make mutants`, `.cargo/mutants.toml` and the CI job against the acceptance criteria, with one run that has a planted missed mutant; evidence `docs/verification/REQ-060.md` |
-| REQ-061 | `crates/harness/tests/media_fuzz.rs` `cartridge_parsers_never_panic`, `atr_parser_never_panics`, `cas_parser_never_panics`, `xex_parser_never_panics`, `rom_check_never_panics`, `load_state_never_panics` (criteria 1, 2, 3), `fuzz_inputs_are_deterministic` (4) |
+| REQ-061 | `crates/harness/tests/media_fuzz.rs` `cartridge_parsers_never_panic`, `atr_parser_never_panics`, `cas_parser_never_panics`, `xex_parser_never_panics`, `rom_check_never_panics`, `load_state_never_panics` (criteria 1, 2, 3), `fuzz_inputs_are_deterministic` (4); the inputs of the panics that the tests found: `state_with_bad_audio_phase_is_an_error`, `state_with_bad_antic_cycle_is_an_error`, `state_with_bad_antic_count_is_an_error`, `state_with_bad_machine_count_is_an_error`, `state_with_bad_pokey_exit_cycle_is_an_error`, `state_with_bad_serial_bit_count_is_an_error`, `state_with_bad_keyboard_counter_is_an_error` (criteria 1, 3) |
 
 ## Open issues
 

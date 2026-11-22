@@ -20,7 +20,7 @@ use super::deck::TapeDeck;
 use super::drive::{Accept, Completion, DiskDrive};
 use crate::events::{self, record};
 use crate::pokey::SerialByte;
-use crate::state::{Reader, State, StateError, Writer, impl_state};
+use crate::state::{Reader, State, StateError, TIME_LIMIT, Writer, impl_state};
 use crate::timing::VideoStandard;
 
 /// The number of bytes from the computer that the bus keeps for `host_bytes`.
@@ -372,6 +372,16 @@ impl_state!(SioBus {
 });
 
 impl SioBus {
+    /// `true` if a loaded state has its cycle times below [`TIME_LIMIT`] (REQ-061).
+    pub(crate) fn loaded_is_valid(&self) -> bool {
+        self.out
+            .iter()
+            .chain(&self.external)
+            .all(|byte| byte.start < TIME_LIMIT)
+            && self.transfer_end.is_none_or(|end| end < TIME_LIMIT)
+            && self.deck.loaded_is_valid()
+    }
+
     /// An idle bus with an empty drive D1:, with the timing of `standard`.
     #[must_use]
     pub fn new(standard: VideoStandard) -> Self {

@@ -5,7 +5,7 @@
 //! (`u64`) of all bytes before it. All numbers are little-endian.
 
 use super::{BusAccess, Machine, Memory};
-use crate::state::{FNV_START, Reader, State, StateError, Writer, fnv1a, impl_state};
+use crate::state::{FNV_START, Reader, State, StateError, TIME_LIMIT, Writer, fnv1a, impl_state};
 
 /// The first bytes of each save state.
 const SIGNATURE: [u8; 8] = *b"A65XEST\x1A";
@@ -122,6 +122,19 @@ pub(super) fn save(machine: &Machine) -> Vec<u8> {
     bytes
 }
 
+/// `true` if the loaded machine `next` agrees with `config`, the machine before the load,
+/// and has values that the chips can run with (REQ-061). A state that `save` wrote is
+/// always valid; the check finds damaged states that have a valid checksum.
+fn loaded_is_valid(next: &Machine, config: &Machine) -> bool {
+    next.standard == config.standard
+        && next.cycles < TIME_LIMIT
+        && next.frames < TIME_LIMIT
+        && next.antic.loaded_is_valid(&config.antic)
+        && next.gtia.loaded_is_valid(&config.gtia)
+        && next.pokey.loaded_is_valid(&config.pokey)
+        && next.sio.loaded_is_valid()
+}
+
 /// `Machine::load_state`.
 pub(super) fn load(machine: &mut Machine, bytes: &[u8]) -> Result<(), StateError> {
     if !bytes.starts_with(&SIGNATURE) {
@@ -150,6 +163,9 @@ pub(super) fn load(machine: &mut Machine, bytes: &[u8]) -> Result<(), StateError
     next.load(&mut r)?;
     if !r.is_empty() {
         return Err(StateError::TrailingBytes);
+    }
+    if !loaded_is_valid(&next, machine) {
+        return Err(StateError::Invalid);
     }
     *machine = next;
     Ok(())

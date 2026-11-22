@@ -381,6 +381,10 @@ pub(crate) fn fnv1a(hash: u64, bytes: &[u8]) -> u64 {
 /// The FNV-1a 64-bit offset basis.
 pub(crate) const FNV_START: u64 = 0xCBF2_9CE4_8422_2325;
 
+/// Each cycle counter of a loaded state is below this limit (REQ-061): 2^62 cycles are more
+/// than 70,000 years of emulated time, so the counters cannot overflow in a run.
+pub(crate) const TIME_LIMIT: u64 = 1 << 62;
+
 #[cfg(test)]
 mod tests {
     use super::{Reader, State as _, StateError, Writer};
