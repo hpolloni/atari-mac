@@ -6,7 +6,7 @@ depends_on: "none"
 packages:
   - id: WP-1
     title: Complexity and file length gates
-    status: planned
+    status: done
     requirements: [REQ-058, REQ-059]
   - id: WP-2
     title: Mutation testing of changed code

@@ -1,0 +1,33 @@
+# Known violations of the code gates (docs/design/code-gates.md, REQ-058, REQ-059).
+#
+# The gates found these functions and files when they were added (WP-1 of SLICE-12). Each line
+# is one function or one file, with its value at the time of the line, separated by one space:
+#
+#   complexity <file> <function> <complexity>   a function above complexity 15 (REQ-058)
+#   lines <file> <length>                       a file above 1500 lines (REQ-059)
+#
+# The function name is `Type::name` for a function in an `impl` block (the trait name for a
+# trait default method) and `name` otherwise. A function or file on this list may not become
+# more complex or longer. A line that matches no function or file above the limit, or that has
+# a value above the current one, fails the gate as stale: lower the value or remove the line.
+# The list may only become smaller. The lead decides each line; do not add lines to hide a new
+# violation.
+complexity crates/atari-core/src/cpu/decode.rs decode_00 45
+complexity crates/atari-core/src/cpu/decode.rs decode_10 22
+complexity crates/atari-core/src/gtia/priority.rs mask 55
+complexity crates/atari-core/src/gtia/tests/priority.rs equations 53
+complexity crates/atari-core/src/keyboard.rs ascii_to_kbcode 70
+complexity crates/atari-core/src/machine.rs Machine::cycle_with 17
+complexity crates/atari-core/src/media.rs MediaError::fmt 22
+complexity crates/atari-core/src/media/sio.rs SioBus::transact 18
+complexity src/keymap.rs character_codes 22
+complexity src/keymap.rs letter_code 27
+complexity src/keymap.rs map_key 20
+complexity src/lib.rs run_machine 16
+lines crates/atari-core/src/cpu/tests.rs 1765
+lines crates/atari-core/src/machine.rs 2435
+lines crates/atari-core/src/pokey.rs 2337
+lines crates/harness/tests/media.rs 2116
+lines crates/harness/tests/spec_gates.rs 2200
+lines src/frontend.rs 2128
+lines tests/cli.rs 2408

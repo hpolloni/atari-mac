@@ -2,10 +2,12 @@
 //!
 //! Design: `docs/design/test-harness.md`. Requirements: REQ-020 to REQ-027. The module
 //! [`spec`] holds the specification gates (`docs/design/spec-gates.md`, REQ-043 to REQ-055).
+//! The module [`code`] holds the code gates (`docs/design/code-gates.md`, REQ-058, REQ-059).
 //!
 //! The library holds the helpers. The test suites are in `tests/`. Each test names the
 //! requirements that it verifies in its documentation comment (REQ-027).
 
+pub mod code;
 pub mod data;
 pub mod image;
 pub mod input;

@@ -76,10 +76,11 @@ deny:
 typos:
 	typos
 
-## Specification gates (docs/design/spec-gates.md). After a change of the specification, run
+## Specification gates (docs/design/spec-gates.md) and the code gates of REQ-058 and REQ-059
+## (docs/design/code-gates.md). After a change of the specification, run
 ## `cargo run -p atari-harness --bin spec-index` to write the generated indexes.
 spec-check:
-	cargo test -p atari-harness --locked --test spec_gates --test traceability
+	cargo test -p atari-harness --locked --test spec_gates --test traceability --test code_gates
 
 toml-check:
 	taplo fmt --check
