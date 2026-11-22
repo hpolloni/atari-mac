@@ -138,7 +138,8 @@ The toolchain is pinned in `rust-toolchain.toml`. `rustup` installs it automatic
 One-time setup:
 
 ```sh
-make tools      # installs cargo-deny, cargo-hack, cargo-llvm-cov, cargo-machete, taplo, typos
+make tools      # installs cargo-deny, cargo-hack, cargo-llvm-cov, cargo-machete, cargo-mutants,
+                # cargo-nextest, taplo, typos
 make hooks      # enables the pre-commit hook in .githooks/
 make roms       # downloads the ROMs and the small test data
 make test-data  # also downloads the SingleStepTests 6502 suite (about 1.1 GB)
@@ -167,6 +168,7 @@ make check
 | MSRV (`rust-version` in `Cargo.toml`) | cargo-hack | `cargo hack check --rust-version` |
 | Every feature combination | cargo-hack | `cargo hack check --feature-powerset` |
 | Line coverage of at least 80% | cargo-llvm-cov | `cargo llvm-cov --fail-under-lines 80` |
+| Each mutant of the changed lines makes a test fail (REQ-060; not in `make pre-commit`) | cargo-mutants | `make mutants` |
 | Workflow lint and security (CI only) | actionlint, zizmor, shellcheck | — |
 
 All warnings are errors (`RUSTFLAGS=-D warnings`). `unsafe` code is forbidden. To silence a

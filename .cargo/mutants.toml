@@ -1,0 +1,40 @@
+# The settings of `cargo mutants` for `make mutants` and the CI job `Mutants (cargo-mutants)`
+# (REQ-060, docs/design/code-gates.md "Mutation testing").
+
+# Most tests of the core are the system tests of crates/harness, so each mutant runs the
+# tests of both packages. On macOS, `make mutants` adds `--test-workspace=true`, so that a
+# mutant also runs the tests of the frontend (atari-mac).
+test_package = ["atari-core", "atari-harness"]
+# The same features as `make test`.
+all_features = true
+# The test binaries `spec_gates`, `code_gates` and `traceability` of atari-harness do not run
+# for a mutant. They test the documents and the gates, not the emulator, and they read the
+# source files that the mutant changes: for example, a mutant that makes a function of the
+# complexity baseline simpler makes the baseline entry stale, and the gate test would count
+# the mutant as caught. `cargo test` cannot leave out one test binary, so the tests run with
+# cargo-nextest and a filter expression.
+test_tool = "nextest"
+additional_cargo_test_args = [
+    "-E",
+    "not (package(atari-harness) & (binary(=spec_gates) | binary(=code_gates) | binary(=traceability)))",
+]
+# `RUSTFLAGS=-D warnings` would make a mutant that leaves a parameter unused unviable, and an
+# unviable mutant passes the gate. `--cap-lints=warn` keeps such a mutant viable.
+cap_lints = true
+
+# A mutant that makes the emulation loop forever is a `timeout`, and a timeout passes the gate
+# (REQ-060 criterion 2). The test timeout is this multiple of the baseline test time.
+timeout_multiplier = 2.0
+# The lower bound of the test timeout, in seconds. The baseline of cargo-mutants runs only the
+# tests of the mutated package (for a core mutant: about 1 s), but each mutant runs all the
+# tests above (in the dev profile: about 90 s for the core and the harness, about 210 s with
+# the frontend tests on macOS). With a smaller bound, a mutant that no test catches runs into
+# the timeout and passes as a `timeout` instead of failing as `missed`. Keep this bound well
+# above the time of all the tests.
+minimum_test_timeout = 600
+
+# The mutation exclusion list (REQ-060 criterion 4). Each entry is a regular expression for
+# the mutant names that `cargo mutants --list` shows. Each entry has a comment line above it
+# that gives the reason (for example, the mutant gives the same behavior). The lead decides
+# each entry.
+exclude_re = []
