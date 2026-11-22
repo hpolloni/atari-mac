@@ -1,10 +1,15 @@
 //! The command line of `atari-mac`.
 
-use std::ffi::OsString;
+use core::error::Error as _;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use atari_core::VideoStandard;
+use clap::builder::{OsStringValueParser, TypedValueParser};
+use clap::error::ErrorKind;
+use clap::{Arg, Command as ClapCommand, CommandFactory as _, Error as ClapError};
+use clap::{FromArgMatches as _, Parser};
 
 use crate::error::FrontendError;
 use crate::frontend::DisplayFilters;
@@ -160,25 +165,200 @@ const fn usage(message: String) -> FrontendError {
     FrontendError::Usage(message)
 }
 
-/// Takes the value of the option `name`.
-fn value(args: &mut impl Iterator<Item = OsString>, name: &str) -> Result<OsString, FrontendError> {
-    args.next()
-        .ok_or_else(|| usage(format!("{name} needs a value")))
+/// The command line as clap reads it. Each option is one argument (`--name`, never
+/// `--name=value`), and an option with a value takes the next argument as the value, also
+/// when it starts with `-`. A later option replaces an earlier one. The text of `--help` is
+/// [`USAGE`].
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one flag of the command line"
+)]
+#[derive(Debug, Parser)]
+#[command(
+    name = "atari-mac",
+    no_binary_name = true,
+    override_help = USAGE,
+    disable_version_flag = true,
+    args_override_self = true,
+    allow_hyphen_values = true
+)]
+struct Args {
+    /// `--os <file>`.
+    #[arg(long, value_parser = path())]
+    os: Option<PathBuf>,
+    /// `--basic <file>`.
+    #[arg(long, value_parser = path())]
+    basic: Option<PathBuf>,
+    /// `--cart <file>`.
+    #[arg(long, value_parser = path())]
+    cart: Option<PathBuf>,
+    /// `--xex <file>`.
+    #[arg(long, value_parser = path())]
+    xex: Option<PathBuf>,
+    /// `--disk <file>`.
+    #[arg(long, value_parser = path())]
+    disk: Option<PathBuf>,
+    /// `--no-fast-disk`.
+    #[arg(long)]
+    no_fast_disk: bool,
+    /// `--cas <file>`.
+    #[arg(long, value_parser = path())]
+    cas: Option<PathBuf>,
+    /// `--no-fast-tape`.
+    #[arg(long)]
+    no_fast_tape: bool,
+    /// `--auto-return`.
+    #[arg(long)]
+    auto_return: bool,
+    /// `--no-basic`.
+    #[arg(long)]
+    no_basic: bool,
+    /// `--bas <file>`.
+    #[arg(long, value_parser = path())]
+    bas: Option<PathBuf>,
+    /// `--no-run`.
+    #[arg(long)]
+    no_run: bool,
+    /// `--pal`.
+    #[arg(long)]
+    pal: bool,
+    /// `--scale <n>`.
+    #[arg(long, value_parser = scale())]
+    scale: Option<usize>,
+    /// `--frames <n>`.
+    #[arg(long, value_parser = number::<u64>("--frames"))]
+    frames: Option<u64>,
+    /// `--headless`.
+    #[arg(long)]
+    headless: bool,
+    /// `--audio-stats`.
+    #[arg(long)]
+    audio_stats: bool,
+    /// `--stats`.
+    #[arg(long)]
+    stats: bool,
+    /// `--log <categories>`.
+    #[arg(long, value_parser = log_categories())]
+    log: Option<Categories>,
+    /// `--trace <file>`.
+    #[arg(long, value_parser = path())]
+    trace: Option<PathBuf>,
+    /// `--trace-from <frame>`.
+    #[arg(long, value_parser = number::<u64>("--trace-from"))]
+    trace_from: Option<u64>,
+    /// `--trace-frames <n>`.
+    #[arg(long, value_parser = number::<u64>("--trace-frames"))]
+    trace_frames: Option<u64>,
+    /// `--screenshot <file>`.
+    #[arg(long, value_parser = path())]
+    screenshot: Option<PathBuf>,
+    /// `--artifacting`.
+    #[arg(long)]
+    artifacting: bool,
+    /// `--pal-blending`.
+    #[arg(long)]
+    pal_blending: bool,
 }
 
-/// Takes the numeric value of the option `name`.
-fn number<T: FromStr>(
-    args: &mut impl Iterator<Item = OsString>,
-    name: &str,
-) -> Result<T, FrontendError> {
-    let text = value(args, name)?;
+impl Args {
+    /// The settings of the run, with the defaults for each option that is not given.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`TraceArgs::options`].
+    fn options(self) -> Result<Options, FrontendError> {
+        let trace = TraceArgs {
+            file: self.trace,
+            from: self.trace_from,
+            frames: self.trace_frames,
+        };
+        Ok(Options {
+            os: self.os.unwrap_or_else(|| PathBuf::from(DEFAULT_OS_ROM)),
+            basic: self
+                .basic
+                .unwrap_or_else(|| PathBuf::from(DEFAULT_BASIC_ROM)),
+            cart: self.cart,
+            xex: self.xex,
+            disk: self.disk,
+            cas: self.cas,
+            fast_tape: !self.no_fast_tape,
+            fast_disk: !self.no_fast_disk,
+            auto_return: self.auto_return,
+            no_basic: self.no_basic,
+            headless: self.headless,
+            frames: self.frames,
+            screenshot: self.screenshot,
+            scale: self.scale.unwrap_or(DEFAULT_SCALE),
+            standard: if self.pal {
+                VideoStandard::Pal
+            } else {
+                VideoStandard::Ntsc
+            },
+            filters: DisplayFilters {
+                artifacting: self.artifacting,
+                pal_blending: self.pal_blending,
+            },
+            bas: self.bas,
+            no_run: self.no_run,
+            audio_stats: self.audio_stats,
+            stats: self.stats,
+            log: self.log,
+            trace: trace.options()?,
+        })
+    }
+}
+
+/// The value parser of a file option: any value, also an empty one.
+fn path() -> impl TypedValueParser<Value = PathBuf> {
+    OsStringValueParser::new().map(PathBuf::from)
+}
+
+/// The value parser of the numeric option `name`.
+fn number<T>(name: &'static str) -> impl TypedValueParser<Value = T>
+where
+    T: FromStr + Clone + Send + Sync + 'static,
+{
+    OsStringValueParser::new().try_map(move |text| parse_number(name, &text))
+}
+
+/// The value parser of `--scale`: a number from 1 to [`MAX_SCALE`].
+fn scale() -> impl TypedValueParser<Value = usize> {
+    OsStringValueParser::new().try_map(|text| {
+        let scale = parse_number("--scale", &text)?;
+        if (1..=MAX_SCALE).contains(&scale) {
+            Ok(scale)
+        } else {
+            Err(format!("--scale must be 1 to {MAX_SCALE}, not {scale}"))
+        }
+    })
+}
+
+/// The value parser of `--log` ([`Categories::parse`]).
+fn log_categories() -> impl TypedValueParser<Value = Categories> {
+    OsStringValueParser::new().try_map(|text| {
+        let text = text
+            .to_str()
+            .ok_or_else(|| format!("unknown --log category {:?}", text.display().to_string()))?;
+        Categories::parse(text).map_err(|error| match error {
+            FrontendError::Usage(message) => message,
+            other => other.to_string(),
+        })
+    })
+}
+
+/// Parses `text`, the value of the numeric option `name`.
+///
+/// # Errors
+///
+/// The message of the usage error for a value that is not a number of type `T`.
+fn parse_number<T: FromStr>(name: &str, text: &OsStr) -> Result<T, String> {
     text.to_str()
         .and_then(|text| text.parse().ok())
         .ok_or_else(|| {
-            usage(format!(
+            format!(
                 "{name} needs a number, not {:?}",
                 text.display().to_string()
-            ))
+            )
         })
 }
 
@@ -218,6 +398,49 @@ impl TraceArgs {
     }
 }
 
+/// The number of arguments at the start of `args` that clap reads. The first argument after
+/// them is unknown: it is not exactly an option of `command` (`--name` or `-h`), and it is not
+/// the value of the option before it. clap does not get it, because clap reads some unknown
+/// arguments as options (`--os=file`, `-hx`) or as the end of the options (`--`).
+fn known_len(command: &ClapCommand, args: &[OsString]) -> usize {
+    let mut len = 0;
+    while let Some(option) = args.get(len).and_then(|arg| find_option(command, arg)) {
+        len += if option.get_action().takes_values() {
+            2
+        } else {
+            1
+        };
+    }
+    len.min(args.len())
+}
+
+/// The option of `command` that `arg` names exactly, for example `--os` or `-h`.
+fn find_option<'a>(command: &'a ClapCommand, arg: &OsStr) -> Option<&'a Arg> {
+    let text = arg.to_str()?;
+    command.get_arguments().find(|option| {
+        option
+            .get_long()
+            .is_some_and(|long| text.strip_prefix("--") == Some(long))
+            || option.get_short().is_some_and(|short| {
+                text.strip_prefix('-')
+                    .is_some_and(|rest| rest.chars().eq([short]))
+            })
+    })
+}
+
+/// The usage error for the clap error `error`. `read` are the arguments that clap read.
+fn clap_error(error: &ClapError, read: &[OsString]) -> FrontendError {
+    let message = match error.kind() {
+        ErrorKind::ValueValidation => error.source().map(ToString::to_string),
+        // Only the last argument can miss its value: each option takes the next argument.
+        ErrorKind::InvalidValue => read
+            .last()
+            .map(|name| format!("{} needs a value", name.display())),
+        _ => None,
+    };
+    usage(message.unwrap_or_else(|| error.to_string()))
+}
+
 /// Parses the command line arguments (without the program name).
 ///
 /// # Errors
@@ -227,105 +450,74 @@ impl TraceArgs {
 /// with `--bas` or `--xex` (each makes key presses at the start, REQ-081 criterion 6), and
 /// for `--no-basic` with `--bas` (REQ-093 criterion 5).
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, FrontendError> {
-    let mut args = args.into_iter();
-    let mut options = Options::default();
-    let mut trace = TraceArgs::default();
-    while let Some(arg) = args.next() {
-        match arg.to_str().unwrap_or_default() {
-            "-h" | "--help" => return Ok(Command::Help),
-            "--os" => options.os = value(&mut args, "--os")?.into(),
-            "--basic" => options.basic = value(&mut args, "--basic")?.into(),
-            "--cart" => options.cart = Some(value(&mut args, "--cart")?.into()),
-            "--xex" => options.xex = Some(value(&mut args, "--xex")?.into()),
-            "--disk" => options.disk = Some(value(&mut args, "--disk")?.into()),
-            "--cas" => options.cas = Some(value(&mut args, "--cas")?.into()),
-            "--no-fast-tape" => options.fast_tape = false,
-            "--no-fast-disk" => options.fast_disk = false,
-            "--auto-return" => options.auto_return = true,
-            "--no-basic" => options.no_basic = true,
-            "--headless" => options.headless = true,
-            "--pal" => options.standard = VideoStandard::Pal,
-            "--frames" => options.frames = Some(number(&mut args, "--frames")?),
-            "--screenshot" => options.screenshot = Some(value(&mut args, "--screenshot")?.into()),
-            "--artifacting" => options.filters.artifacting = true,
-            "--pal-blending" => options.filters.pal_blending = true,
-            "--bas" => options.bas = Some(value(&mut args, "--bas")?.into()),
-            "--no-run" => options.no_run = true,
-            "--audio-stats" => options.audio_stats = true,
-            "--stats" => options.stats = true,
-            "--log" => {
-                let text = value(&mut args, "--log")?;
-                let text = text.to_str().ok_or_else(|| {
-                    usage(format!(
-                        "unknown --log category {:?}",
-                        text.display().to_string()
-                    ))
-                })?;
-                options.log = Some(Categories::parse(text)?);
-            }
-            "--trace" => trace.file = Some(value(&mut args, "--trace")?.into()),
-            "--trace-from" => trace.from = Some(number(&mut args, "--trace-from")?),
-            "--trace-frames" => trace.frames = Some(number(&mut args, "--trace-frames")?),
-            "--scale" => {
-                let scale = number(&mut args, "--scale")?;
-                if !(1..=MAX_SCALE).contains(&scale) {
-                    return Err(usage(format!(
-                        "--scale must be 1 to {MAX_SCALE}, not {scale}"
-                    )));
-                }
-                options.scale = scale;
-            }
-            _ => {
-                return Err(usage(format!(
-                    "unknown argument {:?}",
-                    arg.display().to_string()
-                )));
-            }
-        }
+    let args: Vec<OsString> = args.into_iter().collect();
+    let mut command = Args::command();
+    command.build();
+    let (read, unknown) = args.split_at(known_len(&command, &args));
+    let matches = match command.try_get_matches_from_mut(read) {
+        Ok(matches) => matches,
+        Err(error) if error.kind() == ErrorKind::DisplayHelp => return Ok(Command::Help),
+        Err(error) => return Err(clap_error(&error, read)),
+    };
+    if let Some(arg) = unknown.first() {
+        return Err(usage(format!(
+            "unknown argument {:?}",
+            arg.display().to_string()
+        )));
     }
-    options.trace = trace.options()?;
-    if options.headless && options.frames.is_none() {
-        return Err(usage("--headless needs --frames".to_owned()));
-    }
-    if options.no_run && options.bas.is_none() {
-        return Err(usage("--no-run needs --bas".to_owned()));
-    }
-    if options.xex.is_some() && options.disk.is_some() {
-        return Err(usage(
-            "--xex and --disk cannot be used together: both use drive D1:".to_owned(),
-        ));
-    }
-    if options.xex.is_some() && options.bas.is_some() {
-        return Err(usage(
-            "--xex and --bas cannot be used together: an executable starts with BASIC disabled"
-                .to_owned(),
-        ));
-    }
-    if options.cas.is_some() && options.bas.is_some() {
-        return Err(usage(
-            "--cas and --bas cannot be used together: both make key presses at the start"
-                .to_owned(),
-        ));
-    }
-    if options.no_basic && options.bas.is_some() {
-        return Err(usage(
-            "--no-basic and --bas cannot be used together: --bas types the program into BASIC"
-                .to_owned(),
-        ));
-    }
-    if options.auto_return && options.cas.is_none() {
-        return Err(usage(
-            "--auto-return needs --cas: it presses RETURN for a tape boot".to_owned(),
-        ));
-    }
-    if options.cas.is_some() && options.xex.is_some() {
-        return Err(usage(
-            "--cas and --xex cannot be used together: both make key presses at the start"
-                .to_owned(),
-        ));
-    }
+    let options = Args::from_arg_matches(&matches)
+        .map_err(|error| clap_error(&error, read))?
+        .options()?;
+    check_combinations(&options)?;
     check_filters(&options)?;
     Ok(Command::Run(Box::new(options)))
+}
+
+/// Checks the options that need another option or that cannot be used together, in this
+/// order.
+///
+/// # Errors
+///
+/// [`FrontendError::Usage`] that names the options of the first broken rule.
+fn check_combinations(options: &Options) -> Result<(), FrontendError> {
+    let program = options.bas.is_some();
+    let tape = options.cas.is_some();
+    let executable = options.xex.is_some();
+    let rules = [
+        (
+            options.headless && options.frames.is_none(),
+            "--headless needs --frames",
+        ),
+        (options.no_run && !program, "--no-run needs --bas"),
+        (
+            executable && options.disk.is_some(),
+            "--xex and --disk cannot be used together: both use drive D1:",
+        ),
+        (
+            executable && program,
+            "--xex and --bas cannot be used together: an executable starts with BASIC disabled",
+        ),
+        (
+            tape && program,
+            "--cas and --bas cannot be used together: both make key presses at the start",
+        ),
+        (
+            options.no_basic && program,
+            "--no-basic and --bas cannot be used together: --bas types the program into BASIC",
+        ),
+        (
+            options.auto_return && !tape,
+            "--auto-return needs --cas: it presses RETURN for a tape boot",
+        ),
+        (
+            tape && executable,
+            "--cas and --xex cannot be used together: both make key presses at the start",
+        ),
+    ];
+    rules
+        .into_iter()
+        .find(|&(broken, _)| broken)
+        .map_or(Ok(()), |(_, message)| Err(usage(message.to_owned())))
 }
 
 /// The name of a video standard in messages.

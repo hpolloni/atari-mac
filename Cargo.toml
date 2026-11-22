@@ -27,6 +27,8 @@ publish.workspace = true
 
 [dependencies]
 atari-core.workspace = true
+# The command line parser of `src/cli.rs`; the text of `--help` stays `cli::USAGE`.
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive"] }
 # Audio output on the default host device (docs/design/architecture.md, "Audio output").
 cpal = { version = "0.18.2", default-features = false }
 # The log records of `--log` (REQ-085). `kv` gives the frame and cycle counts of a record
