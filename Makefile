@@ -15,18 +15,23 @@ COVERAGE_MIN := 80
 # On another host, the gates that build code skip it, as the Linux CI jobs do.
 ifeq ($(shell uname -s),Darwin)
 PACKAGES := --workspace
+# cargo-mutants reads `--exclude` as a file glob, so the packages of `PACKAGES` are named.
+MUTANTS_PACKAGES := --workspace --test-workspace=true
 else
 PACKAGES := --workspace --exclude atari-mac
+MUTANTS_PACKAGES := --package atari-core --package atari-harness
 endif
 
 .PHONY: check pre-commit fmt fmt-check spec-check clippy test doc deny typos toml-check \
         machete msrv features coverage doc-test release roms test-data reference worktree-setup \
         tools hooks clean
+.PHONY: mutants
 
 ## Full gate set (same as CI, except the OS matrix). `coverage` runs the tests of `test`
 ## (`cargo llvm-cov --all-targets`), so `check` does not run them a second time.
 check: fmt-check toml-check typos spec-check clippy coverage doc-test release doc deny machete \
        msrv features
+check: mutants
 
 ## Fast subset used by the git pre-commit hook.
 pre-commit: fmt-check spec-check clippy test
@@ -99,6 +104,16 @@ coverage: roms
 
 tools:
 	cargo install --locked cargo-deny cargo-hack cargo-llvm-cov cargo-machete taplo-cli typos-cli
+	cargo install --locked cargo-mutants@27.1.0 cargo-nextest@0.9.151
+
+## Mutation testing of the lines changed from the merge base with origin/main to the working
+## tree (REQ-060, docs/design/code-gates.md). The script makes the mutants in a throwaway
+## worktree (target/mutants-wt), not in this tree; the settings are in .cargo/mutants.toml and
+## the results in target/mutants/mutants.out. Too slow for `pre-commit`. Another base:
+## `make mutants MUTANTS_BASE=<commit>`.
+MUTANTS_BASE ?= $$(git merge-base origin/main HEAD)
+mutants: roms
+	scripts/mutants.sh "$(MUTANTS_BASE)" $(MUTANTS_PACKAGES)
 
 hooks:
 	git config core.hooksPath .githooks

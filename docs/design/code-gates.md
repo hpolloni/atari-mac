@@ -53,20 +53,45 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
 
 ## Mutation testing (REQ-060)
 
-- `make tools` installs `cargo-mutants` with a pinned version (`--locked`).
-- `make mutants` writes the diff of `git diff $(git merge-base origin/main HEAD)` (the working
-  tree included) to `target/mutants.diff` and runs
-  `cargo mutants --in-diff target/mutants.diff` with the packages of `$(PACKAGES)`. When the
-  diff has no `.rs` file, the target prints that and passes (criterion 5).
-- `.cargo/mutants.toml` holds the settings: `exclude_re` (criterion 4), the timeout
-  multiplier, and the test options. A mutant of a function in `crates/atari-core` must run
-  the system tests of `crates/harness` too, because most core tests are there.
+- `make tools` installs `cargo-mutants` and `cargo-nextest` with pinned versions (`--locked`).
+- `make mutants` runs `scripts/mutants.sh` with the base `git merge-base origin/main HEAD`
+  (`MUTANTS_BASE=<commit>` selects another base). The script writes the diff of
+  `git diff <base>` (the working tree included) to `target/mutants/mutants.diff` and runs
+  `cargo mutants --in-diff` with the packages of `$(PACKAGES)`: `--workspace` on macOS,
+  `--package atari-core --package atari-harness` on another host (cargo-mutants reads
+  `--exclude` as a file pattern). When the diff adds or modifies no line of a `.rs` file, the
+  script prints that and passes (criterion 5).
+- The mutants are not made in the checkout of the user. The script makes a throwaway git
+  worktree `target/mutants-wt` (it removes one that an earlier run left first): HEAD detached,
+  the uncommitted changes applied (`git diff HEAD --binary`, so that the tree agrees with the
+  diff), and the ROMs and the `test-data/` link of `scripts/worktree-setup.sh
+  --no-fast-forward`. In it, `cargo mutants --in-place` changes one file at a time (a copy of
+  the tree by cargo-mutants would not have the ROMs and `test-data/`, which are not in git). A
+  trap removes the worktree at the end, also on a failure. A hard kill can only damage the
+  throwaway worktree. The build directory `target/mutants/build` and the results
+  `target/mutants/mutants.out` are in the main tree, so the build cache stays from one run to
+  the next. In CI the checkout is throwaway too; the job uses the same script.
+- `.cargo/mutants.toml` holds the settings: `exclude_re` (criterion 4), the timeouts, and the
+  test options. A mutant of a function in `crates/atari-core` must run the system tests of
+  `crates/harness` too, because most core tests are there (`test_package`; on macOS,
+  `--test-workspace=true` adds the frontend tests).
+- The test binaries `spec_gates`, `code_gates` and `traceability` of `atari-harness` do not run
+  for a mutant (cargo-nextest with a filter expression; `cargo test` cannot leave out one test
+  binary). They test the documents and the gates, and they read the source files that the
+  mutant changes: a mutant that makes a function of the complexity baseline simpler would make
+  the baseline entry stale, and the gate test would count the mutant as caught.
 - A `timeout` is a pass (criterion 2): a mutant that makes the emulation loop forever is
-  caught.
+  caught. The test timeout has a lower bound of 600 s (`minimum_test_timeout`). The baseline
+  run of cargo-mutants runs only the tests of the mutated package (about 1 s for the core),
+  but each mutant runs all the tests above (in the dev profile about 90 s for the core and the
+  harness, about 210 s with the frontend tests on macOS). With a smaller bound, a mutant that
+  no test catches runs into the timeout and passes instead of failing as `missed`.
 - CI: the job `Mutants (cargo-mutants)` on Linux runs the gate on the diff from
-  `github.event.before` to `github.sha`, with `--workspace --exclude atari-mac`. The output
-  directory `mutants.out` is an artifact. The frontend mutants run only in `make check` on
-  macOS.
+  `github.event.before` to `github.sha` (on the first push, where `before` is all zeros: the
+  diff of the last commit), with the packages of `--workspace --exclude atari-mac`. A pull
+  request or a merge queue entry uses the diff from its base; a scheduled or manual run passes
+  with a message. The output directory `target/mutants/mutants.out` is an artifact. The
+  frontend mutants run only in `make check` on macOS.
 
 ## Media parser property tests (REQ-061)
 

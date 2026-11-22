@@ -7,9 +7,20 @@
 # The main checkout is the first entry of `git worktree list --porcelain`. In the main
 # checkout, the script does nothing. Each step prints one line. The ROMs and the symlink are
 # ignored by git (`.gitignore`) and are never committed.
+#
+# With `--no-fast-forward`, the script skips step 1 and does not change the checked-out commit
+# (scripts/mutants.sh uses this for its throwaway worktree).
 set -euo pipefail
 
 readonly MAIN_BRANCH=main
+
+fast_forward=true
+if [[ "${1-}" == "--no-fast-forward" ]]; then
+    fast_forward=false
+elif [[ $# -gt 0 ]]; then
+    echo "usage: $0 [--no-fast-forward]" >&2
+    exit 1
+fi
 
 top=$(git rev-parse --show-toplevel)
 cd "$top"
@@ -28,7 +39,9 @@ if [[ "$here" == "$main_checkout" ]]; then
 fi
 
 # 1. Fast-forward to main.
-if ! git rev-parse --verify --quiet "$MAIN_BRANCH^{commit}" >/dev/null; then
+if [[ "$fast_forward" == false ]]; then
+    echo "fast-forward: skipped (--no-fast-forward)"
+elif ! git rev-parse --verify --quiet "$MAIN_BRANCH^{commit}" >/dev/null; then
     echo "fast-forward: skipped, there is no branch '$MAIN_BRANCH'"
 elif [[ "$(git rev-parse HEAD)" == "$(git rev-parse "$MAIN_BRANCH")" ]]; then
     echo "fast-forward: skipped, already at $MAIN_BRANCH ($(git rev-parse --short HEAD))"
