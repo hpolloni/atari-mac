@@ -1,7 +1,7 @@
 ---
 id: SLICE-12
 title: Code quality gates
-status: planned
+status: in-progress
 depends_on: "none"
 packages:
   - id: WP-1
