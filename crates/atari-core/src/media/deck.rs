@@ -6,7 +6,7 @@
 //! time in machine cycles from the start of the tape.
 
 use super::tape::{Tape, TapeBlock};
-use crate::state::{Reader, State, StateError, Writer};
+use crate::state::{Reader, State, StateError, TIME_LIMIT, Writer};
 use crate::timing::VideoStandard;
 
 /// The bits of one byte on the tape: start bit, 8 data bits and stop bit (HRM C.2).
@@ -77,6 +77,12 @@ const fn exact(n: u64) -> f64 {
 }
 
 impl TapeDeck {
+    /// `true` if a loaded state has a played time and a motor start below [`TIME_LIMIT`]
+    /// (REQ-061).
+    pub(crate) fn loaded_is_valid(&self) -> bool {
+        self.played < TIME_LIMIT && self.running_since.is_none_or(|since| since < TIME_LIMIT)
+    }
+
     /// A deck with no tape and the motor off, with the clock of `standard`.
     #[must_use]
     pub const fn new(standard: VideoStandard) -> Self {

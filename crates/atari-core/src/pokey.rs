@@ -21,7 +21,7 @@ mod timers;
 use std::collections::VecDeque;
 
 use crate::keyboard::{CONTROL, SHIFT};
-use crate::state::impl_state;
+use crate::state::{TIME_LIMIT, impl_state};
 use crate::timing::{CYCLES_PER_LINE, VideoStandard};
 use audio::Audio;
 use kbscan::{KeyboardScan, ScanInput};
@@ -584,6 +584,27 @@ impl Pokey {
     /// The host audio sample rate in Hz (for the save states, REQ-018).
     pub(crate) const fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// `true` if a loaded state agrees with `config`, the state before the load, and has
+    /// values that the chip can run with (REQ-061): the cycle counts are below
+    /// [`TIME_LIMIT`] and the initialization exit is not after the current cycle, the
+    /// volumes are 0-15, the serial bit counts and the keyboard scan counter are in range,
+    /// and the audio output agrees with the configuration.
+    pub(crate) fn loaded_is_valid(&self, config: &Self) -> bool {
+        self.standard == config.standard
+            && self.sample_rate == config.sample_rate
+            && self.cycle < TIME_LIMIT
+            && self.exit_cycle <= self.cycle
+            && self
+                .sent
+                .iter()
+                .all(|byte| byte.start_cycle < TIME_LIMIT && byte.end_cycle < TIME_LIMIT)
+            && self.volumes.iter().all(|&volume| volume <= AUDC_VOLUME)
+            && self.serial.loaded_is_valid()
+            && self.serial_in.loaded_is_valid()
+            && self.scan.loaded_is_valid()
+            && self.audio.loaded_is_valid(&config.audio)
     }
 
     /// Moves all samples made since the last call to the end of `out` (REQ-538).

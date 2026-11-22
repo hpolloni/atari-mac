@@ -96,6 +96,11 @@ impl_state!(KeyboardScan {
 });
 
 impl KeyboardScan {
+    /// `true` if a loaded state has a scan counter of 0-63 (REQ-061).
+    pub(super) const fn loaded_is_valid(self) -> bool {
+        self.counter <= 63
+    }
+
     /// The power-on state.
     pub(super) const fn new() -> Self {
         Self {

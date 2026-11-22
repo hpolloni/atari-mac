@@ -18,6 +18,8 @@ yaml-rust2 = { version = "0.13", default-features = false }
 [dev-dependencies]
 # The capture logger of the machine event log tests (REQ-084).
 log = { version = "0.4.35", default-features = false, features = ["kv"] }
+# The media parser property tests (REQ-061).
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

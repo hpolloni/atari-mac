@@ -13,7 +13,7 @@ use std::mem;
 use std::ops::RangeInclusive;
 
 use crate::antic::{AnCode, CycleOutput, DmaKind};
-use crate::state::impl_state;
+use crate::state::{TIME_LIMIT, impl_state};
 use crate::timing::{VBLANK_START_LINE, VideoStandard};
 
 /// Frame width in half color clocks (HPOS `$20-$DF`).
@@ -328,6 +328,18 @@ impl Gtia {
         self.color_clock(h0, left, pixel, false);
         self.color_clock(h0 + 1, right, pixel, true);
         self.clock += 2;
+    }
+
+    /// `true` if a loaded state agrees with `config`, the state before the load, and has
+    /// values that the chip can run with (REQ-061): the pending writes fit in the queue,
+    /// the color clock count is below [`TIME_LIMIT`], and the frame buffers have the frame
+    /// size.
+    pub(crate) fn loaded_is_valid(&self, config: &Self) -> bool {
+        self.standard == config.standard
+            && self.pending_len <= PENDING
+            && self.clock < TIME_LIMIT
+            && self.back.len() == FRAME_WIDTH * FRAME_HEIGHT
+            && self.front.len() == FRAME_WIDTH * FRAME_HEIGHT
     }
 
     /// The last complete frame (REQ-405): one GTIA color byte per high-resolution pixel.

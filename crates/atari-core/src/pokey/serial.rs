@@ -108,6 +108,11 @@ impl_state!(SerialOut {
 });
 
 impl SerialOut {
+    /// `true` if a loaded state has a bit count of a frame (REQ-061).
+    pub(super) const fn loaded_is_valid(&self) -> bool {
+        self.bits <= FRAME_BITS
+    }
+
     /// The power-on state.
     pub(super) const fn new() -> Self {
         Self {
@@ -264,6 +269,11 @@ impl_state!(SerialIn {
 });
 
 impl SerialIn {
+    /// `true` if a loaded state has a bit count of a frame (REQ-061).
+    pub(super) const fn loaded_is_valid(self) -> bool {
+        self.bits <= STOP_BIT
+    }
+
     /// The power-on state: the input waits, and the line was idle (1).
     pub(super) const fn new() -> Self {
         Self {

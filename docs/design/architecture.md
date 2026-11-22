@@ -115,7 +115,13 @@ The format, all numbers little-endian:
 
 `load_state` checks the signature, the version, the checksum and the configuration hash in
 this order, loads into a copy of the machine, and replaces the machine only when the load
-succeeds and no byte is left. The audio samples that were not drained are in the state. When
+succeeds, no byte is left, and the loaded values are valid (REQ-061): the video standard and
+the audio rates of the chips are those of the configuration; the cycle counters and the
+times of the machine, ANTIC, GTIA, POKEY, the SIO bus and the cassette deck are below
+2^62 (`state::TIME_LIMIT`); the ANTIC scan line and cycle are in the frame; the GTIA write
+queue and frame buffers have their sizes; and the POKEY volumes, serial bit counts,
+keyboard scan counter and resampler phase are in range. A damaged state with a valid
+checksum then gives `StateError::Invalid`, not a panic. The audio samples that were not drained are in the state. When
 a chip gets a new field, its `impl_state!` list gets the field, and the version increments.
 
 ## Frontend

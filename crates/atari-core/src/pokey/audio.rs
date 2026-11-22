@@ -180,6 +180,23 @@ impl Audio {
     pub(super) fn drain(&mut self, out: &mut Vec<f32>) {
         out.append(&mut self.samples);
     }
+
+    /// `true` if a loaded state agrees with `config`, the state before the load (REQ-061):
+    /// the rates and the filter coefficients come from the configuration, the phase is
+    /// below the clock rate, and the level cache has volumes of 0-15.
+    pub(super) fn loaded_is_valid(&self, config: &Self) -> bool {
+        self.clock_hz == config.clock_hz
+            && self.sample_rate == config.sample_rate
+            && self.a1.to_bits() == config.a1.to_bits()
+            && self.a2.to_bits() == config.a2.to_bits()
+            && self.phase < self.clock_hz
+            && (self.level_key == NO_LEVEL
+                || self
+                    .level_key
+                    .to_le_bytes()
+                    .iter()
+                    .all(|&volume| volume <= 0x0F))
+    }
 }
 
 /// A cycle count or rate as `f64`. The values are below 2^53, so the conversion is exact.
