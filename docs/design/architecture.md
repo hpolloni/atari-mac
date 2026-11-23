@@ -330,6 +330,20 @@ with `RUN` (196 frames to `Ready`, then 1,161 frames of typing) takes 2.15 s hea
 (1.83 s for the typing) and 2.27 s in the window (about 1.9 s for the typing), against
 22.6 s for 1,357 frames at real-time speed.
 
+### Command-line errors (REQ-096, REQ-097)
+
+`cli::parse` returns `FrontendError::Usage` for each error of REQ-096 and REQ-097. `main`
+prints `atari-mac: <message>` on standard error and exits with `FrontendError::exit_code`
+(2 for `Usage`). The checks run in this order:
+
+1. The pre-scan (`known_len`) finds the first argument that is not an option name or the
+   value of one (REQ-096 criterion 1). `clap` reads only the arguments before it, so a value
+   error before that argument comes first (criterion 6).
+2. The `clap` value parsers check the numbers and the `--scale` range in the order of the
+   arguments (criteria 3, 4). A missing value can only be the last argument (criterion 2).
+3. `TraceArgs::options`, then `check_combinations` (one table in the order of REQ-097
+   criterion 8), then `check_filters` (REQ-019 criterion 5).
+
 ### Tape image from the command line (REQ-081)
 
 `--cas <file>` sets `Options::cas`. `atari_mac::start` reads the file and calls
@@ -902,6 +916,8 @@ file error.
 | REQ-081 | `tests/cli.rs` `cas_loads_tape` (1), `cas_rejects_bad_files` (2), `cas_key_presses` (3), `cas_boots_tape` (4, NTSC and PAL), `cas_help_lists_option` (5), `cas_with_bas_rejected` (6) |
 | REQ-092 | `tests/cli.rs` `auto_return_presses_return` (1, NTSC and PAL), `auto_return_headless_boot` (2, NTSC and PAL), `auto_return_needs_cas` (3), `cas_without_auto_return` (4), `auto_return_help` (5) |
 | REQ-093 | `tests/cli.rs` `no_basic_holds_option` (1), `no_basic_ram_at_a000` (2), `no_basic_with_cas` (3), `no_basic_with_disk` (4), `no_basic_with_bas_and_xex` (5), `no_basic_help` (6) |
+| REQ-096 | `src/cli.rs` unit tests `unknown_argument_forms` (criterion 1), `missing_value_is_last` (2), `bad_number_values` (3), `scale_out_of_range` (4), `first_syntax_error_wins` (6); `tests/cli_errors.rs` `syntax_error_output` (5) |
+| REQ-097 | `src/cli.rs` unit tests `combination_messages` (criteria 1 to 6), `combination_order` (8); `tests/cli_errors.rs` `combination_error_output` (7) |
 | REQ-091 | `tests/cli.rs` `fast_tape_default_on` (1), `no_fast_tape_option` (2), `no_fast_tape_help` (3); `src/cli.rs` unit test `no_fast_tape_parses` |
 | REQ-094 | `tests/cli.rs` `fast_disk_default_on` (1, with `--disk`, `--xex` and no media), `no_fast_disk_option` (2: the boot test disk of REQ-636 boots on the serial path, with the disk turbo), `fast_disk_boots_faster` (3), `no_fast_disk_help` (4); `src/cli.rs` unit test `no_fast_disk_parses` |
 | REQ-095 | `src/frontend.rs` unit tests `disk_turbo_follows_transfers` (1, 2, fake clock, the boot test disk of REQ-636 with `AltirraOS` and the shortcut off), `empty_drive_keeps_pacing` (3), `disk_turbo_presents_frames` (4, fake clock and device), `disk_turbo_keeps_machine_state` (5); `tests/frontend_log.rs` `disk_turbo_records` (6); the core query of `media.md`, "Disk transfer": `crates/atari-core/src/media/tests/sio.rs` `req095_transfer_span` (1: a read, a write and a NAK), `req095_transfer_edges` (1: a bad frame, a frame for another device, a cut reply, `transact`, a removed drive and `reset`), each with a host that drives `SioBus`, `crates/harness/tests/media.rs` `req095_transfer_on_serial_boot` (1: with `AltirraOS` and the shortcut off, `Machine::disk_transfer` is active from the start bit of the first command byte, `IRQST` bit 3, to the end of the last reply byte, cycle by cycle) |
