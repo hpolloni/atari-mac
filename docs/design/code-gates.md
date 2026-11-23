@@ -80,6 +80,9 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
   binary). They test the documents and the gates, and they read the source files that the
   mutant changes: a mutant that makes a function of the complexity baseline simpler would make
   the baseline entry stale, and the gate test would count the mutant as caught.
+- The test binary `media_fuzz` of `atari-harness` (REQ-061) does not run for a mutant either.
+  Each mutant runs all the tests, and media_fuzz alone takes more than a minute in the dev
+  profile; the error paths of the parsers are also tested in `crates/harness/tests/media.rs`.
 - A `timeout` is a pass (criterion 2): a mutant that makes the emulation loop forever is
   caught. The test timeout has a lower bound of 600 s (`minimum_test_timeout`). The baseline
   run of cargo-mutants runs only the tests of the mutated package (about 1 s for the core),
@@ -105,6 +108,10 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
   REQ-018).
 - For an accepted input, the test builds a machine with the free ROMs (`roms/`, as the other
   harness tests do) and the media, and runs 10 frames (criterion 3).
+- The tests run in `make test`, `make pre-commit` and the CI job `Test` (criterion 5). They do
+  not run in `make coverage`, the CI job `Coverage` and the mutant runs (filter expressions of
+  cargo-nextest): with the coverage counters they took more than 25 minutes in CI, and each
+  mutant runs all the tests.
 - A panic that a test finds is a defect: the package fixes the parser in the core and keeps
   the input as a normal test case in the same file.
 

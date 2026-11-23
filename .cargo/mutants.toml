@@ -13,10 +13,14 @@ all_features = true
 # complexity baseline simpler makes the baseline entry stale, and the gate test would count
 # the mutant as caught. `cargo test` cannot leave out one test binary, so the tests run with
 # cargo-nextest and a filter expression.
+# The test binary `media_fuzz` (the property tests of the media parsers, REQ-061) does not run
+# for a mutant either: each mutant runs all the tests, and media_fuzz alone takes more than a
+# minute in the dev profile. The error paths of the parsers are also tested in
+# crates/harness/tests/media.rs. `make test` and the CI job `Test` run media_fuzz.
 test_tool = "nextest"
 additional_cargo_test_args = [
     "-E",
-    "not (package(atari-harness) & (binary(=spec_gates) | binary(=code_gates) | binary(=traceability)))",
+    "not (package(atari-harness) & (binary(=spec_gates) | binary(=code_gates) | binary(=traceability) | binary(=media_fuzz)))",
 ]
 # `RUSTFLAGS=-D warnings` would make a mutant that leaves a parameter unused unviable, and an
 # unviable mutant passes the gate. `--cap-lints=warn` keeps such a mutant viable.

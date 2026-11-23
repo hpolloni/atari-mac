@@ -100,8 +100,12 @@ msrv:
 features:
 	cargo hack check --feature-powerset $(PACKAGES) --all-targets --locked
 
+## The tests run with cargo-nextest, so that the filter can leave out the property tests of
+## the media parsers (`media_fuzz`, REQ-061): with the coverage counters they take more than
+## 25 minutes in CI. `make test` and the CI job `Test` run them (docs/design/code-gates.md).
+COVERAGE_FILTER := not (package(atari-harness) & binary(=media_fuzz))
 coverage: roms
-	cargo llvm-cov $(PACKAGES) --all-targets --all-features --locked --fail-under-lines $(COVERAGE_MIN)
+	cargo llvm-cov nextest $(PACKAGES) --all-targets --all-features --locked --fail-under-lines $(COVERAGE_MIN) -E '$(COVERAGE_FILTER)'
 
 tools:
 	cargo install --locked cargo-deny cargo-hack cargo-llvm-cov cargo-machete taplo-cli typos-cli

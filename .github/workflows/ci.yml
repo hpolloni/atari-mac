@@ -78,8 +78,8 @@ jobs:
       - run: cargo doc --package atari-mac --no-deps --document-private-items --all-features --locked
 
   # The tests on macOS: the whole workspace with the frontend. On Linux, the job `coverage`
-  # runs the same tests (with the coverage counters), so the SingleStepTests suite runs once
-  # on each OS.
+  # runs the same tests (with the coverage counters) except `media_fuzz`, so the
+  # SingleStepTests suite runs once on each OS.
   test:
     name: Test (macos-latest)
     runs-on: macos-latest
@@ -150,7 +150,9 @@ jobs:
       - run: cargo hack check --feature-powerset --workspace --exclude atari-mac --all-targets --locked
 
   # The tests on Linux (the core and the harness), with the coverage counters: `cargo
-  # llvm-cov --all-targets` runs the same tests as `cargo test --all-targets`.
+  # llvm-cov nextest --all-targets` runs the same tests as `cargo test --all-targets`, but
+  # the filter leaves out the property tests of the media parsers (`media_fuzz`, REQ-061).
+  # With the coverage counters they take more than 25 minutes; the job `test` runs them.
   coverage:
     name: Coverage (cargo-llvm-cov)
     runs-on: ubuntu-latest
@@ -162,7 +164,8 @@ jobs:
       - run: rustup toolchain install
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
-          tool: cargo-llvm-cov
+          # Keep the cargo-nextest version in sync with `make tools`.
+          tool: cargo-llvm-cov,cargo-nextest@0.9.151
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Cache ROMs and test data
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -173,8 +176,9 @@ jobs:
           key: test-data-${{ hashFiles('scripts/fetch-roms.sh', 'scripts/single-step-6502.sha1') }}
       - run: scripts/fetch-roms.sh --single-step
         shell: bash
-      # Keep the threshold in sync with COVERAGE_MIN in the Makefile.
-      - run: cargo llvm-cov --workspace --exclude atari-mac --all-targets --all-features --locked --fail-under-lines 80
+      # Keep the threshold in sync with COVERAGE_MIN and the filter in sync with COVERAGE_FILTER
+      # in the Makefile.
+      - run: cargo llvm-cov nextest --workspace --exclude atari-mac --all-targets --all-features --locked --fail-under-lines 80 -E 'not (package(atari-harness) & binary(=media_fuzz))'
       - name: Doc tests
         run: cargo test --workspace --exclude atari-mac --doc --all-features --locked
       - name: Release build (overflow checks on, LTO)
