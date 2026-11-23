@@ -167,7 +167,7 @@ make check
 | Unused dependencies | cargo-machete | `cargo machete` |
 | MSRV (`rust-version` in `Cargo.toml`) | cargo-hack | `cargo hack check --rust-version` |
 | Every feature combination | cargo-hack | `cargo hack check --feature-powerset` |
-| Line coverage of at least 80% | cargo-llvm-cov | `cargo llvm-cov --fail-under-lines 80` |
+| Line coverage of at least 80% | cargo-llvm-cov | `cargo llvm-cov nextest --fail-under-lines 80` (without `media_fuzz`) |
 | Each mutant of the changed lines makes a test fail (REQ-060; not in `make pre-commit`) | cargo-mutants | `make mutants` |
 | Workflow lint and security (CI only) | actionlint, zizmor, shellcheck | — |
 
