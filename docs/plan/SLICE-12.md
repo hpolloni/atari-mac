@@ -18,7 +18,7 @@ packages:
     requirements: [REQ-061]
   - id: WP-4
     title: Command-line rules found by the mutation run
-    status: planned
+    status: done
     requirements: [REQ-096, REQ-097]
 ---
 # SLICE-12: Code quality gates

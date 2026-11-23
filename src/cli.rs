@@ -557,8 +557,10 @@ mod tests {
     use atari_core::VideoStandard;
 
     use super::{Command, Options, check_filters, parse};
+    use crate::error::FrontendError;
     use crate::frontend::DisplayFilters;
     use crate::logging::Categories;
+    use crate::trace::TraceOptions;
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
@@ -575,6 +577,26 @@ mod tests {
         match parse(args(list)) {
             Err(error) => error.to_string(),
             other => panic!("{list:?} gave {other:?}"),
+        }
+    }
+
+    /// The text of the usage error of `list`. The error has exit code 2.
+    fn usage_message(list: &[&str]) -> String {
+        let error = match parse(args(list)) {
+            Err(error) => error,
+            other => panic!("{list:?} gave {other:?}"),
+        };
+        assert_eq!(error.exit_code(), 2, "exit code of {list:?}");
+        match error {
+            FrontendError::Usage(message) => message,
+            other => panic!("{list:?} gave {other:?}, not a usage error"),
+        }
+    }
+
+    /// Checks that each command line of `cases` gives the usage error with its message.
+    fn assert_usage(cases: &[(&[&str], &str)]) {
+        for &(list, message) in cases {
+            assert_eq!(usage_message(list), message, "{list:?}");
         }
     }
 
@@ -790,5 +812,297 @@ mod tests {
             !parse_ok(&["--disk", "a.atr", "--no-fast-disk"]).fast_disk,
             "--no-fast-disk"
         );
+    }
+
+    /// The options that take a value, as the user types them.
+    const VALUE_OPTIONS: [&str; 14] = [
+        "--os",
+        "--basic",
+        "--cart",
+        "--xex",
+        "--disk",
+        "--cas",
+        "--bas",
+        "--scale",
+        "--frames",
+        "--log",
+        "--trace",
+        "--trace-from",
+        "--trace-frames",
+        "--screenshot",
+    ];
+
+    /// Verifies REQ-096 criterion 1: an argument that is not an option and not the value of
+    /// an option is unknown, also an option with `=` and a value, two short options in one
+    /// argument, `--` and an empty argument, at the start and after a valid option.
+    #[test]
+    fn unknown_argument_forms() {
+        let forms = [
+            "--os=file",
+            "--pal=1",
+            "--frames=10",
+            "--help=1",
+            "-hx",
+            "-hh",
+            "--",
+            "",
+            "-",
+            "-x",
+            "--fast",
+            "--PAL",
+            "pal",
+            "file.rom",
+            "---pal",
+        ];
+        for form in forms {
+            let message = format!("unknown argument {form:?}");
+            for list in [&[form][..], &["--pal", form], &["--os", "a.rom", form]] {
+                assert_eq!(usage_message(list), message, "{list:?}");
+            }
+        }
+    }
+
+    /// Verifies REQ-096 criterion 2: an option that takes a value, as the last argument,
+    /// needs a value, and the next argument is the value, also when it starts with `-`.
+    #[test]
+    fn missing_value_is_last() {
+        for option in VALUE_OPTIONS {
+            let message = format!("{option} needs a value");
+            assert_eq!(usage_message(&[option]), message, "{option} alone");
+            assert_eq!(usage_message(&["--pal", option]), message, "--pal {option}");
+        }
+        for value in [
+            "--pal",
+            "-h",
+            "--help",
+            "--",
+            "-",
+            "--os",
+            "--os=file",
+            "-hx",
+        ] {
+            let os = parse_ok(&["--os", value]).os;
+            assert_eq!(os, PathBuf::from(value), "--os {value}");
+        }
+        assert_eq!(
+            parse_ok(&["--screenshot", "--headless"]).screenshot,
+            Some(PathBuf::from("--headless")),
+            "--screenshot --headless"
+        );
+        assert!(!parse_ok(&["--bas", "--no-run"]).no_run, "--bas --no-run");
+        assert_usage(&[
+            (
+                &["--frames", "--pal"],
+                "--frames needs a number, not \"--pal\"",
+            ),
+            (&["--scale", "-h"], "--scale needs a number, not \"-h\""),
+        ]);
+    }
+
+    /// Verifies REQ-096 criterion 3: a number option with a value that is not a decimal
+    /// number (digits only, with an optional leading `+`) needs a number, and a decimal
+    /// number is its value.
+    #[test]
+    fn bad_number_values() {
+        let values = [
+            "x", "", "-1", "1.5", " 1", "1 ", "0x10", "1e3", "-0", "++1", "+",
+        ];
+        for option in ["--frames", "--trace-from", "--trace-frames"] {
+            for value in values {
+                let message = format!("{option} needs a number, not {value:?}");
+                let list = ["--trace", "t.txt", "--headless", option, value];
+                assert_eq!(usage_message(&list), message, "{list:?}");
+            }
+        }
+        let list = ["--frames", "0", "--trace", "t", "--trace-from", "007"];
+        let options = parse_ok(&list);
+        assert_eq!(options.frames, Some(0), "--frames 0");
+        assert_eq!(options.trace.map(|trace| trace.from), Some(7), "007");
+        let max = "18446744073709551615";
+        assert_eq!(parse_ok(&["--frames", max]).frames, Some(u64::MAX), "max");
+        assert_eq!(parse_ok(&["--frames", "+1"]).frames, Some(1), "--frames +1");
+        let list = ["--trace", "t", "--trace-from", "+2", "--trace-frames", "+3"];
+        let trace = parse_ok(&list)
+            .trace
+            .map(|trace| (trace.from, trace.frames));
+        assert_eq!(trace, Some((2, 3)), "{list:?}");
+    }
+
+    /// Verifies REQ-096 criterion 4: `--scale` outside 1 to 8 is an error that names the
+    /// value, and 1 to 8 are the scale.
+    #[test]
+    fn scale_out_of_range() {
+        for (value, shown) in [
+            ("0", "0"),
+            ("9", "9"),
+            ("10", "10"),
+            ("100", "100"),
+            ("00", "0"),
+            ("18446744073709551615", "18446744073709551615"),
+        ] {
+            let message = format!("--scale must be 1 to 8, not {shown}");
+            assert_eq!(
+                usage_message(&["--scale", value]),
+                message,
+                "--scale {value}"
+            );
+        }
+        for scale in 1..=8_usize {
+            let value = scale.to_string();
+            assert_eq!(
+                parse_ok(&["--scale", &value]).scale,
+                scale,
+                "--scale {value}"
+            );
+        }
+    }
+
+    /// Verifies REQ-096 criterion 6: with more than one syntax error, the message is for the
+    /// first error from the left.
+    #[test]
+    fn first_syntax_error_wins() {
+        let frames = "--frames needs a number, not \"x\"";
+        let scale = "--scale must be 1 to 8, not 0";
+        let unknown = "unknown argument \"--fast\"";
+        assert_usage(&[
+            (&["--frames", "x", "--fast"], frames),
+            (&["--fast", "--frames", "x"], unknown),
+            (&["--frames", "x", "--scale", "0"], frames),
+            (&["--scale", "0", "--frames", "x"], scale),
+            (&["--scale", "0", "--fast"], scale),
+            (&["--fast", "--scale", "0"], unknown),
+            (&["--frames", "x", "--os"], frames),
+            (&["--scale", "0", "--os"], scale),
+            (&["--fast", "--os"], unknown),
+            (&["--fast", "--", "--os=a"], unknown),
+            (&["--frames", "x", "--frames", "1"], frames),
+            (&["--frames", "1", "--frames", "x"], frames),
+        ]);
+    }
+
+    /// Verifies REQ-097 criteria 1 to 6: the message of each combination rule, and the
+    /// command lines that keep each rule.
+    #[test]
+    fn combination_messages() {
+        let trace = "--trace-from and --trace-frames need --trace";
+        let at_least = "--trace-frames must be at least 1";
+        assert_usage(&[
+            (&["--headless"], "--headless needs --frames"),
+            (
+                &["--xex", "a.xex", "--disk", "d.atr"],
+                "--xex and --disk cannot be used together: both use drive D1:",
+            ),
+            (
+                &["--xex", "a.xex", "--bas", "p.bas"],
+                "--xex and --bas cannot be used together: an executable starts with BASIC disabled",
+            ),
+            (
+                &["--cas", "t.cas", "--xex", "a.xex"],
+                "--cas and --xex cannot be used together: both make key presses at the start",
+            ),
+            (&["--trace-from", "1"], trace),
+            (&["--trace-frames", "2"], trace),
+            (&["--trace-from", "1", "--trace-frames", "2"], trace),
+            (&["--trace-frames", "0"], at_least),
+            (&["--trace", "t", "--trace-frames", "0"], at_least),
+        ]);
+        let trace_options = |from, frames| {
+            Some(TraceOptions {
+                file: PathBuf::from("t"),
+                from,
+                frames,
+            })
+        };
+        let list = ["--trace", "t"];
+        assert_eq!(parse_ok(&list).trace, trace_options(0, 1), "{list:?}");
+        let list = ["--trace", "t", "--trace-from", "3", "--trace-frames", "2"];
+        assert_eq!(parse_ok(&list).trace, trace_options(3, 2), "{list:?}");
+        let list = ["--headless", "--frames", "1"];
+        assert_eq!(parse_ok(&list).frames, Some(1), "{list:?}");
+        let list = ["--cas", "t.cas", "--auto-return"];
+        assert!(parse_ok(&list).auto_return, "{list:?}");
+    }
+
+    /// A command line that breaks each rule of REQ-097 criterion 8, in the order of the
+    /// criterion, with the message of the rule.
+    const RULES: [(&[&str], &str); 11] = [
+        (
+            &["--trace-frames", "0"],
+            "--trace-frames must be at least 1",
+        ),
+        (
+            &["--trace-from", "1"],
+            "--trace-from and --trace-frames need --trace",
+        ),
+        (&["--headless"], "--headless needs --frames"),
+        (&["--no-run"], "--no-run needs --bas"),
+        (
+            &["--xex", "a.xex", "--disk", "d.atr"],
+            "--xex and --disk cannot be used together: both use drive D1:",
+        ),
+        (
+            &["--xex", "a.xex", "--bas", "p.bas"],
+            "--xex and --bas cannot be used together: an executable starts with BASIC disabled",
+        ),
+        (
+            &["--cas", "t.cas", "--bas", "p.bas"],
+            "--cas and --bas cannot be used together: both make key presses at the start",
+        ),
+        (
+            &["--no-basic", "--bas", "p.bas"],
+            "--no-basic and --bas cannot be used together: --bas types the program into BASIC",
+        ),
+        (
+            &["--auto-return"],
+            "--auto-return needs --cas: it presses RETURN for a tape boot",
+        ),
+        (
+            &["--cas", "t.cas", "--xex", "a.xex"],
+            "--cas and --xex cannot be used together: both make key presses at the start",
+        ),
+        (
+            &["--pal-blending"],
+            "--pal-blending needs a PAL machine, but the machine is NTSC",
+        ),
+    ];
+
+    /// The index in [`RULES`] of `--auto-return` without `--cas`. A command line cannot break
+    /// it together with the next rule (`--cas` with `--xex`), so the test pairs it with the
+    /// filter rule.
+    const AUTO_RETURN: usize = 8;
+
+    /// Verifies REQ-097 criterion 8: for each adjacent pair of rules, with the arguments in
+    /// both orders, the message is for the earlier rule. The pair `--auto-return` without
+    /// `--cas` and `--cas` with `--xex` cannot both be broken (the first needs no `--cas`, the
+    /// second needs `--cas`), so it has no order to test: each of the two is paired with the
+    /// filter rule instead. Also verifies REQ-097 criterion 7 (second sentence): a syntax
+    /// error comes before each combination error.
+    #[test]
+    fn combination_order() {
+        let syntax = "unknown argument \"--fast\"";
+        for (index, &(list, message)) in RULES.iter().enumerate() {
+            assert_eq!(usage_message(list), message, "rule {index} alone");
+            let later = if index == AUTO_RETURN {
+                index + 2
+            } else {
+                index + 1
+            };
+            let Some(&(other, _)) = RULES.get(later) else {
+                continue;
+            };
+            for both in [[list, other].concat(), [other, list].concat()] {
+                assert_eq!(usage_message(&both), message, "{both:?}");
+                let unknown = [both.as_slice(), &["--fast"]].concat();
+                assert_eq!(usage_message(&unknown), syntax, "{unknown:?}");
+            }
+        }
+        let all: Vec<&str> = RULES
+            .iter()
+            .flat_map(|&(list, _)| list.iter().copied())
+            .collect();
+        assert_eq!(usage_message(&all), RULES[0].1, "{all:?}");
+        let scale = [all.as_slice(), &["--scale", "9"]].concat();
+        let message = "--scale must be 1 to 8, not 9";
+        assert_eq!(usage_message(&scale), message, "{scale:?}");
     }
 }
