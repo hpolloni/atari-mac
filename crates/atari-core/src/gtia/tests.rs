@@ -5,6 +5,7 @@
 
 mod collisions;
 mod inputs;
+mod load_state;
 mod modes;
 mod objects;
 mod players;

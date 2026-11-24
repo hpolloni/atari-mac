@@ -363,3 +363,54 @@ impl SerialIn {
         }
     }
 }
+
+#[cfg(test)]
+impl SerialOut {
+    /// Test constructor: the power-on state with the bit count `bits`.
+    pub(super) const fn with_bits(bits: u8) -> Self {
+        Self {
+            bits,
+            ..Self::new()
+        }
+    }
+}
+
+#[cfg(test)]
+impl SerialIn {
+    /// Test constructor: the power-on state with the bit count `bits`.
+    pub(super) const fn with_bits(bits: u8) -> Self {
+        Self {
+            bits,
+            ..Self::new()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FRAME_BITS, STOP_BIT, SerialIn, SerialOut};
+
+    /// Verifies REQ-061: a loaded output bit count of a full frame is valid, and one more
+    /// is not.
+    #[test]
+    fn serial_out_load_check_bits() {
+        assert!(SerialOut::new().loaded_is_valid(), "power-on state");
+        assert!(SerialOut::with_bits(FRAME_BITS).loaded_is_valid(), "frame");
+        assert!(
+            !SerialOut::with_bits(FRAME_BITS + 1).loaded_is_valid(),
+            "past the frame"
+        );
+    }
+
+    /// Verifies REQ-061: a loaded input bit count of the stop bit is valid, and one more is
+    /// not.
+    #[test]
+    fn serial_in_load_check_bits() {
+        assert!(SerialIn::new().loaded_is_valid(), "power-on state");
+        assert!(SerialIn::with_bits(STOP_BIT).loaded_is_valid(), "stop bit");
+        assert!(
+            !SerialIn::with_bits(STOP_BIT + 1).loaded_is_valid(),
+            "past the stop bit"
+        );
+    }
+}

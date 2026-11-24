@@ -391,3 +391,48 @@ impl State for TapeDeck {
         running_since.load(r)
     }
 }
+
+#[cfg(test)]
+impl TapeDeck {
+    /// Test constructor: an NTSC deck with no tape, the played time `played` and the motor
+    /// start `running_since`.
+    pub(crate) const fn with_times(played: u64, running_since: Option<u64>) -> Self {
+        let mut deck = Self::new(VideoStandard::Ntsc);
+        deck.played = played;
+        deck.running_since = running_since;
+        deck
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TapeDeck;
+    use crate::state::TIME_LIMIT;
+
+    /// Verifies REQ-061: the played time of a loaded deck must be below `TIME_LIMIT`.
+    #[test]
+    fn deck_load_check_played() {
+        assert!(TapeDeck::with_times(0, None).loaded_is_valid(), "new deck");
+        assert!(
+            TapeDeck::with_times(TIME_LIMIT - 1, None).loaded_is_valid(),
+            "below the limit"
+        );
+        assert!(
+            !TapeDeck::with_times(TIME_LIMIT, None).loaded_is_valid(),
+            "at the limit"
+        );
+    }
+
+    /// Verifies REQ-061: the motor start of a loaded deck must be below `TIME_LIMIT`.
+    #[test]
+    fn deck_load_check_motor_start() {
+        assert!(
+            TapeDeck::with_times(0, Some(TIME_LIMIT - 1)).loaded_is_valid(),
+            "below the limit"
+        );
+        assert!(
+            !TapeDeck::with_times(0, Some(TIME_LIMIT)).loaded_is_valid(),
+            "at the limit"
+        );
+    }
+}

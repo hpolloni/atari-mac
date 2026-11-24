@@ -183,3 +183,27 @@ impl KeyboardScan {
         event
     }
 }
+
+#[cfg(test)]
+impl KeyboardScan {
+    /// Test constructor: the power-on state with the scan counter `counter`.
+    pub(super) const fn with_counter(counter: u8) -> Self {
+        Self {
+            counter,
+            ..Self::new()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KeyboardScan;
+
+    /// Verifies REQ-061: a loaded scan counter of 63 is valid, and 64 is not.
+    #[test]
+    fn kbscan_load_check_counter() {
+        assert!(KeyboardScan::new().loaded_is_valid(), "power-on state");
+        assert!(KeyboardScan::with_counter(63).loaded_is_valid(), "63");
+        assert!(!KeyboardScan::with_counter(64).loaded_is_valid(), "64");
+    }
+}

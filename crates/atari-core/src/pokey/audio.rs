@@ -232,3 +232,53 @@ impl PartialEq for Audio {
 }
 
 impl Eq for Audio {}
+
+#[cfg(test)]
+mod tests {
+    use super::{Audio, NO_LEVEL};
+
+    /// `loaded_is_valid` of a new output after `change`, against a new output as the state
+    /// before the load.
+    fn valid_after(change: impl FnOnce(&mut Audio)) -> bool {
+        let config = Audio::new(1_789_773, 48_000);
+        let mut audio = config.clone();
+        change(&mut audio);
+        audio.loaded_is_valid(&config)
+    }
+
+    /// Verifies REQ-061: the rates and the filter coefficients of a loaded output must be
+    /// those of the configuration.
+    #[test]
+    fn audio_load_check_configuration() {
+        assert!(valid_after(|_| {}), "new output");
+        assert!(!valid_after(|a| a.clock_hz += 1), "clock rate");
+        assert!(!valid_after(|a| a.sample_rate += 1), "sample rate");
+        assert!(!valid_after(|a| a.a1 *= 2.0), "a1");
+        assert!(!valid_after(|a| a.a2 *= 2.0), "a2");
+    }
+
+    /// Verifies REQ-061: the phase must be below the clock rate.
+    #[test]
+    fn audio_load_check_phase() {
+        assert!(
+            valid_after(|a| a.phase = a.clock_hz - 1),
+            "below the clock rate"
+        );
+        assert!(!valid_after(|a| a.phase = a.clock_hz), "at the clock rate");
+    }
+
+    /// Verifies REQ-061: the level cache is empty or has four volumes of 0-15.
+    #[test]
+    fn audio_load_check_level_key() {
+        assert!(valid_after(|a| a.level_key = NO_LEVEL), "empty");
+        assert!(valid_after(|a| a.level_key = 0x0F0F_0F0F), "volumes 15");
+        assert!(
+            !valid_after(|a| a.level_key = 0x0F0F_0F10),
+            "first volume 16"
+        );
+        assert!(
+            !valid_after(|a| a.level_key = 0x100F_0F0F),
+            "last volume 16"
+        );
+    }
+}

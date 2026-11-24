@@ -8,6 +8,7 @@ mod display;
 mod dlist;
 mod dma;
 mod line_buffer;
+mod load_state;
 mod modes;
 mod nmi;
 mod nmi_timing;

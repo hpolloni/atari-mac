@@ -1,4 +1,5 @@
-//! Tests of initialization mode and the timers (REQ-502 to REQ-508).
+//! Tests of initialization mode and the timers (REQ-502 to REQ-508), and of the check of a
+//! loaded chip state (REQ-061).
 //!
 //! A read "on cycle N" is a `peek` after the tick of cycle N, as a CPU read in cycle N sees
 //! it.
@@ -10,7 +11,11 @@ use super::{
     run, run_checking, run_until, spacing, timer_pokey,
 };
 use crate::keyboard;
-use crate::pokey::Pokey;
+use crate::pokey::audio::Audio;
+use crate::pokey::kbscan::KeyboardScan;
+use crate::pokey::serial::{SerialIn, SerialOut};
+use crate::pokey::{Pokey, SerialByte};
+use crate::state::TIME_LIMIT;
 use crate::timing::VideoStandard;
 
 /// `RANDOM` (read).
@@ -812,4 +817,119 @@ fn timer_irq_ignores_audc() {
             "AUDC1 = {audc:#04X}"
         );
     }
+}
+
+/// `loaded_is_valid` of a new chip after `change`, against a new chip as the state before
+/// the load.
+fn load_valid_after(change: impl FnOnce(&mut Pokey)) -> bool {
+    let config = new_pokey();
+    let mut p = config.clone();
+    change(&mut p);
+    p.loaded_is_valid(&config)
+}
+
+/// A sent byte with the start cycle `start_cycle` and the end cycle `end_cycle`.
+const fn sent_byte(start_cycle: u64, end_cycle: u64) -> SerialByte {
+    SerialByte {
+        value: 0,
+        start_cycle,
+        end_cycle,
+    }
+}
+
+/// Verifies REQ-061: a new chip is a valid loaded state, and a state of another TV
+/// standard or another audio rate is not.
+#[test]
+fn pokey_load_check_configuration() {
+    assert!(load_valid_after(|_| {}), "new chip");
+    assert!(
+        !load_valid_after(|p| p.standard = VideoStandard::Pal),
+        "other standard"
+    );
+    assert!(
+        !load_valid_after(|p| p.sample_rate = 44_100),
+        "other sample rate"
+    );
+}
+
+/// Verifies REQ-061: the cycle count must be below `TIME_LIMIT`, and the initialization
+/// exit may be on the current cycle but not after it.
+#[test]
+fn pokey_load_check_cycles() {
+    assert!(
+        load_valid_after(|p| p.cycle = TIME_LIMIT - 1),
+        "cycle below the limit"
+    );
+    assert!(
+        !load_valid_after(|p| {
+            p.cycle = TIME_LIMIT;
+            p.exit_cycle = 0;
+        }),
+        "cycle at the limit"
+    );
+    assert!(
+        load_valid_after(|p| {
+            p.cycle = 100;
+            p.exit_cycle = 100;
+        }),
+        "exit on the current cycle"
+    );
+    assert!(
+        !load_valid_after(|p| {
+            p.cycle = 100;
+            p.exit_cycle = 101;
+        }),
+        "exit after the current cycle"
+    );
+}
+
+/// Verifies REQ-061: the start and the end cycle of each sent byte must be below
+/// `TIME_LIMIT`.
+#[test]
+fn pokey_load_check_sent_bytes() {
+    let below = TIME_LIMIT - 1;
+    assert!(
+        load_valid_after(|p| p.sent.push_back(sent_byte(below, below))),
+        "below the limit"
+    );
+    assert!(
+        !load_valid_after(|p| p.sent.push_back(sent_byte(TIME_LIMIT, below))),
+        "start at the limit"
+    );
+    assert!(
+        !load_valid_after(|p| p.sent.push_back(sent_byte(below, TIME_LIMIT))),
+        "end at the limit"
+    );
+}
+
+/// Verifies REQ-061: the volume cache must have volumes of 0-15.
+#[test]
+fn pokey_load_check_volumes() {
+    assert!(load_valid_after(|p| p.volumes = [15; 4]), "volumes 15");
+    assert!(
+        !load_valid_after(|p| p.volumes = [15, 15, 15, 16]),
+        "volume 16"
+    );
+}
+
+/// Verifies REQ-061: the chip check rejects a state with one invalid part: the serial
+/// output, the serial input, the keyboard scan or the audio output.
+#[test]
+fn pokey_load_check_parts() {
+    assert!(
+        !load_valid_after(|p| p.serial = SerialOut::with_bits(u8::MAX)),
+        "serial output"
+    );
+    assert!(
+        !load_valid_after(|p| p.serial_in = SerialIn::with_bits(u8::MAX)),
+        "serial input"
+    );
+    assert!(
+        !load_valid_after(|p| p.scan = KeyboardScan::with_counter(64)),
+        "keyboard scan"
+    );
+    assert!(
+        !load_valid_after(|p| p.audio = Audio::new(1, 48_000)),
+        "audio output"
+    );
 }

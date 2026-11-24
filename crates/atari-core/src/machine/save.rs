@@ -170,3 +170,87 @@ pub(super) fn load(machine: &mut Machine, bytes: &[u8]) -> Result<(), StateError
     *machine = next;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::loaded_is_valid;
+    use crate::antic::Antic;
+    use crate::gtia::Gtia;
+    use crate::machine::{Machine, MachineConfig, OS_ROM_SIZE};
+    use crate::pokey::Pokey;
+    use crate::state::TIME_LIMIT;
+    use crate::timing::VideoStandard;
+
+    /// A new NTSC machine with an OS ROM of zeros and no BASIC.
+    fn machine() -> Machine {
+        Machine::new(MachineConfig {
+            os_rom: vec![0; OS_ROM_SIZE],
+            basic_rom: None,
+            cartridge: None,
+            disk: None,
+            fast_sio: false,
+            fast_tape: false,
+            tape: None,
+            standard: VideoStandard::Ntsc,
+            audio_sample_rate: 48_000,
+        })
+        .unwrap()
+    }
+
+    /// `loaded_is_valid` of a new machine after `change`, against a new machine as the
+    /// machine before the load.
+    fn valid_after(change: impl FnOnce(&mut Machine)) -> bool {
+        let config = machine();
+        let mut next = config.clone();
+        change(&mut next);
+        loaded_is_valid(&next, &config)
+    }
+
+    /// Verifies REQ-061: a new machine is a valid loaded state, and a machine of the other
+    /// TV standard is not.
+    #[test]
+    fn machine_load_check_standard() {
+        assert!(valid_after(|_| {}), "new machine");
+        assert!(
+            !valid_after(|m| m.standard = VideoStandard::Pal),
+            "other standard"
+        );
+    }
+
+    /// Verifies REQ-061: the cycle and the frame counts must be below `TIME_LIMIT`.
+    #[test]
+    fn machine_load_check_time_limit() {
+        assert!(valid_after(|m| m.cycles = TIME_LIMIT - 1), "cycles below");
+        assert!(
+            !valid_after(|m| m.cycles = TIME_LIMIT),
+            "cycles at the limit"
+        );
+        assert!(valid_after(|m| m.frames = TIME_LIMIT - 1), "frames below");
+        assert!(
+            !valid_after(|m| m.frames = TIME_LIMIT),
+            "frames at the limit"
+        );
+    }
+
+    /// Verifies REQ-061: the machine check rejects a state with one invalid chip or an
+    /// invalid SIO bus.
+    #[test]
+    fn machine_load_check_parts() {
+        assert!(
+            !valid_after(|m| m.antic = Antic::new(VideoStandard::Pal)),
+            "ANTIC"
+        );
+        assert!(
+            !valid_after(|m| m.gtia = Gtia::new(VideoStandard::Pal)),
+            "GTIA"
+        );
+        assert!(
+            !valid_after(|m| m.pokey = Pokey::new(VideoStandard::Pal, 48_000)),
+            "POKEY"
+        );
+        assert!(
+            !valid_after(|m| m.sio.send_device_byte(0, TIME_LIMIT, 94)),
+            "SIO bus"
+        );
+    }
+}

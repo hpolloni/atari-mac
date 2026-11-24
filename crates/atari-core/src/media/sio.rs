@@ -843,7 +843,9 @@ impl SioBus {
 
 #[cfg(test)]
 mod tests {
-    use super::SioBus;
+    use super::{DeviceByte, SioBus};
+    use crate::media::deck::TapeDeck;
+    use crate::state::TIME_LIMIT;
     use crate::timing::VideoStandard;
 
     /// Verifies REQ-526: the bus makes the frame of each device byte on SIO DATA IN, which
@@ -883,5 +885,62 @@ mod tests {
         assert!(bus.host_bytes().is_empty(), "no host bytes");
         bus.reset();
         assert_eq!(bus.scheduled_device_bytes(), Vec::new(), "reset");
+    }
+
+    /// `loaded_is_valid` of a new NTSC bus after `change`.
+    fn load_valid_after(change: impl FnOnce(&mut SioBus)) -> bool {
+        let mut bus = SioBus::new(VideoStandard::Ntsc);
+        change(&mut bus);
+        bus.loaded_is_valid()
+    }
+
+    /// A device byte that starts on cycle `start`.
+    const fn byte_at(start: u64) -> DeviceByte {
+        DeviceByte {
+            value: 0,
+            start,
+            bit_cycles: 94,
+        }
+    }
+
+    /// Verifies REQ-061: the start of each scheduled device byte of a loaded bus must be
+    /// below `TIME_LIMIT`.
+    #[test]
+    fn sio_load_check_device_bytes() {
+        assert!(load_valid_after(|_| {}), "new bus");
+        assert!(
+            load_valid_after(|b| b.out.push_back(byte_at(TIME_LIMIT - 1))),
+            "transaction byte below the limit"
+        );
+        assert!(
+            !load_valid_after(|b| b.out.push_back(byte_at(TIME_LIMIT))),
+            "transaction byte at the limit"
+        );
+        assert!(
+            load_valid_after(|b| b.external.push_back(byte_at(TIME_LIMIT - 1))),
+            "external byte below the limit"
+        );
+        assert!(
+            !load_valid_after(|b| b.external.push_back(byte_at(TIME_LIMIT))),
+            "external byte at the limit"
+        );
+    }
+
+    /// Verifies REQ-061: the transfer end of a loaded bus must be below `TIME_LIMIT`, and
+    /// its tape deck must be valid.
+    #[test]
+    fn sio_load_check_transfer_end_and_deck() {
+        assert!(
+            load_valid_after(|b| b.transfer_end = Some(TIME_LIMIT - 1)),
+            "transfer end below the limit"
+        );
+        assert!(
+            !load_valid_after(|b| b.transfer_end = Some(TIME_LIMIT)),
+            "transfer end at the limit"
+        );
+        assert!(
+            !load_valid_after(|b| b.deck = TapeDeck::with_times(TIME_LIMIT, None)),
+            "invalid deck"
+        );
     }
 }
