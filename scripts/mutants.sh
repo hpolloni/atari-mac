@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Mutation testing of the changed lines (REQ-060, docs/design/code-gates.md "Mutation testing").
 #
-# Usage: scripts/mutants.sh BASE [PACKAGE ARGUMENTS...]
+# Usage: scripts/mutants.sh BASE [CARGO-MUTANTS ARGUMENTS...]
 #
 # The diff is from the commit BASE to the working tree (`git diff BASE`, so a new file counts
 # after `git add`). It goes to target/mutants/mutants.diff, and `cargo mutants --in-diff` makes
-# the mutants of its added and modified lines only. The package arguments go to cargo-mutants.
-# The settings are in .cargo/mutants.toml.
+# the mutants of its added and modified lines only. The other arguments go to cargo-mutants:
+# the packages, and in CI the shard (`--shard K/N --sharding round-robin`). The settings are
+# in .cargo/mutants.toml.
 #
 # The mutants are not made in this checkout. The script makes a throwaway git worktree in
 # target/mutants-wt: HEAD (detached), the uncommitted changes of this tree applied on top, and
@@ -57,8 +58,11 @@ if [ -s "$out/uncommitted.diff" ]; then
 fi
 (cd "$wt" && scripts/worktree-setup.sh --no-fast-forward)
 
+# Each mutant changes one source file and builds again. An incremental build compiles only the
+# changed parts of the crate: in CI (where rust-cache sets CARGO_INCREMENTAL=0) a build of a
+# mutant took about 31 s without it.
 status=0
-(cd "$wt" && CARGO_TARGET_DIR=$out/build cargo mutants --in-place \
+(cd "$wt" && CARGO_INCREMENTAL=1 CARGO_TARGET_DIR=$out/build cargo mutants --in-place \
   --in-diff "$out/mutants.diff" --output "$out" "$@") || status=$?
 
 # cargo-mutants exits with 3 when a mutant timed out, also when another mutant is missed.

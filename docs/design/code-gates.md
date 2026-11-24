@@ -80,20 +80,38 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
   binary). They test the documents and the gates, and they read the source files that the
   mutant changes: a mutant that makes a function of the complexity baseline simpler would make
   the baseline entry stale, and the gate test would count the mutant as caught.
-- The test binary `media_fuzz` of `atari-harness` (REQ-061) does not run for a mutant either.
-  Each mutant runs all the tests, and media_fuzz alone takes more than a minute in the dev
-  profile; the error paths of the parsers are also tested in `crates/harness/tests/media.rs`.
+- The property tests of `media_fuzz` (REQ-061: the tests `*_never_panic` and `*_never_panics`)
+  do not run for a mutant either. Each runs 1000 random cases or more, and together they take
+  more than two minutes of CPU time in the dev profile; the error paths of the parsers are also
+  tested in `crates/harness/tests/media.rs`. The other tests of `media_fuzz` (the state checks
+  `state_with_bad_*_is_an_error` and `fuzz_inputs_are_deterministic`) take less than a second
+  and run: in CI run 45106097965 they were the only tests that caught the mutants of
+  `Antic::loaded_is_valid`.
+- cargo-nextest runs with `--max-fail=1:immediate`: the first failed test ends the run and the
+  tests that still run. With the default (`:wait`), a mutant that a test caught after 1 s
+  waited for a slow test that the mutant made loop, and took the full test timeout.
+- The mutants build with the cargo profile `mutants` (root `Cargo.toml`: the test profile
+  without debug information) and with `CARGO_INCREMENTAL=1` (the script sets it; rust-cache
+  sets 0 in CI). Each mutant links all the test binaries again. A higher opt-level does not pay:
+  opt-level 3 makes a tape boot test only about 10 % faster.
 - A `timeout` is a pass (criterion 2): a mutant that makes the emulation loop forever is
-  caught. The test timeout has a lower bound of 600 s (`minimum_test_timeout`). The baseline
-  run of cargo-mutants runs only the tests of the mutated package (about 1 s for the core),
-  but each mutant runs all the tests above (in the dev profile about 90 s for the core and the
-  harness, about 210 s with the frontend tests on macOS). With a smaller bound, a mutant that
-  no test catches runs into the timeout and passes instead of failing as `missed`.
+  caught. The test timeout is 3 times the baseline test time, with a lower bound of 360 s
+  (`minimum_test_timeout`). The baseline run of cargo-mutants runs only the tests of the
+  mutated packages (about 2 s for the core), but each mutant runs all the tests above (about
+  2 minutes in CI, about 40 s on a Mac with 10 cores). With a smaller bound, a mutant that no
+  test catches runs into the timeout and passes instead of failing as `missed`.
 - CI: the job `Mutants (cargo-mutants)` on Linux runs the gate on the diff from
   `github.event.before` to `github.sha` (on the first push, where `before` is all zeros: the
   diff of the last commit), with the packages of `--workspace --exclude atari-mac`. A pull
   request or a merge queue entry uses the diff from its base; a scheduled or manual run passes
-  with a message. The output directory `target/mutants/mutants.out` is an artifact. The
+  with a message. The job is a matrix of 8 shards (`--shard K/8 --sharding round-robin`, one
+  runner each, 120 minutes each); `CI success` needs the job, and the job fails when one shard
+  fails. Each shard runs its own baseline. Measured cost of a mutant in CI before these
+  settings: about 31 s build and 238 s test (a hang: 600 s). The estimate with them: about
+  10 s build, 20 to 50 s test for a caught mutant and about 2 minutes for a missed one. For
+  213 mutants (27 for each shard) a shard takes about 25 minutes when most mutants are caught,
+  and about 65 minutes when no mutant is caught. The output directory
+  `target/mutants/mutants.out` of each shard is an artifact (`mutants.out-shard-K`). The
   frontend mutants run only in `make check` on macOS.
 
 ## Media parser property tests (REQ-061)
