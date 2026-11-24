@@ -13,29 +13,44 @@ all_features = true
 # complexity baseline simpler makes the baseline entry stale, and the gate test would count
 # the mutant as caught. `cargo test` cannot leave out one test binary, so the tests run with
 # cargo-nextest and a filter expression.
-# The test binary `media_fuzz` (the property tests of the media parsers, REQ-061) does not run
-# for a mutant either: each mutant runs all the tests, and media_fuzz alone takes more than a
-# minute in the dev profile. The error paths of the parsers are also tested in
-# crates/harness/tests/media.rs. `make test` and the CI job `Test` run media_fuzz.
+# The property tests of the media parsers (REQ-061: the tests `*_never_panic` and
+# `*_never_panics` of the test binary `media_fuzz`) do not run for a mutant either. Each runs
+# 1000 random cases or more, and together they take more than two minutes of CPU time in the
+# dev profile. The error paths of the parsers are also tested in crates/harness/tests/media.rs.
+# The other tests of media_fuzz (for example `state_with_bad_antic_count_is_an_error`) are
+# fast and run for a mutant: they are the tests of the state checks of the chips. `make test`
+# and the CI job `Test` run all of media_fuzz.
 test_tool = "nextest"
+# `--max-fail=1:immediate`: the first failed test stops the run and ends the tests that still
+# run. Without `:immediate`, cargo-nextest waits for the running tests, and a mutant that a
+# fast test catches can run into the timeout in a slow test (in CI run 45106097965, six
+# mutants took the full 600 s test timeout although a test had failed after 1 s).
 additional_cargo_test_args = [
+    "--max-fail=1:immediate",
     "-E",
-    "not (package(atari-harness) & (binary(=spec_gates) | binary(=code_gates) | binary(=traceability) | binary(=media_fuzz)))",
+    "not (package(atari-harness) & (binary(=spec_gates) | binary(=code_gates) | binary(=traceability) | (binary(=media_fuzz) & test(/_never_panics?$/))))",
 ]
+# The cargo profile `mutants` of the root Cargo.toml: the test profile without debug
+# information. Each mutant links all the test binaries again, and without debug information a
+# build takes about a third less CPU time.
+profile = "mutants"
 # `RUSTFLAGS=-D warnings` would make a mutant that leaves a parameter unused unviable, and an
 # unviable mutant passes the gate. `--cap-lints=warn` keeps such a mutant viable.
 cap_lints = true
 
 # A mutant that makes the emulation loop forever is a `timeout`, and a timeout passes the gate
-# (REQ-060 criterion 2). The test timeout is this multiple of the baseline test time.
-timeout_multiplier = 2.0
+# (REQ-060 criterion 2). The test timeout is this multiple of the baseline test time, but not
+# less than the lower bound below.
+timeout_multiplier = 3.0
 # The lower bound of the test timeout, in seconds. The baseline of cargo-mutants runs only the
-# tests of the mutated package (for a core mutant: about 1 s), but each mutant runs all the
-# tests above (in the dev profile: about 90 s for the core and the harness, about 210 s with
-# the frontend tests on macOS). With a smaller bound, a mutant that no test catches runs into
-# the timeout and passes as a `timeout` instead of failing as `missed`. Keep this bound well
-# above the time of all the tests.
-minimum_test_timeout = 600
+# tests of the mutated packages: when the diff has mutants in atari-core only, the baseline
+# runs the core tests (about 2 s), but each mutant runs all the tests above. A mutant that no
+# test catches takes all of that time: in CI (4 cores) about 2 minutes, on a Mac with 10 cores
+# about 40 s (more with the frontend tests). With a smaller bound, such a mutant runs into the
+# timeout and passes as a `timeout` instead of failing as `missed`. The bound is about three
+# times the time of all the tests in CI. A real endless loop costs this time once for each
+# mutant that no other test catches first (`--max-fail=1:immediate` above).
+minimum_test_timeout = 360
 
 # The mutation exclusion list (REQ-060 criterion 4). Each entry is a regular expression for
 # the mutant names that `cargo mutants --list` shows. Each entry has a comment line above it

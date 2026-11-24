@@ -213,3 +213,11 @@ overflow-checks = true
 # REQ-007 about 10 % faster than thin LTO.
 lto = "fat"
 codegen-units = 1
+
+[profile.mutants]
+# The mutant runs of `make mutants` and the CI job `Mutants (cargo-mutants)` (REQ-060,
+# .cargo/mutants.toml). The test profile (opt-level 1, overflow checks) without debug
+# information: each mutant links all the test binaries again. A higher opt-level makes the
+# tests only a little faster (opt-level 3: about 10 % less CPU time in a tape boot test).
+inherits = "test"
+debug = false

@@ -245,10 +245,17 @@ jobs:
   # diff of the last commit. A pull request or a merge queue entry tests the diff from its
   # base. A scheduled or manual run has no diff and passes. The frontend mutants run only in
   # `make check` on macOS. Keep the packages in sync with MUTANTS_PACKAGES in the Makefile.
+  # The mutants are split over 8 shards (round robin), one runner each: a mutant that no test
+  # catches takes about 2.5 minutes, so one runner would need hours for a diff of 200 mutants.
+  # `CI success` needs the job `mutants`, which fails when one shard fails.
   mutants:
-    name: Mutants (cargo-mutants)
+    name: Mutants (cargo-mutants) shard ${{ matrix.shard }}/8
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -261,6 +268,9 @@ jobs:
           # Keep the version in sync with `make tools`.
           tool: cargo-mutants@27.1.0,cargo-nextest@0.9.151
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # The shards build the same targets, so one shard saves the cache.
+          save-if: ${{ matrix.shard == 0 }}
       - name: Cache ROMs and test data
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -273,6 +283,7 @@ jobs:
       - name: Mutants of the changed lines
         shell: bash
         env:
+          SHARD: ${{ matrix.shard }}
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
@@ -295,12 +306,13 @@ jobs:
             echo "mutants: no diff to test for this run ($EVENT): pass"
             exit 0
           fi
-          scripts/mutants.sh "$base" --package atari-core --package atari-harness
+          scripts/mutants.sh "$base" --package atari-core --package atari-harness \
+            --shard "$SHARD/8" --sharding round-robin
       - name: Upload the mutants results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutants.out
+          name: mutants.out-shard-${{ matrix.shard }}
           path: target/mutants/mutants.out
           if-no-files-found: ignore
 
