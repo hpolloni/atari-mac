@@ -127,9 +127,10 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
 - For an accepted input, the test builds a machine with the free ROMs (`roms/`, as the other
   harness tests do) and the media, and runs 10 frames (criterion 3).
 - The tests run in `make test`, `make pre-commit` and the CI job `Test` (criterion 5). They do
-  not run in `make coverage`, the CI job `Coverage` and the mutant runs (filter expressions of
-  cargo-nextest): with the coverage counters they took more than 25 minutes in CI, and each
-  mutant runs all the tests.
+  not run in `make coverage` and the CI job `Coverage` (a filter expression of cargo-nextest):
+  with the coverage counters they took more than 25 minutes in CI. The mutant runs leave out
+  only the property tests (`*_never_panic`, `*_never_panics`), because each mutant runs all
+  the tests; the other tests of `media_fuzz` run for each mutant.
 - A panic that a test finds is a defect: the package fixes the parser in the core and keeps
   the input as a normal test case in the same file.
 
