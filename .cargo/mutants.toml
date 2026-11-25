@@ -7,12 +7,18 @@
 test_package = ["atari-core", "atari-harness"]
 # The same features as `make test`.
 all_features = true
-# The test binaries `spec_gates`, `code_gates` and `traceability` of atari-harness do not run
-# for a mutant. They test the documents and the gates, not the emulator, and they read the
-# source files that the mutant changes: for example, a mutant that makes a function of the
-# complexity baseline simpler makes the baseline entry stale, and the gate test would count
-# the mutant as caught. `cargo test` cannot leave out one test binary, so the tests run with
-# cargo-nextest and a filter expression.
+# The tests of `spec_gates`, `code_gates` and `traceability` that run a gate on the real
+# repository do not run for a mutant. A gate reads the source files that the mutant changes
+# and the baselines of the repository: for example, a mutant that makes a function of the
+# complexity baseline simpler, or a mutant of a gate that finds fewer violations, makes a
+# baseline entry stale, and the repository test would count the mutant as caught for the
+# wrong reason. These are the tests `*_on_repository`, `finished_packages_have_running_tests`,
+# `gates_run_within_10_seconds`, and the spec gate tests that check the repository before
+# their fixture cases (the list `test(/::(...)$/)` below). The tests of these binaries on
+# synthetic input (a fixture repository in a temporary directory, or a source text) run for
+# each mutant: they are the tests of the gate code (crates/harness/src/code.rs and
+# crates/harness/src/spec*). `cargo test` cannot leave out single tests of a binary by a
+# pattern, so the tests run with cargo-nextest and a filter expression.
 # The property tests of the media parsers (REQ-061: the tests `*_never_panic` and
 # `*_never_panics` of the test binary `media_fuzz`) do not run for a mutant either. Each runs
 # 1000 random cases or more, and together they take more than two minutes of CPU time in the
@@ -28,7 +34,11 @@ test_tool = "nextest"
 additional_cargo_test_args = [
     "--max-fail=1:immediate",
     "-E",
-    "not (package(atari-harness) & (binary(=spec_gates) | binary(=code_gates) | binary(=traceability) | (binary(=media_fuzz) & test(/_never_panics?$/))))",
+    """not (package(atari-harness) & (\
+    (binary(=media_fuzz) & test(/_never_panics?$/)) \
+    | (binary(=code_gates) & test(/_on_repository$/)) \
+    | (binary(=traceability) & test(=finished_packages_have_running_tests)) \
+    | (binary(=spec_gates) & (test(/_on_repository$/) | test(/::(gates_run_within_10_seconds|indexes_are_up_to_date|matrix_has_one_row_per_requirement|open_item_gate_rejects_bad_files|readme_links_and_ids_are_checked|readme_make_targets_exist|readme_options_exist|readme_status_block_is_current|unplanned_requirements_are_reported)$/)))))""",
 ]
 # The cargo profile `mutants` of the root Cargo.toml: the test profile without debug
 # information. Each mutant links all the test binaries again, and without debug information a

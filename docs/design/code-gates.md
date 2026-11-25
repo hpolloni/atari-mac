@@ -75,11 +75,23 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
   test options. A mutant of a function in `crates/atari-core` must run the system tests of
   `crates/harness` too, because most core tests are there (`test_package`; on macOS,
   `--test-workspace=true` adds the frontend tests).
-- The test binaries `spec_gates`, `code_gates` and `traceability` of `atari-harness` do not run
-  for a mutant (cargo-nextest with a filter expression; `cargo test` cannot leave out one test
-  binary). They test the documents and the gates, and they read the source files that the
-  mutant changes: a mutant that makes a function of the complexity baseline simpler would make
-  the baseline entry stale, and the gate test would count the mutant as caught.
+- The tests of `spec_gates`, `code_gates` and `traceability` (`atari-harness`) that run a gate
+  on the real repository do not run for a mutant (cargo-nextest with a filter expression;
+  `cargo test` cannot leave out single tests by a pattern). A gate reads the source files
+  that the mutant changes and the baselines of the repository: a mutant that makes a function
+  of the complexity baseline simpler, or a mutant of a gate that finds fewer violations, makes
+  a baseline entry stale, and the repository test would count the mutant as caught for the
+  wrong reason. These tests are `*_on_repository` of `code_gates` and `spec_gates`,
+  `finished_packages_have_running_tests` of `traceability`, and the tests of `spec_gates` that
+  check the repository first and then a fixture: `gates_run_within_10_seconds`,
+  `indexes_are_up_to_date`, `matrix_has_one_row_per_requirement`,
+  `open_item_gate_rejects_bad_files`, `readme_links_and_ids_are_checked`,
+  `readme_make_targets_exist`, `readme_options_exist`, `readme_status_block_is_current` and
+  `unplanned_requirements_are_reported`. The other tests of the three binaries use synthetic
+  input (a fixture repository in a temporary directory, or a source text) and run for each
+  mutant: they are the tests of the gate code (`crates/harness/src/code.rs`,
+  `crates/harness/src/spec.rs` and `crates/harness/src/spec/`). `code_gates_in_spec_check`
+  reads only `Makefile` and the CI workflow, which a mutant does not change, and runs.
 - The property tests of `media_fuzz` (REQ-061: the tests `*_never_panic` and `*_never_panics`)
   do not run for a mutant either. Each runs 1000 random cases or more, and together they take
   more than two minutes of CPU time in the dev profile; the error paths of the parsers are also

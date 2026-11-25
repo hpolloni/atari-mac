@@ -220,6 +220,21 @@ mod gates {
             .collect();
         assert_eq!(actual, expected, "names, lines and complexities");
         assert!(code::complexities("fn broken( {").is_err(), "a parse error");
+        let types = "struct S;\ntrait T { fn f(&self); }\n\
+                     impl T for &S { fn f(&self) {} }\n\
+                     impl T for (S) { fn f(&self) {} }\n\
+                     impl T for &mut (S) { fn f(&self) {} }\n\
+                     impl T for [S] { fn f(&self) {} }\n";
+        assert_eq!(
+            by_name(types),
+            [
+                ("S::f".to_owned(), 1),
+                ("S::f".to_owned(), 1),
+                ("S::f".to_owned(), 1),
+                ("_::f".to_owned(), 1),
+            ],
+            "the type of a reference and of parentheses; `_` for another type"
+        );
     }
 
     /// Verifies REQ-058: the gate reads each `.rs` file of the workspace that git tracks
@@ -289,6 +304,11 @@ mod gates {
         assert_eq!(violations.len(), 1, "one violation: {}", show(&violations));
         let violation = &violations[0];
         assert_eq!(violation.rule, COMPLEXITY, "the rule");
+        assert_eq!(
+            violation.to_string(),
+            format!("complexity: {}", violation.message),
+            "the text of a violation is the rule and the message"
+        );
         assert_eq!(
             violation.path,
             Path::new("crates/core/src/bad.rs"),
@@ -606,6 +626,15 @@ mod gates {
             sorted,
             [3, 4, 5, 6],
             "a missing file, a short file, an untracked file and a malformed line"
+        );
+        // A file at the limit is stale also when its baseline value is not above its length.
+        fixture.baseline(&["lines src/long.rs 1600", "lines src/short.rs 1500"]);
+        let violations = fixture.check();
+        assert_eq!(rules_of(&violations), [STALE], "{}", show(&violations));
+        assert!(
+            violations[0].message.contains("not more than 1500"),
+            "{}",
+            show(&violations)
         );
     }
 
