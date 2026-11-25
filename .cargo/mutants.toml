@@ -69,4 +69,14 @@ exclude_re = [
     # syn makes `Type::Group` only from the hidden delimiters of a macro expansion, never from
     # parsing source text, and the code gates only parse text, so the arm cannot be reached.
     '^crates/harness/src/code\.rs:\d+:\d+: delete match arm Type::Group\(group\) in type_name$',
+    # The positions that `structure` compares are the indices of three different section
+    # titles, so two of them are never equal, and `>` and `>=` give the same result.
+    '^crates/harness/src/spec/gates\.rs:\d+:\d+: replace > with >= in structure$',
+    # In `source_citations`, the third condition (the first citation is not the HRM) implies
+    # the second (a citation is not the HRM), so a change of the second gives the same result.
+    # Only the second condition is excluded (its line and column); the third is tested.
+    '^crates/harness/src/spec/gates\.rs:300:37: replace != with == in source_citations$',
+    # The fold of `state` starts at (0, 0). A count down gives -1, -2, ..., never 0 again, and
+    # the match only tests for zero, so `-` in place of `+` gives the same state.
+    '^crates/harness/src/spec/report\.rs:\d+:\d+: replace \+ with - in state$',
 ]
