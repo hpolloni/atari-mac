@@ -129,9 +129,13 @@ decided at the WP-2 merge, because the chip packages keep their tests in submodu
 
 ## Gates
 
-Each gate is a function in `atari_harness::spec` and has its own test in
-`crates/harness/tests/spec_gates.rs`. Each test runs the gate on the real repository and
-also on small synthetic files in a temporary directory, so that each failure rule is tested.
+Each gate is a function in `atari_harness::spec` and has its own tests in
+`crates/harness/tests/spec_gates.rs` and its submodules in `spec_gates/` (for example
+`spec_gates/readme.rs`, the README and status tests). The helpers of `crates/harness/src/spec/`
+also have unit tests in the source files (`spec.rs` in a test plan). A test `*_on_repository` runs the gate on the real repository; the other tests
+run it on small synthetic files in a temporary directory, so that each failure rule is tested.
+A test does not do both, so that the mutation gate can leave out the repository tests only
+(`docs/design/code-gates.md` "Mutation testing").
 
 | Gate | Rule |
 | --- | --- |
@@ -245,23 +249,23 @@ frontmatter. The converter is not committed. The migration commit must show that
 
 | Requirement | Test |
 | --- | --- |
-| REQ-043 | `spec_gates.rs` `schema_gate_passes_on_repository`, `schema_gate_rejects_bad_files` |
-| REQ-044 | `spec_gates.rs` `structure_gate_passes_on_repository`, `structure_gate_rejects_bad_files`, `structure_gate_rejects_duplicate_sections` (criterion 1) |
-| REQ-045 | `spec_gates.rs` `vague_words_gate_passes_on_repository`, `vague_words_gate_rejects_bad_files` |
-| REQ-046 | `spec_gates.rs` `sources_gate_passes_on_repository`, `sources_gate_rejects_bad_registry` (criteria 1, 2), `sources_gate_rejects_bad_files` (criteria 3 to 6), `sources_gate_checks_committed_files` (criterion 7), `sources_gate_checks_pinned_urls` (criterion 8); `harness_self_test.rs` `sha256_matches_fips_vectors` (the checksum of criterion 7), `pinned_references_are_ignored` (criterion 8: git ignores `reference/pinned/`) |
-| REQ-047 | `spec_gates.rs` `references_gate_passes_on_repository`, `references_gate_rejects_bad_files`, `references_gate_matches_whole_words` (criterion 3) |
-| REQ-048 | `spec_gates.rs` `test_plans_gate_passes_on_repository`, `test_plans_gate_rejects_bad_files` |
+| REQ-043 | `spec_gates.rs` `schema_gate_passes_on_repository`, `schema_gate_rejects_bad_files`; `spec.rs` `ids_have_an_exact_width`, `split_gives_the_frontmatter_and_numbered_body_lines`, `frontmatter_problems_have_the_line_in_the_file`, `numbers_and_booleans_are_scalars` |
+| REQ-044 | `spec_gates.rs` `structure_gate_passes_on_repository`, `structure_gate_rejects_bad_files`, `structure_gate_rejects_duplicate_sections` (criterion 1), `requirement_counts_its_criteria`; `spec.rs` `headings_in_code_blocks_are_not_sections` |
+| REQ-045 | `spec_gates.rs` `vague_words_gate_passes_on_repository`, `vague_words_gate_rejects_bad_files`, `vague_words_file_skips_empty_lines_and_comments`; `spec.rs` `whole_words_only` |
+| REQ-046 | `spec_gates.rs` `sources_gate_passes_on_repository`, `sources_gate_rejects_bad_registry` (criteria 1, 2), `sources_gate_rejects_bad_files` (criteria 3 to 6), `sources_gate_checks_committed_files` (criterion 7), `sources_gate_checks_pinned_urls` (criterion 8), `sources_gate_checks_section_index_lines_and_license_text` (criterion 2); `harness_self_test.rs` `sha256_matches_fips_vectors` (the checksum of criterion 7), `pinned_references_are_ignored` (criterion 8: git ignores `reference/pinned/`); `spec.rs` `registry_ids_have_upper_case_letters_digits_and_dashes` (criterion 1) |
+| REQ-047 | `spec_gates.rs` `references_gate_passes_on_repository`, `references_gate_rejects_bad_files`, `references_gate_matches_whole_words` (criterion 3), `references_gate_skips_external_links_and_code` |
+| REQ-048 | `spec_gates.rs` `test_plans_gate_passes_on_repository`, `test_plans_gate_rejects_bad_files`, `test_plans_skip_fenced_rows_and_the_design_readme`; `spec.rs` `table_rows_and_cells` |
 | REQ-027, REQ-049 | `spec_gates.rs` `trace_gate_passes_on_repository`, `trace_gate_rejects_bad_files` |
-| REQ-027 | `spec_gates.rs` `trace_gate_requires_a_test_for_each_test_requirement`, `trace_gate_rejects_bad_ignore_reasons` (the planned test stubs); `traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests` |
-| REQ-049 | `spec_gates.rs` `trace_gate_matches_submodule_files`, `trace_gate_rejects_other_modules`, `trace_gate_matches_paths_exactly` (the module rule for file names), `trace_gate_checks_test_plans_of_all_packages`, `trace_gate_needs_a_file_for_each_test` (criterion 4) |
-| REQ-050 | `spec_gates.rs` `unplanned_requirements_are_reported`, `slices_gate_rejects_unplanned_requirements`, `product_complete_needs_must_planned` |
+| REQ-027 | `spec_gates.rs` `trace_gate_requires_a_test_for_each_test_requirement`, `trace_gate_rejects_bad_ignore_reasons` (the planned test stubs); `traceability.rs` `finished_packages_have_running_tests`, `traceability_parser_finds_tests`, `traceability_parser_skips_attributes_and_comments` |
+| REQ-049 | `spec_gates.rs` `trace_gate_matches_submodule_files`, `trace_gate_rejects_other_modules`, `trace_gate_matches_paths_exactly` (the module rule for file names), `trace_gate_checks_test_plans_of_all_packages`, `trace_gate_needs_a_file_for_each_test` (criterion 4), `trace_gate_skips_target_and_hidden_directories`; `spec.rs` `test_names_are_snake_case_with_an_underscore` |
+| REQ-050 | `spec_gates.rs` `unplanned_requirements_are_reported_on_repository`, `unplanned_requirements_are_reported`, `slices_gate_rejects_unplanned_requirements`, `product_complete_needs_must_planned` |
 | REQ-051 | `spec_gates.rs` `evidence_gate_passes_on_repository`, `evidence_gate_rejects_bad_files`, `evidence_gate_checks_each_criterion` (criterion 2) |
-| REQ-052 | `spec_gates.rs` `matrix_has_one_row_per_requirement`; CI job `Specification` (artifact and summary) |
-| REQ-053 | `spec_gates.rs` `open_item_gate_rejects_bad_files`, `open_item_gate_rejects_paths_outside_the_repository` (criterion 1), `indexes_are_up_to_date` |
+| REQ-052 | `spec_gates.rs` `matrix_has_one_row_per_requirement_on_repository`, `matrix_has_one_row_per_requirement`; CI job `Specification` (artifact and summary) |
+| REQ-053 | `spec_gates.rs` `open_item_gate_passes_on_repository`, `open_item_gate_rejects_bad_files`, `open_item_gate_rejects_paths_outside_the_repository` (criterion 1), `indexes_are_up_to_date_on_repository`, `indexes_are_up_to_date` |
 | REQ-054 | `spec_gates.rs` `slice_gate_rejects_bad_files` |
-| REQ-055 | `spec_gates.rs` `gates_run_within_10_seconds`; CI job `Specification` |
-| REQ-056 | `spec_gates.rs` `readme_status_block_is_current` (1-3), `readme_status_block_rejects_bad_markers` (1), `readme_links_and_ids_are_checked` (4), `readme_make_targets_exist` (5), `readme_options_exist` (6) |
-| REQ-057 | `spec_gates.rs` `status_follows_the_plan` (1-3), `readme_status_block_is_current` (4) |
+| REQ-055 | `spec_gates.rs` `gates_run_within_10_seconds`, `violation_has_a_key_and_a_display_form`, `baseline_permits_listed_violations_and_finds_stale_lines`, `baseline_is_read_from_the_repository_root` (the baseline `docs/spec/gate-baseline.txt`); CI job `Specification` |
+| REQ-056 | `spec_gates.rs` `readme_status_block_is_current_on_repository` (1, 2), `readme_status_block_is_current` (1-3), `readme_status_block_rejects_bad_markers` (1), `readme_links_and_ids_are_checked_on_repository`, `readme_links_and_ids_are_checked` (4), `readme_gate_passes_on_repository` (5, 6), `readme_make_targets_exist` (5), `readme_options_exist` (6); `spec.rs` `marker_errors_have_the_line` (1) |
+| REQ-057 | `spec_gates.rs` `status_follows_the_plan` (1-3), `unplanned_requirement_without_implemented_status_passes` (2), `readme_status_block_is_current_on_repository` (4), `readme_status_block_is_current` (4) |
 
 ## Open issues
 

@@ -28,6 +28,6 @@ lines crates/atari-core/src/cpu/tests.rs 1765
 lines crates/atari-core/src/machine.rs 2435
 lines crates/atari-core/src/pokey.rs 2358
 lines crates/harness/tests/media.rs 2116
-lines crates/harness/tests/spec_gates.rs 2200
+lines crates/harness/tests/spec_gates.rs 1890
 lines src/frontend.rs 2128
 lines tests/cli.rs 2408

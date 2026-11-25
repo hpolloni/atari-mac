@@ -183,3 +183,69 @@ pub(super) fn list_number(line: &str) -> Option<usize> {
         .then(|| number.parse().ok())
         .flatten()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies REQ-043: an ID has exactly the width of its digits.
+    #[test]
+    fn ids_have_an_exact_width() {
+        assert_eq!(parse_id("REQ-012", "REQ-", 3), Some(12));
+        assert_eq!(parse_id(concat!("REQ", "-0012"), "REQ-", 3), None);
+        assert_eq!(parse_id("REQ-01a", "REQ-", 3), None);
+        assert_eq!(parse_id("OI-012", "REQ-", 3), None);
+    }
+
+    /// Verifies REQ-048: a `|` in a code span does not split a table cell, and a separator row
+    /// or a line without a leading `|` is not a table row.
+    #[test]
+    fn table_rows_and_cells() {
+        assert_eq!(cells("| `a|b` | c |"), ["`a|b`", "c"]);
+        assert_eq!(cells("| a | b |"), ["a", "b"]);
+        assert!(is_table_row("| a | b |"));
+        assert!(!is_table_row("| --- | :-: |"));
+        assert!(!is_table_row("text | a |"));
+    }
+
+    /// Verifies REQ-044: a `## ` heading in a fenced code block is not a section.
+    #[test]
+    fn headings_in_code_blocks_are_not_sections() {
+        let lines = [
+            (1, "## One"),
+            (2, "```"),
+            (3, "## Not a section"),
+            (4, "```"),
+            (5, "## Two"),
+        ];
+        let titles: Vec<String> = sections(&lines).into_iter().map(|s| s.title).collect();
+        assert_eq!(titles, ["One", "Two"]);
+    }
+
+    /// Verifies REQ-045: a phrase matches only as a whole word: a letter, a digit, `-` or `_`
+    /// next to it is part of the word.
+    #[test]
+    fn whole_words_only() {
+        assert!(contains_word("It is Correct.", "correct"));
+        for text in [
+            "incorrect",
+            "correctly",
+            "a correct_b",
+            "a_correct",
+            "a-correct",
+            "xx correctness",
+        ] {
+            assert!(!contains_word(text, "correct"), "{text}");
+        }
+    }
+
+    /// Verifies REQ-049: a test name in a test plan is a snake-case identifier with a `_`.
+    #[test]
+    fn test_names_are_snake_case_with_an_underscore() {
+        assert!(is_test_name("boots_to_basic"));
+        assert!(is_test_name("_a_b"));
+        for text in ["abc", "1a_b", "A_b", "a_B", "a-b_c"] {
+            assert!(!is_test_name(text), "{text}");
+        }
+    }
+}

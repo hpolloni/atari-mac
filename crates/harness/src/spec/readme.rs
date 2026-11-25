@@ -359,6 +359,7 @@ mod tests {
             options("a --pal-blending, x--no, --- | <!-- c --> `--9` --scale"),
             ["--pal-blending", "--scale"]
         );
+        assert_eq!(options("x_--a x---b ab --pal"), ["--pal"]);
     }
 
     #[test]
@@ -375,5 +376,23 @@ mod tests {
         assert_eq!(without_comment("make roms  # make x"), "make roms  ");
         assert_eq!(without_comment("a#b"), "a#b");
         assert_eq!(usage("x"), None);
+        assert_eq!(usage("pub const USAGE: &str = \"x --a\";\n"), Some("x --a"));
+    }
+
+    /// Verifies REQ-056 criterion 1: a duplicated or unclosed status marker fails with the
+    /// line of the marker.
+    #[test]
+    fn marker_errors_have_the_line() {
+        let begin = format!("{STATUS_BEGIN}\n");
+        let end = format!("{STATUS_END}\n");
+        let line = |readme: &str| block_range(readme).err().and_then(|(line, _)| line);
+        assert_eq!(line(&format!("a\n{begin}b\n{begin}{end}")), Some(4));
+        assert_eq!(line(&format!("a\n{begin}{end}b\n{end}")), Some(5));
+        assert_eq!(line(&format!("a\nb\n{begin}")), Some(3));
+        let start = "a\n".len() + begin.len();
+        assert_eq!(
+            block_range(&format!("a\n{begin}b\n{end}")),
+            Ok(start..start + "b\n".len())
+        );
     }
 }

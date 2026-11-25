@@ -81,3 +81,29 @@ fn traceability_parser_finds_tests() {
     );
     assert_eq!(tests.first().map(|t| t.line), Some(4), "line of `fn a`");
 }
+
+/// Verifies REQ-027: a `Verifies` comment belongs to the next function after other
+/// attributes, empty lines and comments, the parser finds the name after `pub fn` and
+/// `async fn`, and a function without a `#[test]` or a `Verifies` comment is not a test.
+#[test]
+fn traceability_parser_skips_attributes_and_comments() {
+    let text = concat!(
+        "/// Verifies REQ-002.\n#[test]\n#[expect(lint, reason = \"x\")]\npub fn first_test() {}\n\n",
+        "/// Verifies REQ-003.\n\n// A comment.\n#[test]\n    pub(crate) async fn second_test() {}\n\n",
+        "fn helper() {}\n\n",
+        "#[test]\nfn third_test() {}\n",
+    );
+    let tests = spec::tests_in(Path::new("x.rs"), text);
+    let summary: Vec<(&str, bool, Vec<u16>)> = tests
+        .iter()
+        .map(|t| (t.function.as_str(), t.is_test, t.verifies.clone()))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("first_test", true, vec![2]),
+            ("second_test", true, vec![3]),
+            ("third_test", true, vec![]),
+        ],
+    );
+}

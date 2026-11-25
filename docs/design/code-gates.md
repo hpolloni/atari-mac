@@ -82,12 +82,10 @@ pub fn check(root: &Path) -> Vec<CodeViolation>;
   of the complexity baseline simpler, or a mutant of a gate that finds fewer violations, makes
   a baseline entry stale, and the repository test would count the mutant as caught for the
   wrong reason. These tests are `*_on_repository` of `code_gates` and `spec_gates`,
-  `finished_packages_have_running_tests` of `traceability`, and the tests of `spec_gates` that
-  check the repository first and then a fixture: `gates_run_within_10_seconds`,
-  `indexes_are_up_to_date`, `matrix_has_one_row_per_requirement`,
-  `open_item_gate_rejects_bad_files`, `readme_links_and_ids_are_checked`,
-  `readme_make_targets_exist`, `readme_options_exist`, `readme_status_block_is_current` and
-  `unplanned_requirements_are_reported`. The other tests of the three binaries use synthetic
+  `finished_packages_have_running_tests` of `traceability`, and `gates_run_within_10_seconds`
+  of `spec_gates`. No other test of these binaries reads the repository: a test that checks
+  the repository and also a fixture is split in two (`docs/design/spec-gates.md` "Gates").
+  The other tests of the three binaries use synthetic
   input (a fixture repository in a temporary directory, or a source text) and run for each
   mutant: they are the tests of the gate code (`crates/harness/src/code.rs`,
   `crates/harness/src/spec.rs` and `crates/harness/src/spec/`). `code_gates_in_spec_check`

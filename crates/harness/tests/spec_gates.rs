@@ -8,7 +8,7 @@
 /// The tests, the fixture and the helpers. The module has `cfg(test)`, so that the
 /// helpers can use `unwrap` as the tests do.
 #[cfg(test)]
-mod gates {
+mod spec_gates {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
@@ -808,6 +808,8 @@ mod gates {
             "https://github.com/demo/demo/raw/0123456789abcdef/demo.bin",
             "https://archive.org/details/demo",
             "https://archive.org/download/demo",
+            "https://archive.org/download//demo.pdf",
+            "https://archive.org/download/demo/",
             "https://web.archive.org/web/2024/https://example.com/demo.bin",
             "https://web.archive.org/web/*/https://example.com/demo.bin",
         ] {
@@ -1354,9 +1356,10 @@ mod gates {
         assert!(fixture.run(trace).is_empty(), "{plan} matches itself");
     }
 
-    /// Verifies REQ-050: the matrix lists each requirement that no slice plans.
+    /// Verifies REQ-050: the matrix of the repository lists each requirement that no slice
+    /// plans.
     #[test]
-    fn unplanned_requirements_are_reported() {
+    fn unplanned_requirements_are_reported_on_repository() {
         let root = repo_root();
         let spec = spec::load(&root).unwrap();
         let report = spec::matrix(&spec, &[], &Baseline::default());
@@ -1371,6 +1374,11 @@ mod gates {
                 req(r.id)
             );
         }
+    }
+
+    /// Verifies REQ-050: the matrix of the fixture lists each requirement that no slice plans.
+    #[test]
+    fn unplanned_requirements_are_reported() {
         let fixture = Fixture::new();
         let report = fs::read_to_string(fixture.root.join(MATRIX)).unwrap();
         assert!(
@@ -1543,10 +1551,10 @@ mod gates {
         assert!(found.is_empty(), "one subsection per criterion: {found:?}");
     }
 
-    /// Verifies REQ-052: the matrix has one row for each requirement that is not withdrawn,
-    /// with its slice, package, state, tests and evidence, and the counts and violations.
+    /// Verifies REQ-052: the matrix of the repository has one row for each requirement that is
+    /// not withdrawn, and the counts and violations.
     #[test]
-    fn matrix_has_one_row_per_requirement() {
+    fn matrix_has_one_row_per_requirement_on_repository() {
         let root = repo_root();
         let spec = spec::load(&root).unwrap();
         let report = spec::matrix(
@@ -1570,6 +1578,12 @@ mod gates {
         }
         assert!(report.contains("\nCounts: "), "counts line");
         assert!(report.contains("\n## Violations\n"), "violations section");
+    }
+
+    /// Verifies REQ-052: the matrix has one row for each requirement that is not withdrawn,
+    /// with its slice, package, state, tests and evidence, and the counts and violations.
+    #[test]
+    fn matrix_has_one_row_per_requirement() {
         let fixture = Fixture::new();
         let report = fs::read_to_string(fixture.root.join(MATRIX)).unwrap();
         let (one, two, three) = (req(1), req(2), req(3));
@@ -1587,9 +1601,23 @@ mod gates {
             assert!(report.contains(&row), "row {row} in:\n{report}");
         }
         assert!(
-            report.contains("Violations: 0 new, 0 in the baseline."),
+            report.contains(
+                "Counts: not a test requirement: 1, pending: 1, tested: 1. Violations: 0 new, \
+                 0 in the baseline."
+            ),
             "counts: {report}"
         );
+        let missing = Fixture::new();
+        missing.replace(
+            "crates/demo/tests/demo.rs",
+            &format!(
+                "/// Verifies {three}.\n#[test]\n#[ignore = \"planned: SLICE-01\"]\nfn third_test"
+            ),
+            "fn helper",
+        );
+        let report = spec::matrix(&missing.spec(), &[], &Baseline::default());
+        let row = format!("| {three} | test | SLICE-01 WP-2 | missing |  |  |");
+        assert!(report.contains(&row), "row {row} in:\n{report}");
         fixture.replace(
             &Fixture::req_file(1),
             "status: implemented",
@@ -1597,17 +1625,35 @@ mod gates {
         );
         let spec = fixture.spec();
         let violations = spec::check(&spec, &fixture.root);
-        let baseline = Baseline::parse(&violations.first().unwrap().key());
+        let first = violations.first().unwrap();
+        let baseline = Baseline::parse(&first.key());
         let report = spec::matrix(&spec, &violations, &baseline);
         assert!(
             !report.contains(&format!("| {one} |")),
             "no row for a withdrawn requirement"
         );
-        assert!(report.contains("in the baseline."), "baseline count");
+        let counts = format!(
+            "Violations: {} new, 1 in the baseline.",
+            violations.len() - 1
+        );
+        assert!(report.contains(&counts), "{counts} in:\n{report}");
         assert!(
             report.contains("| Rule | File | Line | Message |"),
             "violation table"
         );
+        let known = report
+            .split("### Baseline violations by rule")
+            .nth(1)
+            .unwrap();
+        let rows: Vec<&str> = known.lines().filter(|l| l.starts_with("| REQ-")).collect();
+        assert_eq!(rows, [format!("| REQ-{:03} | 1 |", first.rule)], "{report}");
+    }
+
+    /// Verifies REQ-053: the open items of the repository pass the `schema` and `open_items`
+    /// gates.
+    #[test]
+    fn open_item_gate_passes_on_repository() {
+        repository_passes(open_items, &[53]);
     }
 
     /// Verifies REQ-053: an open item with bad frontmatter or a `Decision` section that does
@@ -1615,7 +1661,6 @@ mod gates {
     #[test]
     fn open_item_gate_rejects_bad_files() {
         fixture_passes();
-        repository_passes(open_items, &[53]);
         let item = "docs/spec/open-items/OI-001.md";
         rejects(open_items, 53, "`status` is `closed`", |f| {
             f.replace(item, "status: open", "status: closed");
@@ -1678,10 +1723,9 @@ mod gates {
         assert!(found.is_empty(), "a `..` inside the repository: {found:?}");
     }
 
-    /// Verifies REQ-053: the generated indexes of the repository are up to date, and a stale
-    /// index fails.
+    /// Verifies REQ-053: the generated indexes of the repository are up to date.
     #[test]
-    fn indexes_are_up_to_date() {
+    fn indexes_are_up_to_date_on_repository() {
         let root = repo_root();
         let spec = spec::load(&root).unwrap();
         let stale: Vec<String> = spec::indexes(&spec, &root)
@@ -1689,6 +1733,12 @@ mod gates {
             .map(ToString::to_string)
             .collect();
         assert!(stale.is_empty(), "{}", stale.join("\n"));
+    }
+
+    /// Verifies REQ-053: the generated indexes of the fixture are up to date, and a stale index
+    /// fails.
+    #[test]
+    fn indexes_are_up_to_date() {
         for path in [REQUIREMENT_INDEX, OPEN_ITEM_INDEX] {
             let fixture = Fixture::new();
             fixture.write(path, "# Old\n");
@@ -1710,6 +1760,24 @@ mod gates {
             found.iter().any(|v| v.file == Path::new(REQUIREMENT_INDEX)),
             "a changed title makes the index stale: {found:?}"
         );
+        let fixture = Fixture::new();
+        let one = req(1);
+        let rows = [
+            (
+                REQUIREMENT_INDEX,
+                format!(
+                    "| [{one}]({one}.md) | Title of {one} | implemented | must | product | test |"
+                ),
+            ),
+            (
+                OPEN_ITEM_INDEX,
+                "| [OI-001](OI-001.md) | A question | product | open |".to_owned(),
+            ),
+        ];
+        for (path, row) in rows {
+            let text = fs::read_to_string(fixture.root.join(path)).unwrap();
+            assert!(text.contains(&row), "{row} in {path}:\n{text}");
+        }
     }
 
     /// Verifies REQ-054: a slice with bad frontmatter, an unknown or duplicated requirement, or
@@ -1767,388 +1835,10 @@ mod gates {
         });
     }
 
-    /// Asserts that `violations` has no violation of `rule` whose message contains `needle`.
-    #[track_caller]
-    fn assert_not_reported(violations: &[Violation], rule: u16, needle: &str) {
-        let found: Vec<String> = violations
-            .iter()
-            .filter(|v| v.rule == rule && v.message.contains(needle))
-            .map(ToString::to_string)
-            .collect();
-        assert!(
-            found.is_empty(),
-            "unexpected violations:\n{}",
-            found.join("\n")
-        );
-    }
-
-    /// The text of the README of the fixture.
-    fn readme_of(fixture: &Fixture) -> String {
-        fs::read_to_string(fixture.root.join(README)).unwrap()
-    }
-
-    /// Verifies REQ-056, REQ-057: the README of the repository has one status block with a row
-    /// for each slice file, `spec-index` writes the block and keeps the text outside it, the
-    /// `indexes` gate fails when the block differs from a new generation, and the block gives
-    /// the number of requirements with the status `implemented` (REQ-057 criterion 4).
-    #[test]
-    fn readme_status_block_is_current() {
-        let root = repo_root();
-        let spec = spec::load(&root).unwrap();
-        let stale: Vec<String> = spec::indexes(&spec, &root)
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        assert!(stale.is_empty(), "{}", stale.join("\n"));
-        let text = fs::read_to_string(root.join(README)).unwrap();
-        let block = format!(
-            "{STATUS_BEGIN}\n{}{STATUS_END}\n",
-            spec::status_block(&spec)
-        );
-        assert_eq!(
-            text.matches(&block).count(),
-            1,
-            "README.md has the block once"
-        );
-        let slice_files = fs::read_dir(root.join("docs/plan"))
-            .unwrap()
-            .filter(|e| {
-                e.as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("SLICE-")
-            })
-            .count();
-        assert_eq!(block.matches("| [SLICE-").count(), slice_files);
-        for slice in &spec.slices {
-            let link = format!("[SLICE-{0:02}](docs/plan/SLICE-{0:02}.md)", slice.id);
-            assert!(block.contains(&link), "a row links {link}");
-        }
-
-        let fixture = Fixture::new();
-        let text = readme_of(&fixture);
-        assert!(
-            text.contains(
-                "| [SLICE-01](docs/plan/SLICE-01.md) | First slice | in-progress | 1 | 1 | 0 | 1 |"
-            ),
-            "the row has the counts of the states:\n{text}"
-        );
-        assert!(
-            text.contains(
-                "All 3 requirements: 1 tested, 1 pending, 0 missing, 1 not a test requirement. \
-                 Implemented: 2. Open items with the status `open`: 1."
-            ),
-            "the counts of the matrix:\n{text}"
-        );
-        assert!(
-            fixture.run(spec::indexes).is_empty(),
-            "the block is current"
-        );
-
-        let above = "# Demo\n\nText | above.\n\n";
-        let below = "\nText below.\n<!-- other -->\n";
-        fixture.write(
-            README,
-            &format!("{above}{STATUS_BEGIN}\nold\n{STATUS_END}\n{below}"),
-        );
-        assert_reports(
-            &fixture.run(spec::indexes),
-            56,
-            "status block is not up to date",
-        );
-        let _counts = spec::generate(&fixture.root).unwrap();
-        let text = readme_of(&fixture);
-        assert!(
-            text.starts_with(&format!("{above}{STATUS_BEGIN}\n")),
-            "{text}"
-        );
-        assert!(
-            text.ends_with(&format!("\n{STATUS_END}\n{below}")),
-            "{text}"
-        );
-        assert!(!text.contains("old"), "{text}");
-        assert!(
-            fixture.run(spec::indexes).is_empty(),
-            "the block is current"
-        );
-
-        fixture.replace(
-            "docs/plan/SLICE-01.md",
-            "title: First slice",
-            "title: New slice",
-        );
-        assert_reports(
-            &fixture.run(spec::indexes),
-            56,
-            "status block is not up to date",
-        );
-        assert_reports(&fixture.all(), 56, "status block is not up to date");
-        let _counts = spec::generate(&fixture.root).unwrap();
-        assert!(readme_of(&fixture).contains("| New slice |"));
-        assert!(fixture.all().is_empty(), "all gates pass");
-
-        assert_implemented_count(&spec, &block, &fixture);
-    }
-
-    /// REQ-057 criterion 4: the status block of the repository and of the fixture gives the
-    /// number of requirements with the status `implemented`.
-    #[track_caller]
-    fn assert_implemented_count(spec: &Spec, block: &str, fixture: &Fixture) {
-        fixture.replace(
-            &Fixture::req_file(2),
-            "status: implemented",
-            "status: withdrawn",
-        );
-        let _counts = spec::generate(&fixture.root).unwrap();
-        assert!(
-            readme_of(fixture).contains("Implemented: 1. Open items"),
-            "the count follows the status `implemented`"
-        );
-        let implemented = spec
-            .requirements
-            .iter()
-            .filter(|r| r.status == Status::Implemented)
-            .count();
-        assert!(
-            block.contains(&format!("Implemented: {implemented}. Open items")),
-            "the README of the repository gives the number of implemented requirements"
-        );
-    }
-
-    /// Verifies REQ-057: a requirement in a `done` package or slice without the status
-    /// `implemented` fails (criterion 1), a requirement with the status `implemented` in no
-    /// package or in a package that is not `done` fails (criterion 2), and a withdrawn
-    /// requirement makes no failure of these rules (criterion 3).
-    #[test]
-    fn status_follows_the_plan() {
-        fixture_passes();
-        let slice = "docs/plan/SLICE-01.md";
-        let (one, two, three) = (req(1), req(2), req(3));
-        let one_file = Fixture::req_file(1);
-        let three_file = Fixture::req_file(3);
-        for status in ["draft", "accepted"] {
-            let needle = format!(
-                "{one} is in SLICE-01 WP-1, which is done, but its status is `{status}`, not \
-                 `implemented`"
-            );
-            rejects(slice_rules, 57, &needle, |f| {
-                f.replace(
-                    &one_file,
-                    "status: implemented",
-                    &format!("status: {status}"),
-                );
-            });
-        }
-        let in_done_slice = format!(
-            "{three} is in SLICE-01 WP-2, which is done, but its status is `draft`, not \
-             `implemented`"
-        );
-        rejects(slice_rules, 57, &in_done_slice, |f| {
-            f.replace(slice, "status: in-progress", "status: done");
-        });
-        let not_done =
-            format!("{three} has the status `implemented`, but SLICE-01 WP-2 is not done");
-        rejects(slice_rules, 57, &not_done, |f| {
-            f.replace(&three_file, "status: draft", "status: implemented");
-        });
-        let package_not_done =
-            format!("{one} has the status `implemented`, but SLICE-01 WP-1 is not done");
-        rejects(slice_rules, 57, &package_not_done, |f| {
-            f.replace(
-                slice,
-                "    title: Work\n    status: done",
-                "    title: Work\n    status: in-progress",
-            );
-        });
-        let unplanned = format!("{one} has the status `implemented`, but it is in no package");
-        rejects(slice_rules, 57, &unplanned, |f| {
-            f.replace(slice, &format!("[{one}, {two}]"), &format!("[{two}]"));
-        });
-
-        let fixture = Fixture::new();
-        fixture.replace(&one_file, "status: implemented", "status: withdrawn");
-        fixture.replace(&three_file, "status: draft", "status: withdrawn");
-        fixture.replace(slice, "status: in-progress", "status: done");
-        fixture.replace(slice, "    status: planned", "    status: done");
-        assert_not_reported(&fixture.run(slice_rules), 57, "");
-        let fixture = Fixture::new();
-        fixture.replace(&one_file, "status: implemented", "status: withdrawn");
-        fixture.replace(slice, &format!("[{one}, {two}]"), &format!("[{two}]"));
-        assert_not_reported(&fixture.run(slice_rules), 57, "");
-        let fixture = Fixture::new();
-        fixture.replace(&three_file, "status: draft", "status: implemented");
-        fixture.replace(slice, "status: in-progress", "status: done");
-        fixture.replace(slice, "    status: planned", "    status: done");
-        assert_not_reported(&fixture.run(slice_rules), 57, "");
-    }
-
-    /// Verifies REQ-056: a missing, duplicated or unclosed status marker fails the `indexes`
-    /// gate, and `spec-index` does not change the README.
-    #[test]
-    fn readme_status_block_rejects_bad_markers() {
-        let begin = format!("{STATUS_BEGIN}\n");
-        let end = format!("{STATUS_END}\n");
-        let cases: [(&str, String); 5] = [
-            ("no line `<!-- BEGIN", String::new()),
-            (
-                "BEGIN GENERATED: status -->` is duplicated",
-                format!("{begin}{begin}"),
-            ),
-            (
-                "END GENERATED: status -->` is duplicated",
-                format!("{end}{end}"),
-            ),
-            ("is not closed", String::new()),
-            ("is before", String::new()),
-        ];
-        for (index, (needle, replacement)) in cases.iter().enumerate() {
-            let fixture = Fixture::new();
-            let good = readme_of(&fixture);
-            let bad = match index {
-                0 | 1 => good.replacen(&begin, replacement, 1),
-                2 | 3 => good.replacen(&end, replacement, 1),
-                _ => format!("{end}{}", good.replacen(&end, "", 1)),
-            };
-            fixture.write(README, &bad);
-            assert_reports(&fixture.run(spec::indexes), 56, needle);
-            let error = spec::generate(&fixture.root).unwrap_err();
-            assert!(
-                matches!(&error, SpecError::Markers { message, .. } if message.contains(needle)),
-                "{error}"
-            );
-            assert!(error.to_string().contains(README), "{error}");
-            assert_eq!(readme_of(&fixture), bad, "the README does not change");
-        }
-        rejects(spec::indexes, 56, "the file does not exist", |f| {
-            fs::remove_file(f.root.join(README)).unwrap();
-        });
-        rejects(spec::indexes, 56, "no line", |f| {
-            f.replace(README, &begin, &format!("  {begin}"));
-        });
-    }
-
-    /// Verifies REQ-056: the `references` gate checks the links and the IDs of `README.md`.
-    #[test]
-    fn readme_links_and_ids_are_checked() {
-        let root = repo_root();
-        let spec = spec::load(&root).unwrap();
-        let found: Vec<String> = spec::references(&spec, &root)
-            .iter()
-            .filter(|v| v.file == Path::new(README))
-            .map(ToString::to_string)
-            .collect();
-        assert!(found.is_empty(), "{}", found.join("\n"));
-        assert!(
-            spec.documents.iter().any(|d| d.path == Path::new(README)),
-            "the gates read README.md"
-        );
-        let fixture = Fixture::new();
-        fixture.replace(
-            README,
-            "Text above.\n",
-            &format!(
-                "Text above.\n\n[x](docs/missing.md), [y](docs/plan/) and {}.\n",
-                req(999)
-            ),
-        );
-        let found = fixture.run(spec::references);
-        assert_reports(&found, 47, "the link `docs/missing.md` points to no file");
-        assert_reports(&found, 47, &format!("`{}` names no file", req(999)));
-        assert_not_reported(&found, 47, "docs/plan/");
-        assert!(
-            found
-                .iter()
-                .all(|v| v.file == Path::new(README) && v.line == Some(5)),
-            "the file and the line: {found:?}"
-        );
-        let item = format!("OI-{:03}", 7);
-        rejects(
-            spec::references,
-            47,
-            &format!("`{item}` names no file"),
-            |f| {
-                f.replace(README, "SLICE-01.\n", &format!("{item}.\n"));
-            },
-        );
-        let slice = format!("SLICE-{:02}", 9);
-        rejects(
-            spec::references,
-            47,
-            &format!("`{slice}` names no file"),
-            |f| {
-                f.replace(README, "SLICE-01.\n", &format!("{slice}.\n"));
-            },
-        );
-    }
-
-    /// Verifies REQ-056: each `make <target>` in a code span or a code block of `README.md` is
-    /// a target in `Makefile`.
-    #[test]
-    fn readme_make_targets_exist() {
-        repository_passes(spec::readme, &[56]);
-        fixture_passes();
-        let needle = "`nothing` is not a target in Makefile";
-        rejects(spec::readme, 56, needle, |f| {
-            f.replace(README, "`make check`", "`make nothing`");
-        });
-        rejects(spec::readme, 56, needle, |f| {
-            f.replace(README, "make test ", "make -k nothing ");
-        });
-        rejects(spec::readme, 56, "`FLAGS` is not a target", |f| {
-            f.replace(README, "`make check`", "`make FLAGS`");
-        });
-        let fixture = Fixture::new();
-        fixture.replace(README, "`make check`", "`make nothing`");
-        assert_reports(&fixture.all(), 56, needle);
-        let found: Vec<Violation> = fixture.run(spec::readme);
-        assert_eq!(found.len(), 1, "{found:?}");
-        let fixture = Fixture::new();
-        fixture.replace(README, "Text above.", "Text above: make nothing, `make`.");
-        assert!(fixture.run(spec::readme).is_empty(), "prose is not checked");
-        rejects(spec::readme, 56, "`check` is not a target", |f| {
-            fs::remove_file(f.root.join("Makefile")).unwrap();
-        });
-    }
-
-    /// Verifies REQ-056: each command-line option of `README.md` is in the help text of
-    /// `src/cli.rs`, except options of other programs in a code span that starts with `cargo`.
-    #[test]
-    fn readme_options_exist() {
-        repository_passes(spec::readme, &[56]);
-        let needle = "`--ntsc` is not an option in the help text of src/cli.rs";
-        rejects(spec::readme, 56, needle, |f| {
-            f.replace(README, "`demo --pal`", "`demo --ntsc`");
-        });
-        rejects(spec::readme, 56, needle, |f| {
-            f.replace(README, "Text above.", "Text above, with --ntsc.");
-        });
-        rejects(spec::readme, 56, needle, |f| {
-            f.replace(README, "-- --pal\n", "-- --pal --ntsc\n");
-        });
-        rejects(spec::readme, 56, needle, |f| {
-            f.replace(
-                README,
-                "Text above.",
-                "Use `cargo run --release -- --ntsc`.",
-            );
-        });
-        rejects(spec::readme, 56, "`--pal-blending` is not an option", |f| {
-            f.replace(README, "`demo --pal`", "`demo --pal-blending`");
-        });
-        let fixture = Fixture::new();
-        fixture.replace(
-            README,
-            "Text above.",
-            "Use `cargo test --all-targets -- --include-ignored`, `cargo run -p x --bin y -- --z` \
-             and `demo -h --help`. A table | --- | and <!-- a comment -->.",
-        );
-        let found = fixture.run(spec::readme);
-        assert!(found.is_empty(), "{found:?}");
-        rejects(spec::readme, 56, "src/cli.rs has no help text", |f| {
-            f.replace("src/cli.rs", "const USAGE", "const HELP");
-        });
-    }
+    mod api;
+    mod files;
+    mod readme;
+    mod rules;
 
     /// Verifies REQ-055: all gates run on the repository in no more than 10 seconds, and the
     /// baseline has no line that matches no violation. The gates include the `readme` gate

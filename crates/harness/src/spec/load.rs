@@ -816,3 +816,58 @@ fn load_documents(root: &Path, spec: &mut Spec) -> Result<(), SpecError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies REQ-043: the frontmatter is the text between the two `---` lines, and the body
+    /// lines keep their line numbers in the file, also without frontmatter.
+    #[test]
+    fn split_gives_the_frontmatter_and_numbered_body_lines() {
+        let parts = split("---\nid: x\n---\nfirst\nsecond\n");
+        assert_eq!(parts.yaml, Some("id: x\n"));
+        assert_eq!(parts.body, [(4, "first"), (5, "second")]);
+        let parts = split("first\nsecond");
+        assert_eq!(parts.yaml, None);
+        assert_eq!(parts.body, [(1, "first"), (2, "second")]);
+    }
+
+    /// Verifies REQ-043: a frontmatter problem has the line of its key in the file, and a YAML
+    /// error has the line of the error in the file.
+    #[test]
+    fn frontmatter_problems_have_the_line_in_the_file() {
+        let path = Path::new("x.md");
+        let parts = split("---\nid: x\nstatus: y\npackages:\n  - title: t\n---\n");
+        let front = Front::parse(path, 43, &parts).unwrap();
+        assert_eq!(front.line_of("status"), Some(3));
+        assert_eq!(front.line_of("title"), Some(5));
+        assert_eq!(front.line_of("missing"), None);
+        let parts = split("---\nid: x\nbad: [a\n---\n");
+        let error = Front::parse(path, 43, &parts).err();
+        assert!(
+            matches!(error, Some(SpecError::Yaml { line: 4, .. })),
+            "{error:?}"
+        );
+    }
+
+    /// Verifies REQ-043: an integer or a boolean value is a scalar with its text.
+    #[test]
+    fn numbers_and_booleans_are_scalars() {
+        assert_eq!(scalar(&Yaml::Integer(3)), Some("3".to_owned()));
+        assert_eq!(scalar(&Yaml::Boolean(true)), Some("true".to_owned()));
+        assert_eq!(scalar(&Yaml::String("a".to_owned())), Some("a".to_owned()));
+        assert_eq!(scalar(&Yaml::Array(Vec::new())), None);
+    }
+
+    /// Verifies REQ-046: a registry ID has upper-case letters, digits and `-` only.
+    #[test]
+    fn registry_ids_have_upper_case_letters_digits_and_dashes() {
+        assert!(is_reference_id("HRM"));
+        assert!(is_reference_id("DE-RE2"));
+        assert!(is_reference_id("2-1"));
+        for id in ["", "Hrm", "HRM_2", "HRM 2"] {
+            assert!(!is_reference_id(id), "{id}");
+        }
+    }
+}
