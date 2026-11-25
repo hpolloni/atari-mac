@@ -104,7 +104,9 @@ macOS frontend is the root crate `atari-mac`. `README.md` gives the layout and t
   the main checkout, and makes the `test-data/` symlink. ROMs and test data are not in git.
   Neither is committed.
 - Before a teammate reports, it stops every background command and wait loop that it
-  started. A wait loop must also end when the command that it waits for has ended.
+  started. A wait loop must also end when the command that it waits for has ended. Wait on a
+  process ID (`kill -0 $pid`), not on `pgrep -f <text>`: the loop's own command line contains
+  the text, so the loop never ends.
 - Merge the branches that other branches depend on first. A gate change that makes the gates
   stricter merges after the work that it checks.
 
