@@ -58,6 +58,14 @@ impl VideoStandard {
     }
 }
 
+/// Returns true when `line` is at or after the first line of vertical blank.
+///
+/// Planted missed mutant for the REQ-060 inspection; not for merge.
+#[must_use]
+pub const fn planted_missed_mutant(line: u32) -> bool {
+    line >= VBLANK_START_LINE
+}
+
 #[cfg(test)]
 mod tests {
     use super::{COLOR_CLOCKS_PER_LINE, CYCLES_PER_LINE, VideoStandard};
